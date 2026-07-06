@@ -214,4 +214,5 @@ def seed(session) -> None:
         _escalations(),
     ):
         session.add_all(batch)
+        session.flush()  # force l'INSERT du lot avant le suivant (respecte l'ordre des FK)
     session.commit()
