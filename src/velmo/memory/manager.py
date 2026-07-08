@@ -1,6 +1,6 @@
 # ===============================================================================
 # VELMO’S MEMORY BRAIN
-# The orchestrator
+# L'orchestrateur
 # ===============================================================================
 
 """Orchestration de la mémoire : reconstitue le contexte pertinent (faits +
@@ -71,7 +71,7 @@ class MemoryManager:
         episodes = self._store.episodes(user_id)
 
         recent = episodes[-_RECENT:]
-        older = episodes[:-_RECENT] if len(episodes) > _RECENT else []
+        older = episodes[:-_RECENT]  # [] automatiquement si ≤ _RECENT tours
         episodic = self._retriever.recall(user_id, message, older, _EPISODIC_K)
 
         ctx = MemoryContext(history=recent, facts=facts, episodic=episodic)
@@ -97,11 +97,11 @@ class MemoryManager:
         """Supprime les souvenirs correspondant à `target`. Renvoie le nombre supprimé."""
         return self._store.forget(user_id, target)
 
-    def inspect(self, user_id: str) -> dict:
+    def inspect(self, user_id: str) -> dict[str, object]:
         """Renvoie l'état mémoire d'un utilisateur (faits + souvenirs épisodiques)."""
         return {
             "facts": self._store.facts(user_id),
-            "episodic": [content for _, content in self._store.episodes(user_id)],
+            "episodic": [turn.content for turn in self._store.episodes(user_id)],
         }
 
     # --- interne -------------------------------------------------------------

@@ -19,6 +19,8 @@ import re
 # Tous ancrés sur des mots entiers (\b) pour éviter les faux positifs de
 # sous-chaîne : « mail » dans « maillot », « porte » dans « comporte ».
 _SIZE_RE = re.compile(r"\b(XXL|XL|S|M|L)\b")
+# Casse stricte volontaire (pas de re.IGNORECASE) : « s », « m », « l »
+# minuscules parasiteraient d'innombrables mots courants.
 # La taille n'est retenue que si le client parle de LA SIENNE (première
 # personne), pas de la taille d'un produit (« dispo en taille M ? »).
 _TAILLE_CTX_RE = re.compile(
@@ -35,9 +37,7 @@ _PHONE_RE = re.compile(r"\b(?:t[ée]l[ée]phone|appel)", re.IGNORECASE)
 
 
 def extract_facts(message: str) -> dict[str, str]:
-    """Repère les préférences durables d'un message (taille, clubs, segment,
-    canal). Motifs volontairement conservateurs : mieux vaut rater un fait que
-    d'en inventer un. Ce qui n'est pas capté ici reste rappelable en épisodique."""
+    """Repère les préférences durables d'un message (taille, clubs, segment, canal)."""
     facts: dict[str, str] = {}
 
     if _TAILLE_CTX_RE.search(message):

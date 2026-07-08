@@ -1,14 +1,14 @@
-"""Memory persistence, isolated per user.
+"""Persistance de la mémoire, isolée par utilisateur.
 
-Two complementary relational levels:
+Deux étages relationnels complémentaires :
 
--`memory_facts`: durable key-value facts (source of structured truth);
--`memory_episodes`: chronological log of exchanges (recall basis).
+- `memory_facts` : faits durables clé-valeur (source de vérité structurée) ;
+- `memory_episodes` : journal chronologique des échanges (base du rappel).
 
-Portable SQLAlchemy backend: Postgres if `MEMORY_DB_URL` is defined, otherwise one
-shared SQLite file (`temp_db/memory.db` at the repo root) which ensures true persistence
-multi-session offline. The semantic episodic level (Chroma) can be
-plug in later behind the same `MemoryStore` interface.
+Backend SQLAlchemy portable : Postgres si `MEMORY_DB_URL` est défini, sinon un
+unique fichier SQLite (`temp_db/memory.db` à la racine du dépôt) qui garantit une
+vraie persistance multi-session hors-ligne. L'étage épisodique sémantique
+(Chroma) pourra se brancher plus tard derrière la même interface `MemoryStore`.
 """
 
 from __future__ import annotations
@@ -16,18 +16,28 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import NamedTuple
 
-from sqlalchemy import DateTime, Integer, String, create_engine, delete, select
+from sqlalchemy import DateTime, Integer, String, create_engine, select
 from sqlalchemy.orm import (
     DeclarativeBase,
     Mapped,
+    Session,
     mapped_column,
     sessionmaker,
 )
 
 from ..config import memory_backend, warn_backend_unavailable
 
-Turn = tuple[str, str]  # (role, content)
+class Turn(NamedTuple):
+    """Un tour de conversation : rôle (« user »/« assistant ») et contenu.
+
+    `NamedTuple` : reste un tuple (dépaquetage et indexation inchangés) tout en
+    exposant `.role` / `.content` là où seul un champ est lu.
+    """
+
+    role: str
+    content: str
 
 
 class Base(DeclarativeBase):
@@ -39,7 +49,7 @@ def _now() -> datetime:
 
 
 class MemoryFact(Base):
-    """Durable fact on a user (e.g. shoe size=L). Unique key per user."""
+    """Fait durable sur un utilisateur (ex. taille=L). Clé unique par utilisateur."""
 
     __tablename__ = "memory_facts"
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -49,7 +59,7 @@ class MemoryFact(Base):
 
 
 class MemoryEpisode(Base):
-    """A turn of conversation retained (role + content), timestamped for the trace."""
+    """Un tour de conversation retenu (rôle + contenu), horodaté pour la traçabilité."""
 
     __tablename__ = "memory_episodes"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -70,11 +80,11 @@ def _default_url() -> str:
     return f"sqlite:///{path}"
 
 
-# An engine (therefore a sessionmaker) per URL, shared between process instances.
-_SESSIONMAKERS: dict[str, sessionmaker] = {}
+# Un engine (donc un sessionmaker) par URL, partagé entre instances du process.
+_SESSIONMAKERS: dict[str, sessionmaker[Session]] = {}
 
 
-def _sessionmaker_for(url: str) -> sessionmaker:
+def _sessionmaker_for(url: str) -> sessionmaker[Session]:
     sm = _SESSIONMAKERS.get(url)
     if sm is None:
         engine = create_engine(url, future=True)
@@ -85,12 +95,12 @@ def _sessionmaker_for(url: str) -> sessionmaker:
 
 
 class MemoryStore:
-    """Persistent access to facts and episodes, filtered by `user_id`."""
+    """Accès persistant aux faits et épisodes, filtrés par `user_id`."""
 
     def __init__(self, url: str | None = None) -> None:
         self._sm = _sessionmaker_for(url or _default_url())
 
-    # --- structured facts ------------------------------------------------
+    # --- faits structurés ------------------------------------------------
 
     def upsert_fact(self, user_id: str, key: str, value: str) -> None:
         with self._sm() as s:
@@ -109,7 +119,7 @@ class MemoryStore:
             ).scalars()
             return {r.key: r.value for r in rows}
 
-    # --- episodic diary --------------------------------------------------
+    # --- journal épisodique ----------------------------------------------
 
     def add_episode(self, user_id: str, role: str, content: str) -> None:
         with self._sm() as s:
@@ -117,22 +127,22 @@ class MemoryStore:
             s.commit()
 
     def episodes(self, user_id: str) -> list[Turn]:
-        "User's episodes, in chronological order."
+        "Épisodes de l'utilisateur, par ordre chronologique."
         with self._sm() as s:
             rows = s.execute(
                 select(MemoryEpisode)
                 .where(MemoryEpisode.user_id == user_id)
                 .order_by(MemoryEpisode.id)
             ).scalars()
-            return [(r.role, r.content) for r in rows]
+            return [Turn(r.role, r.content) for r in rows]
 
-    # --- right to be forgotten ------------------------------------------------------
+    # --- droit à l'oubli -------------------------------------------------
 
     def forget(self, user_id: str, target: str) -> int:
-        """Deletes user facts and episodes mentioning `target`.
+        """Supprime les faits et épisodes d'un utilisateur mentionnant `target`.
 
-        Case-insensitive matching on the key/value of a fact or the
-        content of an episode. Returns the total number of rows deleted.
+        Correspondance insensible à la casse sur la clé/valeur d'un fait ou le
+        contenu d'un épisode. Renvoie le nombre total de lignes supprimées.
         """
         needle = target.strip().lower()
         if not needle:
@@ -155,10 +165,3 @@ class MemoryStore:
                     removed += 1
             s.commit()
         return removed
-
-    def purge(self, user_id: str) -> None:
-        """Efface toute la mémoire d'un utilisateur (utile pour les tests)."""
-        with self._sm() as s:
-            s.execute(delete(MemoryFact).where(MemoryFact.user_id == user_id))
-            s.execute(delete(MemoryEpisode).where(MemoryEpisode.user_id == user_id))
-            s.commit()

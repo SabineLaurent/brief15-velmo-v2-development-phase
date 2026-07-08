@@ -1,6 +1,6 @@
 # ===============================================================================
 # VELMO’S MEMORY BRAIN
-# Récupération épisodique
+# Récupération épisodique, stratégie de rappel des souvenirs anciens
 # ===============================================================================
 
 """Stratégie de rappel des souvenirs anciens (mémoire long terme épisodique).
@@ -58,9 +58,9 @@ class LexicalRetriever:
         if not query:
             return []
         scored: list[tuple[int, str]] = []
-        for _role, content in candidates:
-            overlap = len(query & _tokens(content))
+        for turn in candidates:
+            overlap = len(query & _tokens(turn.content))
             if overlap:
-                scored.append((overlap, content))
+                scored.append((overlap, turn.content))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [content for _, content in scored[:k]]
