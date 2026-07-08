@@ -18,9 +18,9 @@ def test_recall_over_30_turns():
 
 
 def test_cross_session_persistence():
-    # Critère R2 : pointure, clubs et segment retrouvés une session plus tard.
+    # Critère R2 : taille, clubs et segment retrouvés une session plus tard.
     session1 = MemoryManager()
-    session1.remember_fact("acc-marc", "pointure", "L")
+    session1.remember_fact("acc-marc", "taille", "L")
     session1.remember_fact("acc-marc", "clubs", "OM et Brésil")
     session1.remember_fact("acc-marc", "segment", "revendeur")
 

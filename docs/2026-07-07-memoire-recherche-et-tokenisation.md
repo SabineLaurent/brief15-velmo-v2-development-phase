@@ -24,7 +24,7 @@ classement, aucun filtrage par le message. Le seul « filtre » est l'**isolatio
 par `user_id`**.
 
 Pourquoi c'est volontaire : les faits sont **peu nombreux et tous durables**
-(pointure, clubs, segment…). Les remonter tous coûte quasi rien et évite de
+(taille, clubs, segment…). Les remonter tous coûte quasi rien et évite de
 « rater » un fait pertinent.
 
 ### Mémoire épisodique → deux recherches
@@ -68,8 +68,25 @@ chaque `read`. Parfait pour une démo (quelques dizaines de tours) ; c'est ce qu
 
 ## Partie 2 — La tokenisation
 
-Deux choses portent le nom de « token » dans le code ; **aucune** n'est de la
-« vraie » tokenisation NLP.
+### Le pourquoi : rendre le texte *comparable* et *mesurable*
+
+Avant de regarder le code, la vraie question : **à quoi ça sert ?** Une machine ne
+sait ni comparer ni mesurer deux phrases brutes. *« Mon flocage se décolle »* et
+*« le nom sur le maillot s'abîme »* sont proches par le sens, mais n'ont presque
+aucun caractère commun. Tokeniser, c'est passer d'un texte à une représentation
+que le code peut **manipuler**. Et dans ce fichier, ça sert deux besoins distincts :
+
+| Besoin | Ce qu'on produit | À quoi ça sert concrètement |
+|--------|------------------|------------------------------|
+| **Retrouver** (`_tokens`) | un **ensemble de mots** | comparer deux textes → score de pertinence (R1) |
+| **Tenir le budget** (`_estimate_tokens`) | un **nombre** | mesurer la taille du contexte → savoir quoi rogner (R4) |
+
+Le premier rend le texte **comparable** (intersection d'ensembles) ; le second le
+rend **mesurable** (un compte). Sans le premier, pas de rappel épisodique — le
+`_retrieve` n'aurait rien à classer. Sans le second, on ne saurait pas *quand*
+arrêter de couper l'historique : soit on dépasse la fenêtre du LLM (erreur, coût
+qui explose), soit on tronque trop tôt (on perd du contexte utile). Les deux
+usages ci-dessous découlent de ces deux besoins.
 
 ### `_tokens()` — une tokenisation lexicale, maison
 
@@ -112,6 +129,48 @@ pour le rappel hors-ligne. Ni la tokenisation exacte du LLM, ni la vectorisation
 sémantique ne sont branchées.
 
 ---
+
+## Hors-ligne : sans Chroma, es-tu quand même complet ?
+
+Question naturelle à ce stade : « sans ChromaDB, on est bien sur du hors-ligne ? »
+Oui — mais deux précisions changent la lecture.
+
+### Chroma n'est pas *débranché*, il n'est pas encore *branché*
+
+Dans le module mémoire actuel, **aucune ligne n'appelle Chroma**. Le rappel
+épisodique est entièrement assuré par `_retrieve` / `_tokens` (recouvrement
+lexical). « Sans Chroma » n'est donc pas un **mode dégradé** subi : c'est l'**état
+nominal** du palier. Les 4 tests d'acceptance mémoire passent ainsi.
+
+### Ce qui te rend hors-ligne, c'est SQLite — pas l'absence de Chroma
+
+Le vrai repli est dans `store.py` :
+
+```python
+def _default_url() -> str:
+    env = os.getenv("MEMORY_DB_URL")
+    if env:
+        return env
+    path = Path.home() / ".velmo" / "memory.db"   # ← repli fichier
+    return f"sqlite:///{path}"
+```
+
+Sans `MEMORY_DB_URL`, on écrit dans un **fichier** `~/.velmo/memory.db` — pas du
+SQLite en mémoire. C'est *ça* qui garantit la persistance multi-session (R2) sans
+aucun service.
+
+### Le tableau des dépendances
+
+| Étage | Service « en ligne » | Repli hors-ligne actuel | Sans lui, tu perds… |
+|-------|----------------------|--------------------------|----------------------|
+| Faits + journal | Postgres (`MEMORY_DB_URL`) | fichier SQLite | rien de fonctionnel — juste le SGBD partagé |
+| Rappel épisodique | Chroma + embeddings e5 | recouvrement lexical (`_tokens`) | le rappel **sémantique** (« flocage » ≈ « nom sur le maillot ») |
+
+**Réponse honnête** : tu es entièrement hors-ligne et fonctionnellement correct.
+L'absence de Chroma ne casse rien — elle change la *qualité* du rappel (mots exacts
+au lieu du sens), pas sa présence. Seule limite à garder en tête : la recherche
+lexicale est en **force brute O(n)** (re-scan complet à chaque `read`), ce que
+l'indexation de Chroma résoudrait le jour venu.
 
 ## Le fil rouge
 

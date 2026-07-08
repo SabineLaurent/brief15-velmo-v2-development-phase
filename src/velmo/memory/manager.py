@@ -7,37 +7,24 @@
 souvenirs) et le tient au budget de tokens, en s'appuyant sur `MemoryStore`.
 
 Étage court terme = les derniers tours ; étage long terme épisodique = les tours
-plus anciens, remontés par recouvrement lexical avec le message courant. Les
-faits durables (palier 2) complètent le contexte. La récupération lexicale est le
-repli hors-ligne ; une recherche sémantique (Chroma) pourra la remplacer derrière
-la même interface `MemoryStore`.
+plus anciens, remontés par un `EpisodicRetriever` (recouvrement lexical par
+défaut). Les faits durables (palier 2) complètent le contexte. Le rappel est une
+stratégie injectable : une recherche sémantique (Chroma) pourra remplacer le
+lexical sans toucher à cet orchestrateur.
 """
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
+from .extraction import extract_facts
+from .retrieval import EpisodicRetriever, LexicalRetriever
 from .store import MemoryStore, Turn
 
 # Nombre de tours récents gardés tels quels (mémoire court terme).
-_RECENT = 10
+_RECENT = 15
 # Nombre de souvenirs anciens remontés par pertinence (mémoire épisodique).
 _EPISODIC_K = 3
-
-# Mots trop courants pour porter du sens : ignorés dans le recouvrement lexical.
-_STOP = {
-    "le", "la", "les", "de", "des", "du", "un", "une", "et", "ou", "au", "aux",
-    "en", "est", "sur", "mon", "ma", "mes", "ton", "ta", "tes", "je", "tu",
-    "il", "elle", "que", "qui", "quel", "quelle", "etait", "vous", "pour",
-    "avec", "dans", "par", "the", "of",
-}
-
-
-def _tokens(text: str) -> set[str]:
-    """Mots signifiants d'un texte (minuscules, sans ponctuation ni mots vides)."""
-    words = re.split(r"[^0-9a-zàâäéèêëïîôöùûüç]+", text.lower())
-    return {w for w in words if len(w) > 2 and w not in _STOP}
 
 
 def _estimate_tokens(text: str) -> int:
@@ -67,9 +54,16 @@ class MemoryContext:
 class MemoryManager:
     """Orchestre la mémoire court terme et long terme, isolée par utilisateur."""
 
-    def __init__(self, *, token_budget: int = 2000, store: MemoryStore | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        token_budget: int = 2000,
+        store: MemoryStore | None = None,
+        retriever: EpisodicRetriever | None = None,
+    ) -> None:
         self.token_budget = token_budget
         self._store = store or MemoryStore()
+        self._retriever = retriever or LexicalRetriever()
 
     def read(self, user_id: str, message: str) -> MemoryContext:
         """Reconstitue le contexte mémoire pertinent pour `message`."""
@@ -78,16 +72,22 @@ class MemoryManager:
 
         recent = episodes[-_RECENT:]
         older = episodes[:-_RECENT] if len(episodes) > _RECENT else []
-        episodic = self._retrieve(message, older)
+        episodic = self._retriever.recall(user_id, message, older, _EPISODIC_K)
 
         ctx = MemoryContext(history=recent, facts=facts, episodic=episodic)
         self._fit_budget(ctx)
         return ctx
 
     def write(self, user_id: str, user_message: str, assistant_message: str) -> None:
-        """Met à jour la mémoire à partir d'un échange."""
+        """Met à jour la mémoire à partir d'un échange.
+
+        Classe l'information (cf. architecture à étages) : le tour va au journal
+        épisodique, et toute préférence durable détectée est promue en fait
+        structuré (source de vérité, toujours chargée, insensible au budget)."""
         self._store.add_episode(user_id, "user", user_message)
         self._store.add_episode(user_id, "assistant", assistant_message)
+        for key, value in extract_facts(user_message).items():
+            self._store.upsert_fact(user_id, key, value)
 
     def remember_fact(self, user_id: str, key: str, value: str) -> None:
         """Persiste un fait durable sur l'utilisateur."""
@@ -105,19 +105,6 @@ class MemoryManager:
         }
 
     # --- interne -------------------------------------------------------------
-
-    def _retrieve(self, message: str, candidates: list[Turn]) -> list[str]:
-        """Remonte les `_EPISODIC_K` souvenirs anciens les plus proches du message."""
-        query = _tokens(message)
-        if not query:
-            return []
-        scored: list[tuple[int, str]] = []
-        for _role, content in candidates:
-            overlap = len(query & _tokens(content))
-            if overlap:
-                scored.append((overlap, content))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        return [content for _, content in scored[:_EPISODIC_K]]
 
     def _fit_budget(self, ctx: MemoryContext) -> None:
         """Rogne le contexte au budget de tokens : on garde les faits, on lâche

@@ -11,9 +11,10 @@ from __future__ import annotations
 import re
 
 from . import tools
+from .config import db_backend
 from .guardrails import GuardrailEngine
 from .llm import LLM, get_llm
-from .memory import MemoryManager
+from .memory import MemoryContext, MemoryManager
 
 SYSTEM_PROMPT = (
     "Tu es l'assistant de support de Velmo, boutique de maillots de foot collector. "
@@ -29,6 +30,14 @@ ORDER_RE = re.compile(r"O-\d{4}-\d{4}")
 SIZE_RE = re.compile(r"\b(XXL|XL|S|M|L)\b")
 AMOUNT_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:€|euros?)")
 _CONFIRM = ("je confirme", "confirme", "c'est confirmé", "oui je", "vas-y")
+
+# Cibles d'oubli reconnues (R5) : les clés de faits qu'on sait retenir + les
+# cibles épisodiques usuelles. Liste de reconnaissance *prioritaire*, pas une
+# whitelist : hors de cette liste, on retombe sur l'extraction libre.
+# Tuple (et non set) pour un ordre de priorité déterministe quand un message
+# cite plusieurs cibles (« oublie ma taille et mes clubs »).
+_FORGET_TARGETS = ("taille", "clubs", "segment", "canal", "adresse", "commande")
+_FORGET_FALLBACK_RE = re.compile(r"\bm(?:on|a|es)\s+([a-zàâäéèêëïîôöùûüç]+)")
 
 # Alias conviviaux -> référence produit.
 _ALIASES = {
@@ -74,8 +83,8 @@ class Agent:
             self.memory.write(user_id, message, refusal)
             return refusal
 
-        self.memory.read(user_id, message)
-        answer = self._handle(user_id, message)
+        ctx = self.memory.read(user_id, message)
+        answer = self._handle(user_id, message, ctx)
 
         gate_out = self.guardrails.check_output(answer)
         if not gate_out.allowed:
@@ -86,8 +95,15 @@ class Agent:
 
     # --- routage déterministe ------------------------------------------------
 
-    def _handle(self, user_id: str, message: str) -> str:
+    def _handle(self, user_id: str, message: str, ctx: MemoryContext) -> str:
         low = message.lower()
+
+        if "oubli" in low:
+            target = self._forget_target(low)
+            if target:
+                self.memory.forget(user_id, target)
+                return f"C'est oublié : je ne conserve plus votre {target}."
+
         order = ORDER_RE.search(message)
         order_id = order.group(0) if order else None
         confirmed = any(c in low for c in _CONFIRM)
@@ -135,7 +151,7 @@ class Agent:
         if any(k in low for k in _FAQ_KEYWORDS):
             return self._format_kb(tools.search_kb(self.kb, message))
 
-        return self.llm.invoke(SYSTEM_PROMPT, "", message)
+        return self.llm.invoke(SYSTEM_PROMPT, ctx.render(), message)
 
     def _confirm_or_act(self, confirmed: bool, label: str, order_id: str, action) -> str:
         if not confirmed:
@@ -179,6 +195,16 @@ class Agent:
         return None
 
     @staticmethod
+    def _forget_target(low: str) -> str | None:
+        """Cible d'un ordre d'oubli : une cible reconnue si elle est citée, sinon
+        le mot qui suit « mon/ma/mes » (repli libre — R5 reste ouvert)."""
+        for target in _FORGET_TARGETS:
+            if target in low:
+                return target
+        match = _FORGET_FALLBACK_RE.search(low)
+        return match.group(1) if match else None
+
+    @staticmethod
     def _format_order(result: dict) -> str:
         if result.get("error"):
             return "Je ne trouve pas cette commande à votre nom."
@@ -205,11 +231,17 @@ class Agent:
 
 def build_default_agent(session=None, kb=None) -> Agent:
     """Assemble un agent avec composants par défaut, base et FAQ."""
-    from .db import session_factory
+    from .db import fresh_sqlite_session, session_factory
     from .kb_store import get_kb
 
     if session is None:
-        session = session_factory()()
+        if db_backend() == "postgres":
+            session = session_factory()()  # Postgres réel (données seedées via make seed)
+        else:
+            from .sampledata import seed
+
+            session = fresh_sqlite_session()  # SQLite en mémoire…
+            seed(session)  # …peuplé du jeu de référence, pour un CLI démo-able hors-ligne
     if kb is None:
         kb = get_kb()
     return Agent(

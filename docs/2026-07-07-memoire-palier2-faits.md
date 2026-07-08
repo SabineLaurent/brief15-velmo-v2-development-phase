@@ -98,9 +98,9 @@ for key, value in self.facts.items():
     parts.append(f"fact:{key}={value}")
 ```
 
-C'est là qu'opèrent les tests. `remember_fact("acc-marc", "pointure", "L")`
-devient, au `render()`, la ligne `fact:pointure=L`. Le test vérifie juste
-`assert "L" in rendered` — et « L » est bien dans « fact:pointure=L ». Idem « OM »
+C'est là qu'opèrent les tests. `remember_fact("acc-marc", "taille", "L")`
+devient, au `render()`, la ligne `fact:taille=L`. Le test vérifie juste
+`assert "L" in rendered` — et « L » est bien dans « fact:taille=L ». Idem « OM »
 dans `fact:clubs=OM et Brésil`, « revendeur » dans `fact:segment=revendeur`. **Le
 test ne vérifie pas une structure, il vérifie qu'une info survit et ressort dans
 le texte final.**

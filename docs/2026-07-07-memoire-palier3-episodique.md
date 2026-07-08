@@ -77,7 +77,7 @@ Deux lignes, mais la bonne asymétrie avec les faits : un fait s'**upsert**
 tard, et la traçabilité (R6) réelle.
 
 Note : `write` **n'extrait pas** de fait automatiquement (« il porte du L » ne
-crée pas `pointure=L`). Ce serait le rôle d'un LLM ; on l'a laissé de côté, aucun
+crée pas `taille=L`). Ce serait le rôle d'un LLM ; on l'a laissé de côté, aucun
 test ne l'exige.
 
 ---

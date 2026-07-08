@@ -21,12 +21,12 @@ La mémoire est séparée en **deux tables**, comme le veut la note d'architectu
 
 | Table | Contient | Question à laquelle elle répond |
 |-------|----------|--------------------------------|
-| `memory_facts` | faits durables clé→valeur (`pointure=L`) | « quelle taille prend ce client ? » |
+| `memory_facts` | faits durables clé→valeur (`taille=L`) | « quelle taille prend ce client ? » |
 | `memory_episodes` | journal des échanges, tour par tour | « m'a-t-il déjà parlé de… ? » |
 
 La distinction est structurante :
 
-- un **fait** est **exact et écrasable** — la pointure change, on remplace ;
+- un **fait** est **exact et écrasable** — la taille change, on remplace ;
 - un **épisode** est **un souvenir daté qu'on n'écrase jamais** — on empile.
 
 D'où deux structures de données différentes, traitées différemment.
@@ -51,7 +51,7 @@ class MemoryFact(Base):
 
 Le point important est la **clé primaire composée** (`user_id` **et** `key` en
 `primary_key=True`). Traduction métier : *un utilisateur n'a qu'une seule valeur
-par clé*. Marc n'a qu'une `pointure`. C'est ce qui :
+par clé*. Marc n'a qu'une `taille`. C'est ce qui :
 
 1. rend l'écrasement propre (un fait = un état courant, pas un historique) ;
 2. pose le **premier verrou d'isolation** : la donnée est indexée par `user_id`.
@@ -187,8 +187,8 @@ charges :
 
 | Sortie observée | Ce que ça démontre |
 |-----------------|--------------------|
-| `facts u1 : {'pointure': 'XL'}` | l'upsert écrase (fait ≠ empilement) |
-| `facts u2 : {'pointure': 'M'}` | **isolation** : u2 ne voit pas u1 (R3) |
+| `facts u1 : {'taille': 'XL'}` | l'upsert écrase (fait ≠ empilement) |
+| `facts u2 : {'taille': 'M'}` | **isolation** : u2 ne voit pas u1 (R3) |
 | `b.facts(...)` voit ce que `a` a écrit | **persistance multi-session** (R2) |
 | `forget adr: 1` puis « rue des Lilas » absent | **droit à l'oubli** (R5) |
 
