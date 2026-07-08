@@ -45,6 +45,7 @@ out/
 *.sqlite
 *.db
 chroma-data/
+temp_db/
 
 # MLOps run artifacts
 mlops/report.md

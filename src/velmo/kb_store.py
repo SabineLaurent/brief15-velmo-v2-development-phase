@@ -11,6 +11,8 @@ import re
 import unicodedata
 from pathlib import Path
 
+from .config import kb_backend, warn_backend_unavailable
+
 KB_DOCS_DIR = Path(__file__).resolve().parents[2] / "kb" / "docs"
 
 
@@ -74,13 +76,17 @@ class ChromaKB:
 
 
 def get_kb():
-    """Renvoie le backend Chroma si configuré et disponible, sinon le backend local."""
+    """Si `VELMO_KB=chroma`, renvoie Chroma si joignable, sinon le backend local."""
+    if kb_backend() != "chroma":
+        return LocalKB()
     if not os.getenv("CHROMA_URL"):
+        warn_backend_unavailable("FAQ Chroma", "CHROMA_URL absent")
         return LocalKB()
     try:
         import chromadb
         from chromadb.utils import embedding_functions
     except ImportError:
+        warn_backend_unavailable("FAQ Chroma", "dépendance chromadb absente")
         return LocalKB()
 
     client = chromadb.HttpClient(host="chroma", port=8000)

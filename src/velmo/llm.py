@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from typing import Protocol
 
+from .config import llm_backend, warn_backend_unavailable
+
 
 class LLM(Protocol):
     """Interface minimale d'un client de complétion."""
@@ -41,11 +43,18 @@ class AzureLLM:
 
 
 def get_llm() -> LLM:
-    """Construit le client Azure si configuré, sinon le repli `EchoLLM`."""
+    """Si `VELMO_LLM=kimi`, construit le client Azure ; repli `EchoLLM` sinon."""
+    if llm_backend() != "kimi":
+        return EchoLLM()
     if not os.getenv("AZURE_AI_INFERENCE_ENDPOINT"):
+        warn_backend_unavailable("LLM Azure", "AZURE_AI_INFERENCE_ENDPOINT absent")
         return EchoLLM()
 
-    from langchain_azure_ai.chat_models import AzureAIOpenAIApiChatModel
+    try:
+        from langchain_azure_ai.chat_models import AzureAIOpenAIApiChatModel
+    except ImportError:
+        warn_backend_unavailable("LLM Azure", "extra 'llm' non installé")
+        return EchoLLM()
 
     model = AzureAIOpenAIApiChatModel(
         endpoint=os.environ["AZURE_AI_INFERENCE_ENDPOINT"],

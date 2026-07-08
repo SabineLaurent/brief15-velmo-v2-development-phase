@@ -1,14 +1,14 @@
-"""Persistance de la mémoire, isolée par utilisateur.
+"""Memory persistence, isolated per user.
 
-Deux étages relationnels complémentaires :
+Two complementary relational levels:
 
-- `memory_facts` : faits durables clé-valeur (source de vérité structurée) ;
-- `memory_episodes` : journal chronologique des échanges (base du rappel).
+-`memory_facts`: durable key-value facts (source of structured truth);
+-`memory_episodes`: chronological log of exchanges (recall basis).
 
-Backend SQLAlchemy portable : Postgres si `MEMORY_DB_URL` est défini, sinon un
-fichier SQLite partagé (`~/.velmo/memory.db`) qui assure une vraie persistance
-multi-session hors-ligne. L'étage épisodique sémantique (Chroma) pourra se
-brancher plus tard derrière la même interface `MemoryStore`.
+Portable SQLAlchemy backend: Postgres if `MEMORY_DB_URL` is defined, otherwise one
+shared SQLite file (`temp_db/memory.db` at the repo root) which ensures true persistence
+multi-session offline. The semantic episodic level (Chroma) can be
+plug in later behind the same `MemoryStore` interface.
 """
 
 from __future__ import annotations
@@ -24,6 +24,8 @@ from sqlalchemy.orm import (
     mapped_column,
     sessionmaker,
 )
+
+from ..config import memory_backend, warn_backend_unavailable
 
 Turn = tuple[str, str]  # (role, content)
 
@@ -58,10 +60,12 @@ class MemoryEpisode(Base):
 
 
 def _default_url() -> str:
-    env = os.getenv("MEMORY_DB_URL")
-    if env:
-        return env
-    path = Path.home() / ".velmo" / "memory.db"
+    if memory_backend() == "postgres":
+        env = os.getenv("MEMORY_DB_URL") or os.getenv("DB_URL")
+        if env:
+            return env
+        warn_backend_unavailable("mémoire Postgres", "MEMORY_DB_URL/DB_URL absent")
+    path = Path(__file__).resolve().parents[3] / "temp_db" / "memory.db"
     path.parent.mkdir(parents=True, exist_ok=True)
     return f"sqlite:///{path}"
 
