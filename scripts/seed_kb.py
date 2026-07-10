@@ -15,18 +15,36 @@ KB_DOCS_DIR = Path(__file__).resolve().parent.parent / "kb" / "docs"
 def main() -> None:
     import chromadb
     from chromadb.utils import embedding_functions
+    from dotenv import load_dotenv
+    from sentence_transformers import SentenceTransformer
 
-    client = chromadb.HttpClient(
-        host=os.getenv("CHROMA_HOST", "chroma"), port=int(os.getenv("CHROMA_PORT", "8000"))
-    )
-    embedder = embedding_functions.SentenceTransformerEmbeddingFunction(
-        model_name=os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
-    )
+    from velmo.config import chroma_host_port
+
+    load_dotenv()
+    model_name = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
+
+    host, port = chroma_host_port() or ("chroma", 8000)
+    client = chromadb.HttpClient(host=host, port=port)
+    embedder = embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model_name)
     collection = client.get_or_create_collection("velmo_faq", embedding_function=embedder)
+
+    # Garde-fou : au-delà de sa fenêtre, le modèle tronque la fin du texte
+    # SILENCIEUSEMENT (queue jamais vectorisée, donc introuvable). On échoue tôt
+    # et fort plutôt que d'indexer un document à moitié cherchable — le jour où
+    # une fiche dépasse la limite, il faudra la découper (chunking) avant.
+    model = SentenceTransformer(model_name)
+    token_limit = model.max_seq_length
 
     docs, ids, metas = [], [], []
     for path in sorted(KB_DOCS_DIR.glob("*.md")):
-        docs.append(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        n_tokens = len(model.tokenizer.encode(text))
+        if n_tokens > token_limit:
+            raise SystemExit(
+                f"{path.name} : {n_tokens} tokens > fenêtre {token_limit} du modèle "
+                f"{model_name} — à découper (chunking) avant indexation."
+            )
+        docs.append(text)
         ids.append(path.stem)
         metas.append({"source": path.name})
 

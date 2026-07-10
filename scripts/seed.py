@@ -5,11 +5,14 @@ Usage : uv run python scripts/seed.py
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
+
 from velmo.db import Base, make_engine, session_factory
 from velmo.sampledata import seed
 
 
 def main() -> None:
+    load_dotenv()
     engine = make_engine()
     Base.metadata.create_all(engine)
     session = session_factory()()

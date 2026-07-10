@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from urllib.parse import urlparse
 
 _log = logging.getLogger("velmo")
 
@@ -45,6 +46,15 @@ def kb_backend() -> str:
 def db_backend() -> str:
     """`sqlite` (sampledata en mémoire) ou `postgres` (session métier réelle)."""
     return _backend("VELMO_DB", "sqlite")
+
+
+def chroma_host_port() -> tuple[str, int] | None:
+    """(host, port) depuis `CHROMA_URL` ; `None` si la variable est absente."""
+    url = os.getenv("CHROMA_URL")
+    if not url:
+        return None
+    parsed = urlparse(url)
+    return parsed.hostname or "chroma", parsed.port or 8000
 
 
 def warn_backend_unavailable(brick: str, reason: str) -> None:
