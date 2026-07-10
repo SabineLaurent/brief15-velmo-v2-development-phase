@@ -12,6 +12,7 @@ léger — le filet echo/SQLite reste garanti.
 | LLM       | `VELMO_LLM`    | `echo`  | `kimi`   |
 | Mémoire   | `VELMO_MEMORY` | `sqlite`| `postgres` |
 | KB / FAQ  | `VELMO_KB`     | `local` | `chroma` |
+| Épisodique| `VELMO_EPISODIC`| `lexical`| `chroma` |
 | DB métier | `VELMO_DB`     | `sqlite`| `postgres` |
 """
 
@@ -41,6 +42,11 @@ def memory_backend() -> str:
 def kb_backend() -> str:
     """`local` (TF-IDF hors-ligne) ou `chroma` (FAQ sémantique)."""
     return _backend("VELMO_KB", "local")
+
+
+def episodic_backend() -> str:
+    """`lexical` (recouvrement hors-ligne) ou `chroma` (rappel sémantique)."""
+    return _backend("VELMO_EPISODIC", "lexical")
 
 
 def db_backend() -> str:

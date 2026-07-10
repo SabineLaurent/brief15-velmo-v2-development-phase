@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .extraction import extract_facts
-from .retrieval import EpisodicRetriever, LexicalRetriever
+from .retrieval import EpisodicRetriever, get_episodic_retriever
 from .store import MemoryStore, Turn
 
 # Nombre de tours récents gardés tels quels (mémoire court terme).
@@ -63,7 +63,7 @@ class MemoryManager:
     ) -> None:
         self.token_budget = token_budget
         self._store = store or MemoryStore()
-        self._retriever = retriever or LexicalRetriever()
+        self._retriever = retriever or get_episodic_retriever()
 
     def read(self, user_id: str, message: str) -> MemoryContext:
         """Reconstitue le contexte mémoire pertinent pour `message`."""
@@ -82,10 +82,13 @@ class MemoryManager:
         """Met à jour la mémoire à partir d'un échange.
 
         Classe l'information (cf. architecture à étages) : le tour va au journal
-        épisodique, et toute préférence durable détectée est promue en fait
+        épisodique SQL (vérité chronologique) et à l'index épisodique du retriever
+        (rappel sémantique) ; toute préférence durable détectée est promue en fait
         structuré (source de vérité, toujours chargée, insensible au budget)."""
         self._store.add_episode(user_id, "user", user_message)
         self._store.add_episode(user_id, "assistant", assistant_message)
+        self._retriever.index(user_id, "user", user_message)
+        self._retriever.index(user_id, "assistant", assistant_message)
         for key, value in extract_facts(user_message).items():
             self._store.upsert_fact(user_id, key, value)
 

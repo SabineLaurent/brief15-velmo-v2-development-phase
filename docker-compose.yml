@@ -30,7 +30,7 @@ services:
       retries: 10
 
   chroma:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:0.5.20
     ports:
       - "8001:8000"
     volumes:

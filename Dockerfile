@@ -11,6 +11,6 @@ COPY pyproject.toml ./
 COPY src ./src
 COPY eval ./eval
 
-RUN uv sync --no-dev
+RUN uv sync --no-dev --extra vector --extra llm
 
 CMD ["uv", "run", "python", "-m", "velmo.cli"]
