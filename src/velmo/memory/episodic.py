@@ -20,6 +20,7 @@ class EpisodicStore(Protocol):
     def add(self, user_id: str, text: str) -> None: ...
     def search(self, user_id: str, query: str, k: int = 3) -> list[str]: ...
     def all_for(self, user_id: str) -> list[str]: ...
+    def forget(self, user_id: str, target: str) -> int: ...
 
 
 def _tokens(text: str) -> set[str]:
@@ -47,6 +48,14 @@ class LocalEpisodicStore:
     def all_for(self, user_id: str) -> list[str]:
         return list(self._store.get(user_id, []))
 
+    def forget(self, user_id: str, target: str) -> int:
+        target_l = target.lower()
+        texts = self._store.get(user_id, [])
+        kept = [text for text in texts if target_l not in text.lower()]
+        removed = len(texts) - len(kept)
+        self._store[user_id] = kept
+        return removed
+
 
 class ChromaEpisodicStore:
     """Recherche sémantique via une collection Chroma dédiée à la mémoire."""
@@ -71,6 +80,15 @@ class ChromaEpisodicStore:
         # Chroma n'a pas d'équivalent simple à un "SELECT *" par métadonnée
         # sans pagination explicite ; hors périmètre pour `inspect()` ici.
         return []
+
+    def forget(self, user_id: str, target: str) -> int:
+        match = self._collection.get(
+            where={"user_id": user_id}, where_document={"$contains": target}
+        )
+        ids = match.get("ids", [])
+        if ids:
+            self._collection.delete(ids=ids)
+        return len(ids)
 
 
 def get_episodic_store() -> EpisodicStore:

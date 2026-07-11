@@ -163,6 +163,20 @@ class Escalation(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class MemoryFact(Base):
+    """Fait durable de la mémoire long terme factuelle (clé-valeur par `user_id`).
+
+    Table volontairement indépendante du schéma métier (pas de FK vers
+    `customers`) : `user_id` est l'identifiant applicatif générique utilisé
+    par `MemoryManager`, pas garanti d'exister comme client en base.
+    """
+
+    __tablename__ = "memory_facts"
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[str] = mapped_column(String)
+
+
 def make_engine(url: str | None = None):
     """Crée un engine SQLAlchemy (Postgres en prod, fourni via `DB_URL`)."""
     url = url or os.getenv("DB_URL", "postgresql+psycopg://app:app@localhost:5432/velmo")

@@ -1,11 +1,11 @@
 """Mémoire de l'agent Velmo : contexte court terme et mémoire long terme.
 
 Surface publique stable consommée par l'agent et la suite d'acceptance.
-Étape 1b (courante) : court terme (tampon en RAM borné par `token_budget`) +
-long terme épisodique (recherche par similarité au-delà de la fenêtre court
-terme, via `episodic.get_episodic_store()`). Les faits durables (long terme
-factuel) et le droit à l'oubli sont des étapes ultérieures ;
-`remember_fact`/`forget` restent no-op.
+Étape 1c (courante) : court terme (tampon en RAM borné par `token_budget`) +
+long terme épisodique (recherche par similarité, `episodic.get_episodic_store()`)
++ long terme factuel (faits clé-valeur persistés, `facts.get_facts_store()`,
+Postgres en prod / SQLite hors-ligne). Le droit à l'oubli (`forget`) purge les
+trois étages.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .episodic import get_episodic_store
+from .facts import get_facts_store
 
 Turn = tuple[str, str]  # (role, content)
 
@@ -52,13 +53,16 @@ class MemoryManager:
     la fin du process. Long terme épisodique : `self._episodic`, un backend
     interrogeable par similarité (Chroma en prod, repli local hors-ligne),
     qui retrouve les souvenirs pertinents même sortis du tampon court terme.
-    Les faits durables (long terme factuel) sont une étape ultérieure.
+    Long terme factuel : `self._facts`, des faits clé-valeur persistés
+    (Postgres en prod, SQLite hors-ligne), qui survivent à la fin du process
+    et à la création d'un nouveau `MemoryManager` (persistance multi-session).
     """
 
     def __init__(self, *, token_budget: int = 2000) -> None:
         self.token_budget = token_budget
         self._history: dict[str, list[Turn]] = {}
         self._episodic = get_episodic_store()
+        self._facts = get_facts_store()
 
     def read(self, user_id: str, message: str) -> MemoryContext:
         """Reconstitue le contexte mémoire pertinent pour `message`."""
@@ -66,7 +70,8 @@ class MemoryManager:
         already_present = {f"{role}: {content}" for role, content in history}
         hits = self._episodic.search(user_id, message, k=_EPISODIC_K)
         episodic = [hit for hit in hits if hit not in already_present]
-        return MemoryContext(history=history, episodic=episodic)
+        facts = self._facts.all_for(user_id)
+        return MemoryContext(history=history, episodic=episodic, facts=facts)
 
     def write(self, user_id: str, user_message: str, assistant_message: str) -> None:
         """Met à jour la mémoire à partir d'un échange."""
@@ -79,19 +84,29 @@ class MemoryManager:
 
     def remember_fact(self, user_id: str, key: str, value: str) -> None:
         """Persiste un fait durable sur l'utilisateur."""
-        # Étape ultérieure (mémoire long terme factuelle).
-        return None
+        self._facts.set(user_id, key, value)
 
     def forget(self, user_id: str, target: str) -> int:
-        """Supprime les souvenirs correspondant à `target`. Renvoie le nombre supprimé."""
-        # Étape ultérieure (droit à l'oubli) : devra aussi purger l'épisodique.
-        return 0
+        """Supprime les souvenirs correspondant à `target`. Renvoie le nombre supprimé.
+
+        Purge les trois étages : tampon court terme, épisodique, faits
+        durables — sans quoi un souvenir écarté d'un étage resterait
+        retrouvable via un autre (voir note de cours étape 1b).
+        """
+        target_l = target.lower()
+        turns = self._history.get(user_id, [])
+        kept = [turn for turn in turns if target_l not in turn[1].lower()]
+        removed = len(turns) - len(kept)
+        self._history[user_id] = kept
+        removed += self._episodic.forget(user_id, target)
+        removed += self._facts.forget(user_id, target)
+        return removed
 
     def inspect(self, user_id: str) -> dict:
         """Renvoie l'état mémoire d'un utilisateur (historique, faits, épisodique)."""
         return {
             "history": list(self._history.get(user_id, [])),
-            "facts": {},
+            "facts": self._facts.all_for(user_id),
             "episodic": self._episodic.all_for(user_id),
         }
 

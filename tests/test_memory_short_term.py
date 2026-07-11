@@ -52,14 +52,3 @@ def test_token_budget_trims_oldest_turns():
     contents = [content for _, content in history]
     assert any("troisieme" in c for c in contents)
     assert not any("premier" in c for c in contents)
-
-
-def test_remember_fact_and_forget_remain_noop_for_now():
-    mm = MemoryManager()
-    user = "not-yet-implemented"
-
-    mm.remember_fact(user, "pointure", "L")
-    assert mm.read(user, "ma pointure ?").facts == {}
-
-    removed = mm.forget(user, "pointure")
-    assert removed == 0
