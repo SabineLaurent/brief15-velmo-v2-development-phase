@@ -39,15 +39,19 @@ def test_isolation_between_users_same_manager():
 
 
 def test_token_budget_trims_oldest_turns():
+    # Vérifie le tampon court terme spécifiquement (`.history`), pas le rendu
+    # complet : depuis l'étape 1b, la mémoire épisodique peut légitimement
+    # faire réapparaître un ancien tour dans `.episodic` — c'est son rôle.
     mm = MemoryManager(token_budget=20)
     user = "budget-trim"
     mm.write(user, "premier message assez long pour peser dans le budget", "ok")
     mm.write(user, "deuxieme message assez long pour peser dans le budget", "ok")
     mm.write(user, "troisieme message assez long pour peser dans le budget", "ok")
 
-    rendered = mm.read(user, "message ?").render()
-    assert "troisieme" in rendered
-    assert "premier" not in rendered
+    history = mm.read(user, "message ?").history
+    contents = [content for _, content in history]
+    assert any("troisieme" in c for c in contents)
+    assert not any("premier" in c for c in contents)
 
 
 def test_remember_fact_and_forget_remain_noop_for_now():
