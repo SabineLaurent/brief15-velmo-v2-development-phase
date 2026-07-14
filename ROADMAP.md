@@ -27,12 +27,14 @@ changeant juste `.env`. Un mini-script qui envoie un message et reçoit une rép
 **Livrable :** chaque appel LLM est tracé et visible dans le dashboard LangSmith.
 **Fait :** tracing EU activé (endpoint region), runs enrichis (run_name/tags/metadata).
 
-## Phase 3 — Mémoire court terme (conversation) 🚧
+## Phase 3 — Mémoire court terme (conversation) ✅
 **Concept :** LangGraph `checkpointer`, notion de `thread_id`, état persistant
 d'une conversation.
 **Livrable :** l'agent se souvient des messages précédents dans une même session.
+**Fait :** `create_agent` + `InMemorySaver`, chat interactif, souvenir + isolation
+par `thread_id` vérifiés en live.
 
-## Phase 4 — Base de connaissance FAQ (RAG) ⬜
+## Phase 4 — Base de connaissance FAQ (RAG) 🚧
 **Concept :** embeddings, vector store, retriever, chunking, retrieval tool.
 **Livrable :** l'agent répond en s'appuyant sur une FAQ ingérée, avec citations.
 
@@ -67,4 +69,5 @@ utilisateur.
 - [x] Phase 0 — structure & fondations
 - [x] Phase 1 — couche LLM agnostique (run live Mistral OK)
 - [x] Phase 2 — observabilité LangSmith (tracing EU OK)
-- [ ] Phase 3 — mémoire court terme (prochaine étape)
+- [x] Phase 3 — mémoire court terme (souvenir + isolation vérifiés)
+- [ ] Phase 4 — base de connaissance FAQ / RAG (prochaine étape)

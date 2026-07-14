@@ -43,4 +43,5 @@ make run     # lance l'agent de support
 
 ## Statut
 
-🚧 En construction — Phase 0 (structure du projet) terminée.
+🚧 En construction — Phases 0 à 3 terminées (structure, LLM agnostique,
+observabilité LangSmith, mémoire court terme). Prochaine : Phase 4 (RAG / FAQ).
