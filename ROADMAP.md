@@ -41,10 +41,14 @@ par `thread_id` vérifiés en live.
 outil `search_faq` (agentic RAG). Cas « dans la FAQ » (avec source) et « hors FAQ »
 (refus honnête) vérifiés en live.
 
-## Phase 5 — Mémoire long terme (cross-session) 🚧
+## Phase 5 — Mémoire long terme (cross-session) ✅
 **Concept :** LangGraph `Store`, mémoire sémantique/épisodique, namespaces par
 utilisateur.
 **Livrable :** l'agent se souvient d'infos d'un utilisateur d'une session à l'autre.
+**Fait :** `InMemoryStore` avec recherche sémantique (embeddings agnostiques réutilisés),
+outils agentiques `save_memory`/`search_memories`, namespace `("memories", user_id)`,
+`create_agent(store=..., context_schema=AgentContext)`. Recall cross-session
+(thread A → thread B) et isolation par `user_id` vérifiés en live.
 
 ## Phase 6 — Orchestration LangGraph (le vrai graphe) ⬜
 **Concept :** `StateGraph`, nœuds, arêtes conditionnelles, routage.
@@ -74,4 +78,5 @@ utilisateur.
 - [x] Phase 2 — observabilité LangSmith (tracing EU OK)
 - [x] Phase 3 — mémoire court terme (souvenir + isolation vérifiés)
 - [x] Phase 4 — base de connaissance FAQ / RAG (hit + miss vérifiés)
-- [ ] Phase 5 — mémoire long terme cross-session (prochaine étape)
+- [x] Phase 5 — mémoire long terme cross-session (recall + isolation vérifiés)
+- [ ] Phase 6 — orchestration LangGraph / StateGraph (prochaine étape)
