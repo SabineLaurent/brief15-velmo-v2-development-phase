@@ -1,0 +1,129 @@
+# 🏛️ Architecture — Le COMMENT
+
+> Ce document décrit **la conception technique**. Pour le besoin métier, voir
+> [`spec.md`](spec.md).
+
+## 1. Vue d'ensemble
+
+```
+                    ┌─────────────────────────────────────────┐
+   Client  ───────► │              AGENT (LangGraph)           │
+   (message)        │  ┌────────────────────────────────────┐ │
+                    │  │  Graphe : router → répondre / RAG   │ │
+                    │  │           / escalader / outils      │ │
+                    │  └───┬───────────┬───────────┬─────────┘ │
+                    │      │           │           │           │
+                    │   ┌──▼──┐   ┌────▼────┐  ┌───▼────┐      │
+                    │   │ LLM │   │ Mémoire │  │  FAQ   │      │
+                    │   │(abst)│  │ CT + LT │  │ (RAG)  │      │
+                    │   └──┬──┘   └────┬────┘  └───┬────┘      │
+                    └──────┼──────────┼───────────┼───────────┘
+                           │          │           │
+                    ┌──────▼───┐ ┌────▼─────┐ ┌───▼──────────┐
+                    │ Provider │ │Checkpoint│ │ Vector store │
+                    │ (via .env)│ │ + Store  │ │ + embeddings │
+                    └──────────┘ └──────────┘ └──────────────┘
+```
+
+Chaque bloc = un dossier dans `src/support_agent/`. On les construit un par un
+(voir `ROADMAP.md`).
+
+## 2. ⭐ Le cœur agnostique : la couche LLM
+
+**Principe :** le code applicatif ne connaît qu'une interface abstraite,
+`BaseChatModel` (commune à tous les providers LangChain). Le choix du provider
+est une donnée de **configuration**, pas de code.
+
+```
+config (.env)  ──►  llm/factory.py : get_chat_model()  ──►  BaseChatModel
+   LLM_PROVIDER=mistral                                        (utilisé partout)
+```
+
+Trois cas gérés par la factory :
+
+1. **Provider standard** (mistral, groq, google_genai, azure_openai, azure_ai…)
+   → on délègue à `init_chat_model("provider:model")`, le sélecteur natif de
+   LangChain. Rien à écrire de plus.
+2. **API OpenAI-compatible** (beaucoup d'APIs maison ou tierces le sont)
+   → `ChatOpenAI(base_url=..., api_key=...)`. Juste de la config.
+3. **API 100 % custom** (non standard)
+   → un adaptateur `llm/adapters/custom.py` : une sous-classe `BaseChatModel`
+   (~30 lignes) qui traduit notre appel vers ton API. **Seul** endroit qui
+   connaît les détails de cette API ; le reste de l'app l'ignore.
+
+> 💡 **C'est ça, l'agnosticisme** : swaper Mistral → Groq → Foundry → API maison
+> = changer `LLM_PROVIDER` dans `.env`. Zéro refacto.
+
+Même logique pour les **embeddings** (RAG) : `llm/embeddings.py` renvoie une
+interface `Embeddings` abstraite, choisie par config.
+
+## 3. Le modèle de mémoire (deux niveaux)
+
+LangGraph distingue nettement deux mémoires — c'est un concept clé à comprendre :
+
+| | **Court terme** | **Long terme** |
+|---|---|---|
+| Portée | Une conversation (thread) | Tous les threads d'un utilisateur |
+| Contient | L'historique des messages, l'état | Faits durables, préférences, résumés |
+| Mécanisme LangGraph | `Checkpointer` | `Store` |
+| Clé d'accès | `thread_id` | `namespace` (ex: `("user", user_id)`) |
+| Analogie | La RAM de la conversation | Le disque dur de l'agent |
+
+- **Court terme (Phase 3)** : un `checkpointer` sauvegarde l'état du graphe à
+  chaque étape, indexé par `thread_id`. Reprendre une conversation = rejouer le
+  même `thread_id`.
+- **Long terme (Phase 5)** : un `store` clé/valeur (avec recherche sémantique
+  optionnelle) partagé entre threads, rangé par `namespace`.
+
+Implémentations interchangeables : en mémoire vive pour apprendre
+(`InMemorySaver`, `InMemoryStore`), puis backend persistant (SQLite/Postgres)
+pour la prod — **sans changer le code de l'agent**.
+
+## 4. La base de connaissance FAQ (RAG) — Phase 4
+
+Pipeline classique de Retrieval-Augmented Generation :
+
+```
+Documents FAQ ─► découpage (chunking) ─► embeddings ─► vector store
+                                                             │
+Question client ─► embedding ─► recherche similarité ◄───────┘
+                                     │
+                                     ▼
+                         chunks pertinents + question ─► LLM ─► réponse sourcée
+```
+
+Le vector store est lui aussi choisi par config (au début : local/en mémoire ;
+plus tard : Chroma, pgvector, Azure AI Search…).
+
+## 5. Orchestration : LangGraph — Phase 6
+
+L'agent est un **graphe d'états** (`StateGraph`) : des **nœuds** (étapes) reliés
+par des **arêtes** (transitions), certaines **conditionnelles** (routage). Cela
+rend le comportement explicite, débogable et traçable — contrairement à une
+simple chaîne linéaire.
+
+Au début (Phases 1–3) on utilisera le raccourci `create_react_agent` (agent
+préfabriqué) ; on « ouvrira le capot » avec un `StateGraph` custom en Phase 6.
+
+## 6. Configuration & agnosticisme projet
+
+- Toute la config passe par `config.py` (Pydantic Settings) qui lit `.env`.
+- Rien de spécifique à un projet n'est codé en dur : la FAQ, le provider, les
+  clés, les modèles… tout est injecté.
+- Brancher l'agent sur un nouveau projet = fournir une nouvelle FAQ + un `.env`.
+
+## 7. Observabilité : LangSmith — Phase 2
+
+Variables d'env `LANGSMITH_*` → chaque exécution (appels LLM, retrieval,
+décisions du graphe) est tracée automatiquement. Indispensable pour comprendre
+*pourquoi* l'agent a répondu ainsi.
+
+## 8. Décisions techniques
+
+| Sujet | Choix | Raison |
+|---|---|---|
+| Langage | Python 3.12 | Compat maximale de l'écosystème lang* |
+| Gestion projet | `uv` | Rapide, moderne, lockfile reproductible |
+| Config | Pydantic Settings | Typée, validée, lit `.env` |
+| Orchestration | LangGraph | Stateful, mémoire, human-in-the-loop natifs |
+| Abstraction LLM | `BaseChatModel` + factory | Cœur de l'agnosticisme |
