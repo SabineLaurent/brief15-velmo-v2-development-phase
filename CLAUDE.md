@@ -67,3 +67,17 @@ make check    # lint + tests
 - Vérifier la doc à jour (Context7) avant d'écrire du code lang* — ces API
   bougent vite.
 - Avancer **une phase à la fois** (voir ROADMAP.md), pas tout d'un coup.
+
+## Reprendre après un `/clear` (ou en nouvelle session)
+
+Ce fichier et la mémoire projet (`MEMORY.md`) sont rechargés automatiquement.
+Pour reprendre le fil exact :
+
+1. Lire `ROADMAP.md` → section **« Où on en est »** = état d'avancement à jour.
+2. Reprendre à la première phase non cochée.
+3. Respecter la méthode (voir `docs/methodologie.md`) : Context7 avant le code
+   lang*, pédagogie du POURQUOI, une phase à la fois, commit par phase.
+
+Prompt de reprise type à me donner :
+> « On reprend le projet agent de support. Lis CLAUDE.md, MEMORY.md et
+> ROADMAP.md, fais un point sur où on en est, puis reprenons à la prochaine phase. »
