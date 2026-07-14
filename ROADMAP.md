@@ -22,11 +22,12 @@ une base agnostique dès le départ.
 changeant juste `.env`. Un mini-script qui envoie un message et reçoit une réponse.
 **Fait :** run live validé contre Mistral (`mistral-large-latest`).
 
-## Phase 2 — Observabilité avec LangSmith 🚧
+## Phase 2 — Observabilité avec LangSmith ✅
 **Concept :** tracing, pourquoi c'est indispensable pour déboguer un agent.
 **Livrable :** chaque appel LLM est tracé et visible dans le dashboard LangSmith.
+**Fait :** tracing EU activé (endpoint region), runs enrichis (run_name/tags/metadata).
 
-## Phase 3 — Mémoire court terme (conversation) ⬜
+## Phase 3 — Mémoire court terme (conversation) 🚧
 **Concept :** LangGraph `checkpointer`, notion de `thread_id`, état persistant
 d'une conversation.
 **Livrable :** l'agent se souvient des messages précédents dans une même session.
@@ -65,4 +66,5 @@ utilisateur.
 ### Où on en est
 - [x] Phase 0 — structure & fondations
 - [x] Phase 1 — couche LLM agnostique (run live Mistral OK)
-- [ ] Phase 2 — LangSmith (prochaine étape)
+- [x] Phase 2 — observabilité LangSmith (tracing EU OK)
+- [ ] Phase 3 — mémoire court terme (prochaine étape)

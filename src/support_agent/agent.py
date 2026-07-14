@@ -29,7 +29,17 @@ def main() -> None:
         SystemMessage(SYSTEM_PROMPT),
         HumanMessage("Bonjour ! Présente-toi en une phrase en tant qu'agent de support."),
     ]
-    response = model.invoke(messages)
+
+    # Enrich the LangSmith trace so runs are searchable/filterable in the
+    # dashboard (by name, tags, or metadata). This is free observability hygiene.
+    response = model.invoke(
+        messages,
+        config={
+            "run_name": "support-demo",
+            "tags": ["phase-2", f"provider:{settings.llm_provider}"],
+            "metadata": {"model": settings.llm_model, "phase": "2-observability"},
+        },
+    )
     print(response.content)
 
 
