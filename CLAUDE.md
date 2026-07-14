@@ -59,6 +59,7 @@ make check    # lint + tests
 - « Comment c'est conçu techniquement ? » → `docs/architecture.md`
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `src/support_agent/llm/`
+- « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
 
 ## Ce que Claude doit faire
 

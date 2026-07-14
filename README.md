@@ -38,6 +38,7 @@ make run     # lance l'agent de support
 | [`ROADMAP.md`](ROADMAP.md) | Le tuto étape par étape — **commence ici** |
 | [`docs/spec.md`](docs/spec.md) | Le **QUOI** : périmètre fonctionnel, cas d'usage |
 | [`docs/architecture.md`](docs/architecture.md) | Le **COMMENT** : conception technique, mémoire, agnosticisme |
+| [`docs/methodologie.md`](docs/methodologie.md) | La méthode de travail (prompt réutilisable pour de futurs projets) |
 | [`CLAUDE.md`](CLAUDE.md) | Règles & conventions du projet |
 
 ## Statut
