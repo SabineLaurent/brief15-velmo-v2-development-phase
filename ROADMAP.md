@@ -16,12 +16,13 @@ une base agnostique dès le départ.
 
 ---
 
-## Phase 1 — La couche LLM agnostique + premier « hello agent » ⬜
+## Phase 1 — La couche LLM agnostique + premier « hello agent » ✅
 **Concept :** `BaseChatModel`, la factory provider, `init_chat_model`.
 **Livrable :** `llm/factory.py` — on parle à Mistral *ou* Groq *ou* Foundry en
 changeant juste `.env`. Un mini-script qui envoie un message et reçoit une réponse.
+**Fait :** run live validé contre Mistral (`mistral-large-latest`).
 
-## Phase 2 — Observabilité avec LangSmith ⬜
+## Phase 2 — Observabilité avec LangSmith 🚧
 **Concept :** tracing, pourquoi c'est indispensable pour déboguer un agent.
 **Livrable :** chaque appel LLM est tracé et visible dans le dashboard LangSmith.
 
@@ -62,5 +63,6 @@ utilisateur.
 ---
 
 ### Où on en est
-- [x] Phase 0 amorcée
-- [ ] Phase 1 — prochaine étape
+- [x] Phase 0 — structure & fondations
+- [x] Phase 1 — couche LLM agnostique (run live Mistral OK)
+- [ ] Phase 2 — LangSmith (prochaine étape)
