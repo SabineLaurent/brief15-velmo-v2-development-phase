@@ -43,5 +43,6 @@ make run     # lance l'agent de support
 
 ## Statut
 
-🚧 En construction — Phases 0 à 3 terminées (structure, LLM agnostique,
-observabilité LangSmith, mémoire court terme). Prochaine : Phase 4 (RAG / FAQ).
+🚧 En construction — Phases 0 à 4 terminées (structure, LLM agnostique,
+observabilité LangSmith, mémoire court terme, RAG / FAQ). Prochaine : Phase 5
+(mémoire long terme cross-session).

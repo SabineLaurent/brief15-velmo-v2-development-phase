@@ -8,9 +8,11 @@ dependencies = [
     # Cœur LangChain / LangGraph
     "langchain>=0.3",
     "langchain-mistralai>=1.1.6",
+    "langchain-text-splitters>=1.1.2",
     "langgraph>=1.0",
     "langsmith>=0.1",
     # Config typée depuis .env
+    "numpy>=2.4.6",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
     # NOTE : les intégrations providers (langchain-mistralai, langchain-groq,

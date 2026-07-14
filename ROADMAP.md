@@ -34,11 +34,14 @@ d'une conversation.
 **Fait :** `create_agent` + `InMemorySaver`, chat interactif, souvenir + isolation
 par `thread_id` vérifiés en live.
 
-## Phase 4 — Base de connaissance FAQ (RAG) 🚧
+## Phase 4 — Base de connaissance FAQ (RAG) ✅
 **Concept :** embeddings, vector store, retriever, chunking, retrieval tool.
 **Livrable :** l'agent répond en s'appuyant sur une FAQ ingérée, avec citations.
+**Fait :** FAQ d'exemple (4 fichiers), embeddings agnostiques, `InMemoryVectorStore`,
+outil `search_faq` (agentic RAG). Cas « dans la FAQ » (avec source) et « hors FAQ »
+(refus honnête) vérifiés en live.
 
-## Phase 5 — Mémoire long terme (cross-session) ⬜
+## Phase 5 — Mémoire long terme (cross-session) 🚧
 **Concept :** LangGraph `Store`, mémoire sémantique/épisodique, namespaces par
 utilisateur.
 **Livrable :** l'agent se souvient d'infos d'un utilisateur d'une session à l'autre.
@@ -70,4 +73,5 @@ utilisateur.
 - [x] Phase 1 — couche LLM agnostique (run live Mistral OK)
 - [x] Phase 2 — observabilité LangSmith (tracing EU OK)
 - [x] Phase 3 — mémoire court terme (souvenir + isolation vérifiés)
-- [ ] Phase 4 — base de connaissance FAQ / RAG (prochaine étape)
+- [x] Phase 4 — base de connaissance FAQ / RAG (hit + miss vérifiés)
+- [ ] Phase 5 — mémoire long terme cross-session (prochaine étape)
