@@ -19,23 +19,17 @@ API — on change de fournisseur sans toucher au code.
 ## Installation
 
 ```bash
-# 1. Récupère une version de Python compatible (gérée par uv)
-uv python install 3.12
-
-# 2. Installe les dépendances du projet
-uv sync
-
-# 3. Configure tes secrets
-cp .env.example .env
-#   → édite .env : choisis LLM_PROVIDER et renseigne la clé correspondante
+make setup   # installe les dépendances (uv) ET crée .env depuis .env.example
+#   → édite ensuite .env : choisis LLM_PROVIDER et renseigne la clé correspondante
 ```
+
+> Tape `make` (ou `make help`) pour voir toutes les commandes disponibles.
 
 ## Lancement
 
 ```bash
-uv run python -m support_agent.agent
+make run     # lance l'agent de support
 ```
-*(disponible à partir de la Phase 1 de la ROADMAP)*
 
 ## Documentation
 

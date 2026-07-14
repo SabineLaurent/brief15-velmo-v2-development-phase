@@ -43,10 +43,14 @@ docs/                # spec.md (le QUOI) + architecture.md (le COMMENT)
 
 ## Commandes
 
+Passe par le `Makefile` (porte d'entrée unique ; `make help` pour la liste) :
+
 ```bash
-uv sync                       # installe les dépendances
-uv run python -m support_agent.agent   # lance l'agent (une fois écrit)
-uv run pytest                 # tests (à venir)
+make setup    # uv sync + crée .env depuis .env.example
+make run      # lance l'agent (uv run python -m support_agent.agent)
+make test     # tests (pytest)
+make lint     # ruff check
+make check    # lint + tests
 ```
 
 ## Where things live (rappel rapide)
