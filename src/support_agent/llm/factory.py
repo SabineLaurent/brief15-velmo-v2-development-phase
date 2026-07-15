@@ -21,8 +21,7 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "groq": "groq",
     "google_genai": "google_genai",
     "openai": "openai",
-    "azure_openai": "azure_openai",
-    "azure_ai": "azure_ai",  # Azure AI Foundry (Azure AI Inference)
+    "azure_ai": "azure_ai",  # Azure AI Foundry native models (Azure AI Inference)
 }
 
 
@@ -56,8 +55,8 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
             model=settings.llm_model,
             model_provider="openai",
             temperature=settings.llm_temperature,
-            base_url=settings.custom_llm_base_url,
-            api_key=settings.custom_llm_api_key,
+            base_url=settings.llm_inference_endpoint,
+            api_key=settings.llm_inference_api_key,
         )
 
     # Case 3 — a fully custom, non-standard API. When you need it, implement a

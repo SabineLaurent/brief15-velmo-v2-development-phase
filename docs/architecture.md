@@ -41,7 +41,7 @@ config (.env)  ──►  llm/factory.py : get_chat_model()  ──►  BaseChat
 
 Trois cas gérés par la factory :
 
-1. **Provider standard** (mistral, groq, google_genai, azure_openai, azure_ai…)
+1. **Provider standard** (mistral, groq, google_genai, azure_ai…)
    → on délègue à `init_chat_model("provider:model")`, le sélecteur natif de
    LangChain. Rien à écrire de plus.
 2. **API OpenAI-compatible** (beaucoup d'APIs maison ou tierces le sont)
@@ -132,3 +132,11 @@ décisions du graphe) est tracée automatiquement. Indispensable pour comprendre
 | Config | Pydantic Settings | Typée, validée, lit `.env` |
 | Orchestration | LangGraph | Stateful, mémoire, human-in-the-loop natifs |
 | Abstraction LLM | `BaseChatModel` + factory | Cœur de l'agnosticisme |
+
+## 9. Principe de code à appliquer
+
+- clean code;
+- SoC;
+- DRY;
+- KISS et en tout cas pas d'over-engineering;
+- bonnes pratiques PEP.

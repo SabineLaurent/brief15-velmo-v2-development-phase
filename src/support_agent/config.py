@@ -32,9 +32,12 @@ class Settings(BaseSettings):
     llm_model: str = "mistral-large-latest"
     llm_temperature: float = 0.0
 
-    # --- OpenAI-compatible / custom endpoint (self-hosted or third-party API) ---
-    custom_llm_base_url: str | None = None
-    custom_llm_api_key: str | None = None
+    # --- OpenAI-compatible endpoint (Azure OpenAI API v1, vLLM, third-party...) ---
+    # The single generic path for any endpoint speaking the OpenAI API: its URL
+    # and key. Used only by provider "openai_compatible" (hosted providers like
+    # mistral/groq bring their own MISTRAL_API_KEY / GROQ_API_KEY instead).
+    llm_inference_endpoint: str | None = None
+    llm_inference_api_key: str | None = None
 
     # --- Embeddings (Phase 4, RAG) ---
     embeddings_provider: str = "mistral"
