@@ -5,6 +5,10 @@ Chaque phase a un **objectif d'apprentissage** (le concept lang* qu'on découvre
 et un **livrable** (ce qui marche à la fin). On ne passe à la phase suivante
 qu'une fois la précédente comprise et fonctionnelle.
 
+> 🎯 La ROADMAP est le **chemin**. Pour la **destination** (à quoi ressemble le
+> produit fini, prod-grade 2026, et les critères pas encore couverts par une
+> phase), voir [`docs/perimetre-final.md`](docs/perimetre-final.md).
+
 Légende : ✅ fait · 🚧 en cours · ⬜ à venir
 
 ---

@@ -58,6 +58,7 @@ make check    # lint + tests
 - « Quel est le besoin métier ? » → `docs/spec.md`
 - « Comment c'est conçu techniquement ? » → `docs/architecture.md`
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md`
+- « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `src/support_agent/llm/`
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
 
