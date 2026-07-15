@@ -60,6 +60,7 @@ make check    # lint + tests
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md`
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `src/support_agent/llm/`
+- « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
 
 ## Ce que Claude doit faire
