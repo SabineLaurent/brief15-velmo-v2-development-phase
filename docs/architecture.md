@@ -102,8 +102,13 @@ par des **arêtes** (transitions), certaines **conditionnelles** (routage). Cela
 rend le comportement explicite, débogable et traçable — contrairement à une
 simple chaîne linéaire.
 
-Au début (Phases 1–3) on utilisera le raccourci `create_react_agent` (agent
-préfabriqué) ; on « ouvrira le capot » avec un `StateGraph` custom en Phase 6.
+Au début (Phases 1–5) on a utilisé le raccourci `create_agent` (agent
+préfabriqué) ; depuis la Phase 6 on a « ouvert le capot » avec un `StateGraph`
+custom (package `src/support_agent/graph/`) : un nœud `router` classe l'intention
+(LLM à sortie structurée), puis une arête conditionnelle aiguille vers `answer`
+(petit talk), `support` (boucle ReAct explicite `model` ⇄ `ToolNode` : FAQ +
+mémoire) ou `escalate` (handoff humain — remplacé par un vrai `interrupt` en
+Phase 7).
 
 ## 6. Configuration & agnosticisme projet
 

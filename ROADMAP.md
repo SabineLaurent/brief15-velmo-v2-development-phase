@@ -50,9 +50,16 @@ outils agentiques `save_memory`/`search_memories`, namespace `("memories", user_
 `create_agent(store=..., context_schema=AgentContext)`. Recall cross-session
 (thread A → thread B) et isolation par `user_id` vérifiés en live.
 
-## Phase 6 — Orchestration LangGraph (le vrai graphe) ⬜
+## Phase 6 — Orchestration LangGraph (le vrai graphe) ✅
 **Concept :** `StateGraph`, nœuds, arêtes conditionnelles, routage.
 **Livrable :** un graphe explicite qui décide : répondre / chercher FAQ / escalader.
+**Fait :** `create_agent` remplacé par un `StateGraph` custom (package `graph/` :
+`state.py` / `nodes.py` / `builder.py`). Nœud `router` (LLM à sortie structurée
+`with_structured_output`) → arête conditionnelle vers 3 branches : `answer`
+(petit talk), `support` (boucle ReAct manuelle `model` ⇄ `ToolNode` via
+`tools_condition` : FAQ + mémoire), `escalate` (handoff — placeholder Phase 7).
+Mémoire court/long terme conservée (`compile(checkpointer, store)` +
+`context_schema`). Les 3 routages + le rappel mémoire cross-thread vérifiés en live.
 
 ## Phase 7 — Escalade humaine (human-in-the-loop) ⬜
 **Concept :** `interrupt`, points de pause, reprise d'exécution.
@@ -79,4 +86,5 @@ outils agentiques `save_memory`/`search_memories`, namespace `("memories", user_
 - [x] Phase 3 — mémoire court terme (souvenir + isolation vérifiés)
 - [x] Phase 4 — base de connaissance FAQ / RAG (hit + miss vérifiés)
 - [x] Phase 5 — mémoire long terme cross-session (recall + isolation vérifiés)
-- [ ] Phase 6 — orchestration LangGraph / StateGraph (prochaine étape)
+- [x] Phase 6 — orchestration LangGraph / StateGraph (routage + ReAct manuel vérifiés)
+- [ ] Phase 7 — escalade humaine / human-in-the-loop (prochaine étape)
