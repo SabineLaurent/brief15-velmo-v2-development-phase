@@ -75,9 +75,20 @@ et reprend via `Command(resume=<réponse>)`, qui redevient le message client. N�
 gardé idempotent (lecture seule avant l'`interrupt`, car le nœud ré-exécute à la
 reprise). Pause + reprise vérifiées en live (branche escalade → réponse humaine).
 
-## Phase 8 — Outils & actions ⬜
+## Phase 8 — Outils & actions ✅
 **Concept :** tool calling, définition d'outils métier agnostiques.
 **Livrable :** l'agent peut agir (ex : statut de commande, création de ticket).
+**Fait :** nouveau package `actions/` bâti comme la factory LLM — un **port**
+`SupportBackend` (Protocol) + un adaptateur de démo `InMemorySupportBackend`,
+pour rester agnostique au SI métier (brancher le vrai système = écrire un
+adaptateur, sans toucher aux outils). Deux outils d'**action** (`actions/tools.py`)
+branchés sur la branche `support` à côté de FAQ + mémoire : `get_order_status`
+(lecture d'une commande) et `create_ticket` (effet de bord ; `user_id` pris dans
+le contexte runtime, jamais du LLM — même isolation que la mémoire). Prompt du
+routeur affûté pour séparer `create_ticket` (suivi asynchrone → branche support)
+de l'escalade Phase 7 (handoff synchrone → `interrupt`). Les 3 cas vérifiés en
+live : statut commande, ouverture de ticket (conversation continue), et demande
+humaine explicite (escalade Phase 7 non régressée).
 
 ## Phase 9 — Évaluation & qualité ⬜
 **Concept :** datasets LangSmith, evaluators, tests de non-régression.
@@ -98,4 +109,5 @@ reprise). Pause + reprise vérifiées en live (branche escalade → réponse hum
 - [x] Phase 5 — mémoire long terme cross-session (recall + isolation vérifiés)
 - [x] Phase 6 — orchestration LangGraph / StateGraph (routage + ReAct manuel vérifiés)
 - [x] Phase 7 — escalade humaine / human-in-the-loop (pause + reprise vérifiées)
-- [ ] Phase 8 — outils & actions (prochaine étape)
+- [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
+- [ ] Phase 9 — évaluation & qualité (prochaine étape)

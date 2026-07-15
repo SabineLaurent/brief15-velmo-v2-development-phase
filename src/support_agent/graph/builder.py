@@ -25,6 +25,7 @@ from support_agent.graph.nodes import (
     make_support_model,
     route_from_state,
 )
+from support_agent.actions import build_action_tools, get_backend
 from support_agent.graph.state import SupportState
 from support_agent.knowledge import build_faq_tool, build_vector_store
 from support_agent.llm import get_chat_model
@@ -42,9 +43,15 @@ def build_support_graph() -> CompiledStateGraph:
     checkpointer = get_checkpointer()  # short-term: this conversation (thread_id)
     store = get_store()  # long-term: this customer (user_id)
 
-    # Tools available on the SUPPORT branch: FAQ retrieval + long-term memory.
+    # Tools available on the SUPPORT branch: FAQ retrieval (read), long-term
+    # memory (read/write), and business actions (order lookup + ticket creation).
     vector_store = build_vector_store()
-    tools = [build_faq_tool(vector_store), *build_memory_tools()]
+    backend = get_backend()  # the business port: swap the adapter, not the tools
+    tools = [
+        build_faq_tool(vector_store),
+        *build_memory_tools(),
+        *build_action_tools(backend),
+    ]
 
     # `context_schema` lets nodes and tools read the runtime `user_id`.
     builder = StateGraph(SupportState, context_schema=AgentContext)
