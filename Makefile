@@ -6,7 +6,7 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run test lint format check clean
+.PHONY: help setup install run eval test lint format check clean
 
 help: ## Affiche cette aide
 	@echo "Agnostic Support AI Agent — commandes disponibles :"
@@ -23,6 +23,9 @@ install: ## Installe/synchronise les dépendances (uv sync)
 
 run: ## Lance l'agent de support
 	$(UV) run python -m support_agent.agent
+
+eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
+	$(UV) run python -m support_agent.eval.run
 
 test: ## Lance les tests (pytest)
 	$(UV) run pytest

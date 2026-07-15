@@ -90,9 +90,22 @@ de l'escalade Phase 7 (handoff synchrone → `interrupt`). Les 3 cas vérifiés 
 live : statut commande, ouverture de ticket (conversation continue), et demande
 humaine explicite (escalade Phase 7 non régressée).
 
-## Phase 9 — Évaluation & qualité ⬜
+## Phase 9 — Évaluation & qualité ✅
 **Concept :** datasets LangSmith, evaluators, tests de non-régression.
 **Livrable :** un jeu d'évaluation qui note l'agent automatiquement.
+**Fait :** nouveau package `eval/` — les cas de test vivent **en code**
+(`dataset.py`, source de vérité versionnée) et alimentent deux runners : le run
+**LangSmith** (`run.py` : `target(inputs)` invoque le vrai graphe → `route` /
+`answer` / `tool_output`, puis `client.evaluate(...)` sur EU, expérience nommée
+par provider/model pour comparer les LLM) et un **gate pytest** local
+(`tests/test_eval.py`, intégration, `skipif` si aucune clé provider). 5
+evaluators **déterministes** (`evaluators.py`) : `route_matches` (match exact de
+branche, le signal fort), `cites_source`, `honest_refusal`, `mentions_order`,
+`no_cross_user_leak` (inspecte la sortie outil, robuste à la langue). Un
+evaluator renvoie `None` = non applicable (skip pytest) ; adapté pour LangSmith
+qui refuse les valeurs falsy (`_for_langsmith` → `{"results": []}`). Juge
+LLM-as-judge volontairement remis à plus tard. Cible `make eval`. Vérifié en
+live : 6/6 cas passent en pytest, expérience LangSmith EU sans erreur.
 
 ## Phase 10 — Exposition & déploiement ⬜
 **Concept :** servir l'agent (API/LangGraph Server), configuration par environnement.
@@ -110,4 +123,5 @@ humaine explicite (escalade Phase 7 non régressée).
 - [x] Phase 6 — orchestration LangGraph / StateGraph (routage + ReAct manuel vérifiés)
 - [x] Phase 7 — escalade humaine / human-in-the-loop (pause + reprise vérifiées)
 - [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
-- [ ] Phase 9 — évaluation & qualité (prochaine étape)
+- [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
+- [ ] Phase 10 — exposition & déploiement (prochaine étape)
