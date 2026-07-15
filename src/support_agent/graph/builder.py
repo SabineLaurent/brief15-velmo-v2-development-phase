@@ -5,7 +5,7 @@ named nodes and conditional edges we control ourselves.
 
     START ─► router ─┬─(answer)──► answer ─────────────────► END
                      ├─(support)─► model ⇄ tools ─(ReAct)──► END
-                     └─(escalate)► escalate ────────────────► END
+                     └─(escalate)► escalate ─(interrupt ⏸)─► END
 
 Memory is preserved exactly as before: the checkpointer keeps the conversation
 (short term), the store keeps the customer (long term), and `context_schema`

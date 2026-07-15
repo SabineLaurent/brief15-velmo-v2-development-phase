@@ -6,7 +6,7 @@ We deliberately "open the hood" of the prebuilt `create_agent` here:
     answer   -> small talk / greetings: a plain LLM reply, no tools
     model    -> the SUPPORT branch: LLM bound with tools (FAQ + memory)
     tools    -> executes the tool calls (ToolNode), then loops back to `model`
-    escalate -> hands off to a human (placeholder; Phase 7 = real interrupt)
+    escalate -> pauses the graph and hands off to a human (Phase 7: `interrupt`)
 
 Each node is a small function `(state) -> state update`. Making them explicit is
 the whole point: the routing and the ReAct loop become objects we can read, draw
@@ -18,9 +18,10 @@ from __future__ import annotations
 from typing import Callable
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
+from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from support_agent.graph.state import Route, SupportState
@@ -124,18 +125,37 @@ def make_support_model(
     return support_model
 
 
-# --- Escalate (human handoff placeholder) ----------------------------------
+# --- Escalate (human-in-the-loop handoff) ----------------------------------
 
 
 def escalate(state: SupportState, runtime: Runtime[AgentContext]) -> dict:
-    """Hand the conversation off to a human.
+    """Pause the graph and hand the conversation off to a human agent.
 
-    Phase 6 placeholder: we just emit a transfer message. Phase 7 will replace
-    this with a real human-in-the-loop `interrupt()` that pauses the graph.
+    This is the human-in-the-loop node. `interrupt()` checkpoints the current
+    state, raises a `GraphInterrupt`, and surfaces `payload` to the caller (via
+    `result["__interrupt__"]`) — that payload is what the human operator sees.
+    The graph stays paused until someone resumes it with `Command(resume=<reply>)`;
+    at that point `interrupt()` returns that reply and we deliver it to the customer.
+
+    IMPORTANT: on resume the whole node re-executes from the top, so everything
+    BEFORE `interrupt()` must be side-effect free (here: just reads). See
+    LangGraph's `interrupt` docs — the node reruns with the resume value in scope.
     """
     user_id = runtime.context.user_id
-    message = (
-        "Je transfère votre demande à un conseiller humain, qui reprendra le fil "
-        f"de cette conversation (référence client : {user_id}). Merci de patienter."
+    last_user_message = next(
+        (m.content for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+        "",
     )
-    return {"messages": [AIMessage(content=message)]}
+
+    # Pause here and wait for a human. The returned value is whatever the human
+    # operator sent through `Command(resume=...)`.
+    human_reply = interrupt(
+        {
+            "reason": "handoff_to_human",
+            "user_id": user_id,
+            "customer_message": last_user_message,
+        }
+    )
+
+    # Deliver the human agent's reply to the customer as the agent's message.
+    return {"messages": [AIMessage(content=human_reply)]}

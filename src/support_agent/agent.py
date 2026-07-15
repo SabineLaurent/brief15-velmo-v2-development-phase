@@ -1,12 +1,18 @@
-"""Phase 6: a support agent orchestrated by an explicit LangGraph `StateGraph`.
+"""Phase 7: the support agent with human-in-the-loop escalation.
 
-We stop using the prebuilt `create_agent` and "open the hood": a router node
-classifies the user's intent, then a conditional edge dispatches to one of three
-branches (see `support_agent.graph`):
+Built on the Phase 6 `StateGraph`: a router node classifies the user's intent,
+then a conditional edge dispatches to one of three branches (see
+`support_agent.graph`):
 
     router  ->  answer    (small talk: plain LLM reply)
             ->  support   (FAQ + memory, explicit ReAct loop)
-            ->  escalate  (human handoff; real interrupt comes in Phase 7)
+            ->  escalate  (human-in-the-loop: `interrupt()` pauses the graph)
+
+Phase 7 adds the escalation flow: when the graph routes to `escalate`, it calls
+`interrupt()` and pauses. `invoke` then returns a result carrying `__interrupt__`
+instead of a final answer. We surface the case to a human operator, read their
+reply, and resume the graph with `Command(resume=<reply>)` — which flows back to
+the customer as the agent's message.
 
 Memory is unchanged from Phase 5:
 
@@ -23,6 +29,7 @@ from __future__ import annotations
 import uuid
 
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command
 
 from support_agent.config import get_settings
 from support_agent.graph import build_support_graph
@@ -62,16 +69,36 @@ def main() -> None:
         if user_input.lower() in {"quit", "exit", "q"}:
             break
 
+        # Same context + config are reused on resume: the runtime `user_id` and,
+        # crucially, the `thread_id` that lets the checkpointer find the paused run.
+        context = AgentContext(user_id=user_id)  # long-term memory key
+        config = {
+            "configurable": {"thread_id": thread_id},  # short-term memory key
+            "run_name": "support-chat",
+            "tags": ["phase-7", f"provider:{settings.llm_provider}"],
+            "metadata": {"model": settings.llm_model, "phase": "7-human-in-the-loop"},
+        }
+
         result = agent.invoke(
             {"messages": [{"role": "user", "content": user_input}]},
-            context=AgentContext(user_id=user_id),  # long-term memory key
-            config={
-                "configurable": {"thread_id": thread_id},  # short-term memory key
-                "run_name": "support-chat",
-                "tags": ["phase-6", f"provider:{settings.llm_provider}"],
-                "metadata": {"model": settings.llm_model, "phase": "6-orchestration"},
-            },
+            context=context,
+            config=config,
         )
+
+        # Human-in-the-loop: while the graph is paused on an `escalate` interrupt,
+        # play the human operator — read the case, type a reply, resume the graph.
+        while result.get("__interrupt__"):
+            payload = result["__interrupt__"][0].value
+            print("\n--- ESCALADE : transfert à un conseiller humain ---")
+            print(f"    client  : {payload['user_id']}")
+            print(f"    demande : {payload['customer_message']}")
+            operator_reply = input("Conseiller > ").strip()
+            result = agent.invoke(
+                Command(resume=operator_reply),
+                context=context,
+                config=config,
+            )
+
         reply = result["messages"][-1].content
         print(f"Agent  > {reply}\n")
 

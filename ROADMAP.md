@@ -65,9 +65,15 @@ outils agentiques `save_memory`/`search_memories`, namespace `("memories", user_
 Mémoire court/long terme conservée (`compile(checkpointer, store)` +
 `context_schema`). Les 3 routages + le rappel mémoire cross-thread vérifiés en live.
 
-## Phase 7 — Escalade humaine (human-in-the-loop) ⬜
+## Phase 7 — Escalade humaine (human-in-the-loop) ✅
 **Concept :** `interrupt`, points de pause, reprise d'exécution.
 **Livrable :** l'agent transfère à un humain les cas qu'il ne sait pas traiter.
+**Fait :** nœud `escalate` réécrit avec un vrai `interrupt()` (payload `reason` /
+`user_id` / `customer_message` remonté à l'opérateur). Le graphe se met en pause
+(checkpointer) et `invoke` renvoie `__interrupt__` ; `agent.py` joue le conseiller
+et reprend via `Command(resume=<réponse>)`, qui redevient le message client. Nœud
+gardé idempotent (lecture seule avant l'`interrupt`, car le nœud ré-exécute à la
+reprise). Pause + reprise vérifiées en live (branche escalade → réponse humaine).
 
 ## Phase 8 — Outils & actions ⬜
 **Concept :** tool calling, définition d'outils métier agnostiques.
@@ -91,4 +97,5 @@ Mémoire court/long terme conservée (`compile(checkpointer, store)` +
 - [x] Phase 4 — base de connaissance FAQ / RAG (hit + miss vérifiés)
 - [x] Phase 5 — mémoire long terme cross-session (recall + isolation vérifiés)
 - [x] Phase 6 — orchestration LangGraph / StateGraph (routage + ReAct manuel vérifiés)
-- [ ] Phase 7 — escalade humaine / human-in-the-loop (prochaine étape)
+- [x] Phase 7 — escalade humaine / human-in-the-loop (pause + reprise vérifiées)
+- [ ] Phase 8 — outils & actions (prochaine étape)
