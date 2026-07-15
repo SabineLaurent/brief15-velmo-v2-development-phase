@@ -18,7 +18,7 @@ from __future__ import annotations
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 
-from support_agent.actions.backend import OrderStatus, SupportBackend
+from support_agent.actions.backend import OrderStatus, SupportBackend, Ticket
 from support_agent.memory import AgentContext
 
 
@@ -31,6 +31,14 @@ def _format_order(order: OrderStatus) -> str:
         lines.append(f"Tracking number: {order.tracking_number}")
     if order.estimated_delivery:
         lines.append(f"Estimated delivery: {order.estimated_delivery}")
+    return "\n".join(lines)
+
+
+def _format_tickets(tickets: list[Ticket]) -> str:
+    """Render a customer's ticket history as a compact list for the LLM."""
+    lines = [
+        f"- {t.ticket_id} [{t.status}] {t.subject}" for t in tickets
+    ]
     return "\n".join(lines)
 
 
@@ -83,4 +91,21 @@ def build_action_tools(backend: SupportBackend) -> list[BaseTool]:
             f"(subject: {ticket.subject}). Status: {ticket.status}."
         )
 
-    return [get_order_status, create_ticket]
+    @tool
+    def list_customer_tickets(runtime: ToolRuntime[AgentContext]) -> str:
+        """List the current customer's past support tickets (their history).
+
+        Use this to check whether an issue has happened before (recurrence): when
+        the customer reports a problem that may be recurring, or refers to a past
+        request, look up their tickets first so you can acknowledge the history
+        instead of treating it as brand new. Takes no argument — the customer is
+        identified from the trusted runtime context.
+        """
+        # user_id comes from the trusted runtime context, never from the model.
+        user_id = runtime.context.user_id
+        tickets = backend.list_tickets(user_id)
+        if not tickets:
+            return "This customer has no previous support tickets."
+        return "Previous tickets for this customer:\n" + _format_tickets(tickets)
+
+    return [get_order_status, create_ticket, list_customer_tickets]

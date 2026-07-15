@@ -74,6 +74,15 @@ class SupportBackend(Protocol):
         """
         ...
 
+    def list_tickets(self, user_id: str) -> list[Ticket]:
+        """Return this user's support tickets (their history), most recent last.
+
+        Scoped to `user_id` like every other method: a customer only ever sees
+        their own tickets. This is the authoritative way to tell whether an issue
+        has already happened before (recurrence), rather than relying on memory.
+        """
+        ...
+
 
 # --- The demo adapter: an in-memory fake backend ---------------------------
 
@@ -93,6 +102,8 @@ class InMemorySupportBackend:
     def __post_init__(self) -> None:
         if not self.orders:
             self.orders = _seed_orders()
+        if not self.tickets:
+            self.tickets = _seed_tickets()
 
     def get_order_status(self, order_id: str, user_id: str) -> OrderStatus | None:
         # Normalise so "cmd-1001", "CMD-1001" and stray spaces all match.
@@ -115,6 +126,10 @@ class InMemorySupportBackend:
         )
         self.tickets.append(ticket)
         return ticket
+
+    def list_tickets(self, user_id: str) -> list[Ticket]:
+        # Ownership scoping, like every other method: only this user's tickets.
+        return [t for t in self.tickets if t.user_id == user_id]
 
 
 def _ticket_id(user_id: str, subject: str, body: str) -> str:
@@ -151,6 +166,34 @@ def _seed_orders() -> dict[str, OrderStatus]:
         OrderStatus(order_id="CMD-1003", owner_id="other-user", status="delivered"),
     ]
     return {order.order_id: order for order in orders}
+
+
+def _seed_tickets() -> list[Ticket]:
+    """A past ticket so `list_tickets` can demonstrate recurrence detection.
+
+    demo-user already had a delivery problem (resolved) on an earlier order:
+    the agent can now discover, deterministically, that this is not the first
+    time — instead of guessing from memory.
+    """
+    return [
+        _seed_ticket(
+            user_id="demo-user",
+            subject="Colis marqué livré mais non reçu (CMD-0990)",
+            body="Le suivi indiquait 'livré' mais le client n'a rien reçu.",
+            status="resolved",
+        ),
+    ]
+
+
+def _seed_ticket(user_id: str, subject: str, body: str, status: str) -> Ticket:
+    """Build a seeded ticket with the same content-derived id as create_ticket."""
+    return Ticket(
+        ticket_id=_ticket_id(user_id, subject, body),
+        user_id=user_id,
+        subject=subject,
+        body=body,
+        status=status,
+    )
 
 
 # One shared demo backend per process, like `get_store()` for memory. A real app

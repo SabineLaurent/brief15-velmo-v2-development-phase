@@ -111,6 +111,10 @@ SUPPORT_SYSTEM_PROMPT = (
     "request but it does not need to pause the conversation. Only take an action "
     "when the customer actually asks for it, and confirm the result (order status "
     "or ticket number) back to them. "
+    "When the customer reports a problem that might be recurring (e.g. another "
+    "delivery issue), call `list_customer_tickets` first to check their history: "
+    "if a similar past ticket exists, acknowledge that it happened before instead "
+    "of treating it as new. "
     "Answer concisely, in the user's language, and use both the conversation "
     "history and your memories to stay consistent."
 )

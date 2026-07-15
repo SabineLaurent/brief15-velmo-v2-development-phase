@@ -37,16 +37,22 @@ Ces points font partie du périmètre final mais ne sont pas encore des étapes
 dédiées dans la ROADMAP. On les garde au radar pour les traiter au bon moment,
 plutôt que de les découvrir en production.
 
-1. **Persistance durable**
+1. **Persistance durable** — ✅ *traité (SQLite ; Postgres en drop-in documenté)*
    Remplacer `InMemory*` par un backend durable (SQLite / Postgres) via les
    factories `get_checkpointer()` / `get_store()` — le « one-line change » prévu
    dans leurs docstrings. Sans ça : redémarrage du process = amnésie totale
    (mémoire court **et** long terme perdues).
+   → Fait : switch unique `PERSISTENCE_BACKEND` (`memory` | `sqlite`), store
+   durable avec index sémantique. Survie à un redémarrage vérifiée en live
+   (inter-process). Postgres = `NotImplementedError` documenté (serveur requis).
 
-2. **Robustesse & gestion d'erreurs**
+2. **Robustesse & gestion d'erreurs** — 🚧 *partiel (retries/timeout au niveau factory)*
    Déjà rencontré en vrai avec les `429 Rate limit` de Mistral. Un agent pro gère
    proprement : retries avec backoff, timeouts, fallback provider — pas un
    `try/except` de script de test.
+   → Fait : `LLM_MAX_RETRIES` + `LLM_TIMEOUT` forwardés à tous les providers via
+   la factory (backoff auto). Restent à faire : **fallback provider** et une
+   gestion d'erreurs explicite dans les nœuds du graphe.
 
 3. **Sécurité & guardrails**
    Prompt-injection, filtrage/masquage des données personnelles (PII), limites
