@@ -39,9 +39,22 @@ class Settings(BaseSettings):
     llm_inference_endpoint: str | None = None
     llm_inference_api_key: str | None = None
 
+    # --- Robustness (retries / timeout, applied in the LLM factory) ---
+    # Passed through to the provider so a transient 429 / network blip is retried
+    # instead of crashing the turn. `llm_timeout` is seconds (None = provider default).
+    llm_max_retries: int = 3
+    llm_timeout: float | None = None
+
     # --- Embeddings (Phase 4, RAG) ---
     embeddings_provider: str = "mistral"
     embeddings_model: str = "mistral-embed"
+
+    # --- Persistence (durable memory) ---
+    # One switch drives BOTH the checkpointer (short term) and the store (long
+    # term), same agnostic spirit as the LLM provider. "memory" = in-RAM (lost on
+    # restart, fine for demos); "sqlite" = durable on disk (survives a restart).
+    persistence_backend: str = "memory"
+    sqlite_path: str = "./data/agent_state.sqlite3"
 
     # --- Observability, LangSmith (Phase 2) ---
     langsmith_tracing: bool = False

@@ -39,6 +39,15 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
     settings = settings or get_settings()
     provider = settings.llm_provider.lower()
 
+    # Robustness knobs forwarded to every provider so a transient 429 / network
+    # blip is retried with backoff instead of crashing the turn. These are the
+    # widely-supported standard kwargs; `timeout` is omitted when unset so we
+    # never pass None to a provider that dislikes it. NOTE: exact param support
+    # varies slightly by provider — this is the pragmatic agnostic default.
+    robustness: dict[str, object] = {"max_retries": settings.llm_max_retries}
+    if settings.llm_timeout is not None:
+        robustness["timeout"] = settings.llm_timeout
+
     # Case 1 — first-class provider: delegate to init_chat_model. Credentials are
     # auto-discovered from standard env vars (MISTRAL_API_KEY, GROQ_API_KEY, ...).
     if provider in _PROVIDER_ALIASES:
@@ -46,6 +55,7 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
             model=settings.llm_model,
             model_provider=_PROVIDER_ALIASES[provider],
             temperature=settings.llm_temperature,
+            **robustness,
         )
 
     # Case 2 — any OpenAI-compatible endpoint (self-hosted vLLM/Ollama, a third
@@ -57,6 +67,7 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
             temperature=settings.llm_temperature,
             base_url=settings.llm_inference_endpoint,
             api_key=settings.llm_inference_api_key,
+            **robustness,
         )
 
     # Case 3 — a fully custom, non-standard API. When you need it, implement a

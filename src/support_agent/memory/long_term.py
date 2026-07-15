@@ -23,7 +23,9 @@ from dataclasses import dataclass
 from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 
+from support_agent.config import Settings, get_settings
 from support_agent.llm.embeddings import get_embeddings
+from support_agent.memory.sqlite_conn import open_sqlite_connection
 
 
 @dataclass
@@ -37,18 +39,53 @@ class AgentContext:
     user_id: str
 
 
-def get_store() -> BaseStore:
+def get_store(settings: Settings | None = None) -> BaseStore:
     """Return the configured long-term memory store.
 
-    Today: in-memory, with *semantic search* over stored memories — we reuse the
-    same agnostic embeddings as the FAQ (Phase 4), so recall works by meaning,
-    not exact keywords. Later we can select a persistent backend from config
-    without touching any calling code.
+    The store always keeps *semantic search* over memories — we reuse the same
+    agnostic embeddings as the FAQ (Phase 4), so recall works by meaning, not
+    exact keywords. The storage backend is a config choice (`PERSISTENCE_BACKEND`),
+    exactly like the checkpointer:
+
+        "memory"  ->  InMemoryStore: lost when the process exits
+        "sqlite"  ->  SqliteStore:   durable on disk, survives a restart
+
+    Args:
+        settings: Optional settings override (handy for tests).
     """
-    embeddings = get_embeddings()
+    settings = settings or get_settings()
+    embeddings = get_embeddings(settings)
     # Probe once to learn the vector size instead of hard-coding a per-model
     # dimension — keeps the store provider-agnostic like everything else.
     dims = len(embeddings.embed_query("probe"))
-    return InMemoryStore(
-        index={"embed": embeddings, "dims": dims, "fields": ["text"]},
+    index = {"embed": embeddings, "dims": dims, "fields": ["text"]}
+
+    backend = settings.persistence_backend.lower()
+
+    if backend == "memory":
+        return InMemoryStore(index=index)
+
+    if backend == "sqlite":
+        from langgraph.store.sqlite import SqliteStore
+
+        # Same self-managed connection as the checkpointer; `setup()` creates the
+        # store tables (and the vector index, via the bundled sqlite-vec) on first
+        # use. The semantic `index` config is identical to the in-memory store.
+        store = SqliteStore(open_sqlite_connection(settings.sqlite_path), index=index)
+        store.setup()
+        return store
+
+    if backend == "postgres":
+        # Production drop-in: `pip install langgraph-checkpoint-postgres`, then
+        #   from langgraph.store.postgres import PostgresStore
+        #   store = PostgresStore.from_conn_string(settings.database_url) / pool
+        #   store.setup()
+        raise NotImplementedError(
+            "Postgres store not wired yet. Add a DATABASE_URL setting and build a "
+            "PostgresStore here (see docstring)."
+        )
+
+    raise ValueError(
+        f"Unknown PERSISTENCE_BACKEND={settings.persistence_backend!r}. "
+        f"Expected one of: memory, sqlite, postgres."
     )
