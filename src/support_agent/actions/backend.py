@@ -14,7 +14,7 @@ tools or the graph, exactly like swapping an LLM provider via `.env`.
 
 from __future__ import annotations
 
-import uuid
+import hashlib
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
@@ -26,6 +26,7 @@ class OrderStatus:
     """The status of a customer order, as returned by the backend."""
 
     order_id: str
+    owner_id: str  # the user_id this order belongs to (for authorization)
     status: str  # e.g. "shipped", "processing", "delivered", "cancelled"
     carrier: str | None = None
     tracking_number: str | None = None
@@ -55,12 +56,22 @@ class SupportBackend(Protocol):
     (order service, Zendesk/Jira, ...) without the tools ever knowing.
     """
 
-    def get_order_status(self, order_id: str) -> OrderStatus | None:
-        """Return the status of an order, or None if it does not exist."""
+    def get_order_status(self, order_id: str, user_id: str) -> OrderStatus | None:
+        """Return the order IF it belongs to `user_id`, else None.
+
+        Authorization lives here, in the backend: the tool passes the trusted
+        `user_id` and the adapter refuses to reveal another customer's order.
+        Returning None for both "unknown" and "not yours" avoids leaking whether
+        an order id exists (no enumeration).
+        """
         ...
 
     def create_ticket(self, user_id: str, subject: str, body: str) -> Ticket:
-        """Open a support ticket for a user and return the created ticket."""
+        """Open a support ticket for a user and return the created ticket.
+
+        Must be idempotent: calling it twice with the same (user_id, subject,
+        body) returns the same ticket instead of opening a duplicate.
+        """
         ...
 
 
@@ -83,26 +94,49 @@ class InMemorySupportBackend:
         if not self.orders:
             self.orders = _seed_orders()
 
-    def get_order_status(self, order_id: str) -> OrderStatus | None:
+    def get_order_status(self, order_id: str, user_id: str) -> OrderStatus | None:
         # Normalise so "cmd-1001", "CMD-1001" and stray spaces all match.
-        return self.orders.get(order_id.strip().upper())
+        order = self.orders.get(order_id.strip().upper())
+        # Ownership check: never reveal an order that belongs to someone else.
+        if order is None or order.owner_id != user_id:
+            return None
+        return order
 
     def create_ticket(self, user_id: str, subject: str, body: str) -> Ticket:
+        # Deterministic id from the request content => idempotent: a retry with
+        # the same (user_id, subject, body) yields the same id, so we return the
+        # existing ticket instead of opening a duplicate.
+        ticket_id = _ticket_id(user_id, subject, body)
+        for existing in self.tickets:
+            if existing.ticket_id == ticket_id:
+                return existing
         ticket = Ticket(
-            ticket_id=f"TICKET-{uuid.uuid4().hex[:8].upper()}",
-            user_id=user_id,
-            subject=subject,
-            body=body,
+            ticket_id=ticket_id, user_id=user_id, subject=subject, body=body
         )
         self.tickets.append(ticket)
         return ticket
 
 
+def _ticket_id(user_id: str, subject: str, body: str) -> str:
+    """A deterministic ticket id derived from the request content (idempotency).
+
+    The NUL separators keep the fields unambiguous so that distinct requests
+    cannot collide by concatenation (e.g. subject "ab"+body "c" vs "a"+"bc").
+    """
+    digest = hashlib.sha1(f"{user_id}\x00{subject}\x00{body}".encode()).hexdigest()
+    return f"TICKET-{digest[:8].upper()}"
+
+
 def _seed_orders() -> dict[str, OrderStatus]:
-    """A few example orders so `get_order_status` has data to return."""
+    """A few example orders so `get_order_status` has data to return.
+
+    CMD-1003 belongs to another customer on purpose: it lets the demo show the
+    ownership check refusing to reveal someone else's order.
+    """
     orders = [
         OrderStatus(
             order_id="CMD-1001",
+            owner_id="demo-user",
             status="shipped",
             carrier="Colissimo",
             tracking_number="6A123456789FR",
@@ -110,10 +144,11 @@ def _seed_orders() -> dict[str, OrderStatus]:
         ),
         OrderStatus(
             order_id="CMD-1002",
+            owner_id="demo-user",
             status="processing",
             estimated_delivery="2026-07-22",
         ),
-        OrderStatus(order_id="CMD-1003", status="delivered"),
+        OrderStatus(order_id="CMD-1003", owner_id="other-user", status="delivered"),
     ]
     return {order.order_id: order for order in orders}
 

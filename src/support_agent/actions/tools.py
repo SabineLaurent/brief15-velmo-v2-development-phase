@@ -42,7 +42,7 @@ def build_action_tools(backend: SupportBackend) -> list[BaseTool]:
     """
 
     @tool
-    def get_order_status(order_id: str) -> str:
+    def get_order_status(order_id: str, runtime: ToolRuntime[AgentContext]) -> str:
         """Look up the current status of a customer order.
 
         Use this whenever the customer asks about a specific order: where it is,
@@ -50,11 +50,16 @@ def build_action_tools(backend: SupportBackend) -> list[BaseTool]:
         `order_id` looks like 'CMD-1001'. If the customer has not given an order
         id, ask them for it before calling this tool.
         """
-        order = backend.get_order_status(order_id)
+        # user_id comes from the trusted runtime context: the backend only
+        # returns the order if it belongs to THIS customer (never from the LLM).
+        user_id = runtime.context.user_id
+        order = backend.get_order_status(order_id, user_id)
         if order is None:
+            # Same message whether the order is unknown or owned by someone else
+            # (do not reveal that a foreign order id exists).
             return (
-                f"No order found with id '{order_id}'. Double-check the order id "
-                "with the customer (it looks like 'CMD-1001')."
+                f"No order '{order_id}' found on this customer's account. "
+                "Double-check the order id with them (it looks like 'CMD-1001')."
             )
         return _format_order(order)
 
