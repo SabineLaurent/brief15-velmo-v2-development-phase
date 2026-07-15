@@ -27,7 +27,10 @@ Les phases restantes construisent l'essentiel du produit :
 | **7 — Human-in-the-loop** | escalade réelle vers un humain : indispensable, on ne laisse jamais l'IA seule sur les cas sensibles. |
 | **8 — Outils & actions** | l'agent *agit* (statut commande, création de ticket) — ce qui le rend utile, pas seulement bavard. |
 | **9 — Évaluation & qualité** | tests de non-régression : sans eux, on ne *sait pas* si une modif casse l'agent. |
-| **10 — Exposition & déploiement** | rendre l'agent appelable de l'extérieur (API / serveur), config par environnement. |
+| **10 — Persistance & robustesse** | survivre à un redémarrage, encaisser les erreurs transitoires (429/timeout). |
+| **11 — Cycle de vie du support (Case + Ticket)** | dossiers de support comme en prod : log auto, statuts, signature du bot, récurrence. |
+| **12 — Sécurité & guardrails** | résister aux entrées malveillantes, protéger les PII, borner ce que les outils peuvent faire. |
+| **13 — Exposition & déploiement** | rendre l'agent appelable de l'extérieur (API / serveur), config par environnement. |
 
 ---
 
@@ -37,34 +40,17 @@ Ces points font partie du périmètre final mais ne sont pas encore des étapes
 dédiées dans la ROADMAP. On les garde au radar pour les traiter au bon moment,
 plutôt que de les découvrir en production.
 
-1. **Persistance durable** — ✅ *traité (SQLite ; Postgres en drop-in documenté)*
-   Remplacer `InMemory*` par un backend durable (SQLite / Postgres) via les
-   factories `get_checkpointer()` / `get_store()` — le « one-line change » prévu
-   dans leurs docstrings. Sans ça : redémarrage du process = amnésie totale
-   (mémoire court **et** long terme perdues).
-   → Fait : switch unique `PERSISTENCE_BACKEND` (`memory` | `sqlite`), store
-   durable avec index sémantique. Survie à un redémarrage vérifiée en live
-   (inter-process). Postgres = `NotImplementedError` documenté (serveur requis).
+> **Promus en phases** (voir ROADMAP) : *Persistance durable* et *Robustesse* →
+> **Phase 10** (persistance SQLite faite, fallback/erreurs restants) ; *Sécurité
+> & guardrails* → **Phase 12**. Le *cycle de vie du support* (Case + Ticket) est
+> devenu la **Phase 11**. Restent au radar :
 
-2. **Robustesse & gestion d'erreurs** — 🚧 *partiel (retries/timeout au niveau factory)*
-   Déjà rencontré en vrai avec les `429 Rate limit` de Mistral. Un agent pro gère
-   proprement : retries avec backoff, timeouts, fallback provider — pas un
-   `try/except` de script de test.
-   → Fait : `LLM_MAX_RETRIES` + `LLM_TIMEOUT` forwardés à tous les providers via
-   la factory (backoff auto). Restent à faire : **fallback provider** et une
-   gestion d'erreurs explicite dans les nœuds du graphe.
-
-3. **Sécurité & guardrails**
-   Prompt-injection, filtrage/masquage des données personnelles (PII), limites
-   sur ce que les outils ont le droit de faire. Critique dès qu'un vrai client
-   parle à l'agent.
-
-4. **Coût & latence**
+1. **Coût & latence**
    Choix du modèle par tâche (ex : un petit modèle suffit pour le nœud `router`),
-   streaming des réponses, caching. Un chatbot pro doit être rapide et maîtrisé
-   côté budget.
+   streaming des réponses, caching, résumé de conversation pour les fils longs.
+   Un chatbot pro doit être rapide et maîtrisé côté budget.
 
-5. **Cycle de vie de la mémoire**
+2. **Cycle de vie de la mémoire**
    Mise à jour / oubli des faits obsolètes. Aujourd'hui `save_memory` empile une
    nouvelle entrée sans jamais corriger : si un client change d'avis, les deux
    faits contradictoires coexistent.

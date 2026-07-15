@@ -107,7 +107,53 @@ qui refuse les valeurs falsy (`_for_langsmith` → `{"results": []}`). Juge
 LLM-as-judge volontairement remis à plus tard. Cible `make eval`. Vérifié en
 live : 6/6 cas passent en pytest, expérience LangSmith EU sans erreur.
 
-## Phase 10 — Exposition & déploiement ⬜
+## Phase 10 — Persistance & robustesse (durcissement pré-prod) 🚧
+**Concept :** backends durables (checkpointer/store), retries/backoff/timeout,
+fallback provider — un agent servi redémarre et encaisse les erreurs transitoires.
+**Livrable :** l'agent survit à un redémarrage et ne casse pas sur un `429`/timeout.
+**Fait :** persistance durable via un switch unique `PERSISTENCE_BACKEND`
+(`memory` | `sqlite`) sur le checkpointer ET le store (index sémantique durable),
+survie inter-process vérifiée en live ; retries + timeout forwardés à tous les
+providers par la factory LLM. **Reste :** fallback provider et gestion d'erreurs
+explicite dans les nœuds du graphe.
+
+## Phase 11 — Cycle de vie du support (Case + Ticket) ⬜
+**Concept :** modéliser un dossier de support comme en prod — un **Case** (dossier
+par conversation, logué automatiquement) distinct des **Tickets** actionnables
+qui lui sont rattachés ; statut + assignation (IA vs humain) qui évoluent.
+**Livrable :** chaque conversation ouvre un Case ; le bot « signe » sa résolution
+après validation du client ; l'historique complet permet une vraie détection de
+récurrence.
+**Étapes :**
+- **A — Domaine & transitions :** objets `Case` + `Ticket` (deux objets), nœud
+  `open_case` automatique et idempotent (ré-ouverture si le client revient),
+  transitions `create_ticket → pending_human` / `escalate → escalated`, outil
+  `list_customer_cases`.
+- **B — Protocole de résolution :** en fin de traitement le bot fait **valider**
+  au client (« Ai-je répondu à votre demande ? » / « Avez-vous besoin d'autre
+  chose ? ») → oui ⇒ clôture + signature (`resolved_by_ai → closed`) ; sinon
+  continuation / ré-ouverture.
+  Découpage en **trois moments** (dont un seul est du routage) :
+  1. **Poser** la question de clôture — en *sortie* d'un tour réussi (nœud
+     `ask_closure`, ou consigne de prompt) ; pose aussi un drapeau d'état
+     `awaiting_closure = True`.
+  2. **Interpréter** la réponse oui/non — c'est une **sous-étape de routage** :
+     nouvelle route `close` (à côté de `answer` / `support` / `escalate`), fiabilisée
+     par le drapeau `awaiting_closure` pour ne pas confondre un « oui » de
+     confirmation avec un « oui » quelconque.
+  3. **Agir** — nœud `close_case` : signe et clôt (`resolved_by_ai → closed`) si
+     résolu, sinon efface le drapeau et repart en `support` / `answer` (ré-ouverture).
+  Choix assumé : cross-turn via le routeur (le client répond par un message
+  normal), **pas** d'`interrupt()` — ce dernier reste réservé au handoff humain
+  externe (Phase 7).
+
+## Phase 12 — Sécurité & guardrails ⬜
+**Concept :** prompt-injection, filtrage/masquage des données personnelles (PII),
+limites sur ce que les outils ont le droit de faire, validation des entrées/sorties.
+**Livrable :** l'agent résiste aux entrées malveillantes et ne fuit ni n'exécute
+rien d'interdit — critique dès qu'un vrai client lui parle.
+
+## Phase 13 — Exposition & déploiement ⬜
 **Concept :** servir l'agent (API/LangGraph Server), configuration par environnement.
 **Livrable :** l'agent est appelable depuis l'extérieur, prêt à être branché à un projet.
 
@@ -124,4 +170,7 @@ live : 6/6 cas passent en pytest, expérience LangSmith EU sans erreur.
 - [x] Phase 7 — escalade humaine / human-in-the-loop (pause + reprise vérifiées)
 - [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
-- [ ] Phase 10 — exposition & déploiement (prochaine étape)
+- [~] Phase 10 — persistance & robustesse (persistance SQLite OK ; reste fallback + erreurs nœuds)
+- [ ] Phase 11 — cycle de vie du support (Case + Ticket) ← **prochaine étape**
+- [ ] Phase 12 — sécurité & guardrails
+- [ ] Phase 13 — exposition & déploiement
