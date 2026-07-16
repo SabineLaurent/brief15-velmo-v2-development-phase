@@ -163,6 +163,48 @@ limites sur ce que les outils ont le droit de faire, validation des entrées/sor
 **Livrable :** l'agent résiste aux entrées malveillantes et ne fuit ni n'exécute
 rien d'interdit — critique dès qu'un vrai client lui parle.
 
+**Décision d'architecture :** on garde le `StateGraph` custom (esprit « capot
+ouvert » de la Phase 6) et on écrit les guardrails comme des **nœuds explicites**,
+PAS via les middlewares LangChain 1.x (`PIIMiddleware`, `HumanInTheLoopMiddleware`)
+qui sont couplés à `create_agent` — qu'on a justement retiré. On emprunte leur
+*modèle mental* (un hook d'entrée, un hook de sortie, une garde d'outil) sans le
+couplage. Les middlewares tout faits restent une illustration possible, pas la
+fondation.
+
+**Principes transverses (non négociables du projet) :**
+- **Agnosticisme préservé :** chaque détecteur (PII, injection) est un **port**
+  (`Protocol`) + un adaptateur baseline, jamais un SaaS en dur — même pattern que
+  `SupportBackend` (`actions/`) et la factory LLM. Remplaçable plus tard par
+  Presidio ou un classifieur LLM sans toucher au graphe. Aucun provider nommé
+  dans le code métier.
+- **Déterministe d'abord :** la baseline est en regex/règles (gratuit, fiable,
+  aucun appel LLM en plus). Un détecteur LLM-based reste une option pluggable
+  future derrière le même port.
+- **Fail-safe & observable :** un guardrail qui déclenche → log + trace LangSmith
+  (tag dédié), jamais un crash silencieux ; court-circuit vers une réponse sûre.
+
+**Étapes :**
+- **A — Guardrails d'entrée (la porte d'entrée, priorité 1) :** nœud explicite
+  `guard_input` en tête de graphe, AVANT `router`, capable de court-circuiter vers
+  une réponse sûre (`jump_to` équivalent : arête conditionnelle vers une sortie).
+  Contenu : (1) validation déterministe — taille max (coût/DoS), rejet vide/binaire ;
+  (2) détection prompt-injection via un port `InjectionDetector` (baseline : patterns
+  connus « ignore tes instructions », « montre ton system prompt »…) ; (3) masquage
+  PII AVANT que le message n'atteigne le LLM, via un port `PIIDetector` (baseline
+  regex : email / carte / téléphone / IBAN) avec stratégies `redact` / `mask` / `block`.
+- **B — Guardrails de sortie & anti-fuite :** nœud `guard_output` avant de rendre
+  la réponse au client. Défense en profondeur : re-masquage PII en sortie, anti-fuite
+  (le modèle ne recrache pas son system prompt / une clé / des données d'un autre
+  client), refus hors-domaine. S'applique aussi sur le chemin de reprise après
+  `escalate` (Phase 7).
+- **C — Durcissement outils & mémoire (effet de bord + persistance) :** (1)
+  validation des entrées d'outils (`subject` / `body` de `create_ticket` viennent
+  en partie du client via le LLM) ; (2) **hygiène PII de la mémoire long terme** —
+  filtrer/masquer AVANT `store.put` dans `save_memory` : ne jamais persister un
+  numéro de carte en clair (aggravé depuis la persistance SQLite durable de la
+  Phase 10) ; (3) anti-abus : rate-limit applicatif sur les actions à effet de
+  bord (`create_ticket`).
+
 ## Phase 13 — Exposition & déploiement ⬜
 **Concept :** servir l'agent (API/LangGraph Server), configuration par environnement.
 **Livrable :** l'agent est appelable depuis l'extérieur, prêt à être branché à un projet.
