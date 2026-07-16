@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # message length (cost / DoS) before it ever reaches the LLM.
     guardrails_enabled: bool = True
     guardrails_max_input_chars: int = 4000
+    # Tool-boundary hardening (Phase 12-C): cap on LLM-generated tool fields
+    # (ticket subject/body, memory text), and a rate limit on side-effecting
+    # actions (ticket creation) — `limit` calls per `window` seconds, per customer.
+    guardrails_max_tool_field_chars: int = 2000
+    guardrails_action_rate_limit: int = 5
+    guardrails_action_rate_window_s: float = 3600.0
 
     # --- Observability, LangSmith (Phase 2) ---
     langsmith_tracing: bool = False

@@ -13,12 +13,14 @@ from __future__ import annotations
 
 from support_agent.guardrails import (
     InputGuard,
+    RateLimiter,
     RegexInjectionDetector,
     RegexPIIDetector,
     RegexSecretDetector,
     apply_pii_policy,
     build_input_guard,
     build_output_guard,
+    build_tool_guard,
 )
 from support_agent.guardrails.output_guard import SAFE_OUTPUT_MESSAGE
 
@@ -163,3 +165,37 @@ def test_output_replaces_system_prompt_leak() -> None:
     assert decision.replaced is True
     assert decision.prompt_leak is True
     assert decision.sanitized_text == SAFE_OUTPUT_MESSAGE
+
+
+# --- Tool guard (Phase 12-C: side effects & persistence) --------------------
+
+
+def _tool_guard(max_chars: int = 2000, limit: int = 5, window: float = 3600.0):
+    return build_tool_guard(max_chars, limit, window)
+
+
+def test_rate_limiter_blocks_after_limit() -> None:
+    limiter = RateLimiter(max_calls=2, window_seconds=3600.0)
+    assert limiter.allow("user-a") is True
+    assert limiter.allow("user-a") is True
+    assert limiter.allow("user-a") is False  # third call over the limit
+    # A different key is tracked independently.
+    assert limiter.allow("user-b") is True
+
+
+def test_tool_guard_sanitizes_pii_before_persisting() -> None:
+    clean = _tool_guard().sanitize("carte 4111 1111 1111 1111 email a@b.com")
+    assert "4111" not in clean
+    assert "a@b.com" not in clean
+
+
+def test_tool_guard_validate_field_rejects_overlong() -> None:
+    guard = _tool_guard(max_chars=10)
+    assert guard.validate_field("x" * 11, field_name="body") is not None
+    assert guard.validate_field("short", field_name="body") is None
+
+
+def test_tool_guard_allow_action_enforces_limit() -> None:
+    guard = _tool_guard(limit=1)
+    assert guard.allow_action("cust-1") is True
+    assert guard.allow_action("cust-1") is False

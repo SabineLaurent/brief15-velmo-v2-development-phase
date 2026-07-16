@@ -41,7 +41,11 @@ from support_agent.graph.nodes import (
 from support_agent.actions import build_action_tools, get_backend
 from support_agent.config import get_settings
 from support_agent.graph.state import SupportState
-from support_agent.guardrails import build_input_guard, build_output_guard
+from support_agent.guardrails import (
+    build_input_guard,
+    build_output_guard,
+    build_tool_guard,
+)
 from support_agent.knowledge import build_faq_tool, build_vector_store
 from support_agent.llm import get_chat_model, get_chat_model_fallbacks
 from support_agent.memory import (
@@ -66,10 +70,22 @@ def build_support_graph() -> CompiledStateGraph:
     # memory (read/write), and business actions (order lookup + ticket creation).
     vector_store = build_vector_store()
     backend = get_backend()  # the business port: swap the adapter, not the tools
+    # Phase 12-C: harden the WRITE tools (validate fields, mask PII before it is
+    # persisted, rate-limit ticket creation). `None` when guardrails are off keeps
+    # the tools behaving exactly as before.
+    tool_guard = (
+        build_tool_guard(
+            settings.guardrails_max_tool_field_chars,
+            settings.guardrails_action_rate_limit,
+            settings.guardrails_action_rate_window_s,
+        )
+        if settings.guardrails_enabled
+        else None
+    )
     tools = [
         build_faq_tool(vector_store),
-        *build_memory_tools(),
-        *build_action_tools(backend),
+        *build_memory_tools(tool_guard),
+        *build_action_tools(backend, tool_guard),
     ]
 
     # `context_schema` lets nodes and tools read the runtime `user_id`.

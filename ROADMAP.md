@@ -157,7 +157,7 @@ récurrence.
   normal), **pas** d'`interrupt()` — ce dernier reste réservé au handoff humain
   externe (Phase 7).
 
-## Phase 12 — Sécurité & guardrails 🚧
+## Phase 12 — Sécurité & guardrails ✅
 **Concept :** prompt-injection, filtrage/masquage des données personnelles (PII),
 limites sur ce que les outils ont le droit de faire, validation des entrées/sorties.
 **Livrable :** l'agent résiste aux entrées malveillantes et ne fuit ni n'exécute
@@ -238,6 +238,21 @@ guardrails, suite complète 29/29), vérif live : graphe complet traversant
 `guard_output` sur les chemins answer + support, sans faux positif. **Reste : C
 (outils & mémoire).**
 
+**Fait (C) — durcissement outils & mémoire :** nouveau `ToolGuard` (réutilise le
+`PIIDetector` + un `RateLimiter` in-process, sliding-window) threadé dans les
+*builders* d'outils via le même kill switch (`None` = comportement d'avant). Trois
+protections sur les outils **d'écriture** : (1) **validation** de la longueur des
+champs générés par le LLM (`subject`/`body` de ticket, `text` mémoire) ; (2)
+**hygiène PII avant persistance** — `sanitize()` masque la PII **avant**
+`store.put` (`save_memory`) et avant d'écrire un ticket (`create_ticket`), donc
+un numéro de carte n'est **jamais** persisté en clair (le trou aggravé par le
+SQLite de la Phase 10) ; (3) **anti-abus** — rate-limit par client sur
+`create_ticket` (seule vraie action à effet de bord). Le `RateLimiter`
+in-process est documenté comme à remplacer par un store partagé (Redis) en prod,
+sans changer le code des outils. Tests +4 (22/22 guardrails, suite complète
+33/33), lint clean. Vérif hors-ligne : ticket **et** mémoire persistés sans PII
+brute, rate-limit appliqué, graphe sans cycle d'import. **Phase 12 terminée.**
+
 **Durcissement futur des détecteurs (derrière les ports, sans toucher au graphe) :**
 la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents :
 - **PII → Presidio** (pas un LLM) : ajoute noms/adresses (NER) + validation
@@ -267,9 +282,8 @@ la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents
 - [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
 - [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
-- [~] Phase 12 — sécurité & guardrails (12-A entrée + 12-B sortie/anti-fuite : **faits**) ← **en cours**
-- [ ] Phase 12 — reste : C (outils & mémoire)
-- [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12)*
+- [x] Phase 12 — sécurité & guardrails (A entrée + B sortie/anti-fuite + C outils & mémoire)
+- [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12)* ← **prochaine étape**
 - [ ] Phase 13 — exposition & déploiement
 
 > Note : Phases 11 et 12 **réordonnées** — la sécurité (guardrails) passe avant le

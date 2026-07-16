@@ -39,6 +39,11 @@ from support_agent.guardrails.secrets import (
     RegexSecretDetector,
     SecretDetector,
 )
+from support_agent.guardrails.tool_guard import (
+    RateLimiter,
+    ToolGuard,
+    build_tool_guard,
+)
 
 __all__ = [
     "DEFAULT_POLICY",
@@ -52,11 +57,14 @@ __all__ = [
     "PIIMatch",
     "PIIResult",
     "PIIStrategy",
+    "RateLimiter",
     "RegexInjectionDetector",
     "RegexPIIDetector",
     "RegexSecretDetector",
     "SecretDetector",
+    "ToolGuard",
     "apply_pii_policy",
     "build_input_guard",
     "build_output_guard",
+    "build_tool_guard",
 ]

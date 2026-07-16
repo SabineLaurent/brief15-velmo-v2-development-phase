@@ -16,6 +16,7 @@ import uuid
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 
+from support_agent.guardrails import ToolGuard
 from support_agent.memory.long_term import AgentContext
 
 
@@ -24,8 +25,14 @@ def _namespace(user_id: str) -> tuple[str, str]:
     return ("memories", user_id)
 
 
-def build_memory_tools() -> list[BaseTool]:
-    """Build the `save_memory` / `search_memories` long-term memory tools."""
+def build_memory_tools(tool_guard: ToolGuard | None = None) -> list[BaseTool]:
+    """Build the `save_memory` / `search_memories` long-term memory tools.
+
+    Args:
+        tool_guard: Optional Phase 12-C hardening applied to `save_memory` before
+            it PERSISTS (field validation + PII masking, so raw PII is never
+            written to the durable store). `None` disables it.
+    """
 
     @tool
     def save_memory(text: str, runtime: ToolRuntime[AgentContext]) -> str:
@@ -38,6 +45,14 @@ def build_memory_tools() -> list[BaseTool]:
         """
         store = runtime.store
         user_id = runtime.context.user_id
+
+        # Phase 12-C: validate and strip PII BEFORE persisting to the durable store.
+        if tool_guard is not None:
+            error = tool_guard.validate_field(text, field_name="memory")
+            if error is not None:
+                return error
+            text = tool_guard.sanitize(text)
+
         # Random key: each memory is a new entry, we never overwrite blindly.
         store.put(_namespace(user_id), str(uuid.uuid4()), {"text": text})
         return f"Saved memory: {text}"

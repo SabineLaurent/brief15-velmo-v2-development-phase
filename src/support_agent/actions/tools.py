@@ -19,6 +19,7 @@ from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 
 from support_agent.actions.backend import OrderStatus, SupportBackend, Ticket
+from support_agent.guardrails import ToolGuard
 from support_agent.memory import AgentContext
 
 
@@ -42,11 +43,16 @@ def _format_tickets(tickets: list[Ticket]) -> str:
     return "\n".join(lines)
 
 
-def build_action_tools(backend: SupportBackend) -> list[BaseTool]:
+def build_action_tools(
+    backend: SupportBackend, tool_guard: ToolGuard | None = None
+) -> list[BaseTool]:
     """Build the business action tools bound to a given backend adapter.
 
     Args:
         backend: The `SupportBackend` implementation the tools act through.
+        tool_guard: Optional Phase 12-C hardening for the write tools (field
+            validation, PII masking before persistence, rate limiting). `None`
+            disables it — same behavior as before guardrails existed.
     """
 
     @tool
@@ -85,6 +91,24 @@ def build_action_tools(backend: SupportBackend) -> list[BaseTool]:
         """
         # user_id comes from the trusted runtime context, never from the model.
         user_id = runtime.context.user_id
+
+        # Phase 12-C hardening on this side-effecting, persisting tool.
+        if tool_guard is not None:
+            error = tool_guard.validate_field(
+                subject, field_name="subject"
+            ) or tool_guard.validate_field(body, field_name="body")
+            if error is not None:
+                return error
+            # Anti-abuse: cap how many tickets one customer can open in a window.
+            if not tool_guard.allow_action(user_id):
+                return (
+                    "Too many tickets were opened recently for this customer. "
+                    "Please try again later, or ask for a human agent if urgent."
+                )
+            # Never persist raw PII (e.g. a full card number) in a ticket.
+            subject = tool_guard.sanitize(subject)
+            body = tool_guard.sanitize(body)
+
         ticket = backend.create_ticket(user_id=user_id, subject=subject, body=body)
         return (
             f"Ticket {ticket.ticket_id} created for this customer "
