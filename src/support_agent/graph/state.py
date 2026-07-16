@@ -20,3 +20,6 @@ class SupportState(MessagesState):
     """Conversation state: the message history + the last routing decision."""
 
     route: Route
+    # Set by the `guard_input` node (Phase 12-A): True when the entry guard
+    # refused the message, so the entry conditional edge short-circuits to END.
+    input_blocked: bool

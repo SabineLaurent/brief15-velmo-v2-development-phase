@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     persistence_backend: str = "memory"
     sqlite_path: str = "./data/agent_state.sqlite3"
 
+    # --- Guardrails (Phase 12, security) ---
+    # `guardrails_enabled` is a kill switch: off = the graph is wired exactly as
+    # before (START -> router), no overhead. `max_input_chars` caps the incoming
+    # message length (cost / DoS) before it ever reaches the LLM.
+    guardrails_enabled: bool = True
+    guardrails_max_input_chars: int = 4000
+
     # --- Observability, LangSmith (Phase 2) ---
     langsmith_tracing: bool = False
     langsmith_project: str = "agnostic-support-agent"

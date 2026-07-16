@@ -157,7 +157,7 @@ récurrence.
   normal), **pas** d'`interrupt()` — ce dernier reste réservé au handoff humain
   externe (Phase 7).
 
-## Phase 12 — Sécurité & guardrails ⬜
+## Phase 12 — Sécurité & guardrails 🚧
 **Concept :** prompt-injection, filtrage/masquage des données personnelles (PII),
 limites sur ce que les outils ont le droit de faire, validation des entrées/sorties.
 **Livrable :** l'agent résiste aux entrées malveillantes et ne fuit ni n'exécute
@@ -205,6 +205,22 @@ fondation.
   Phase 10) ; (3) anti-abus : rate-limit applicatif sur les actions à effet de
   bord (`create_ticket`).
 
+**Fait (A) — guardrails d'entrée :** nouveau package `guardrails/` bâti comme
+`actions/` — deux **ports** (`PIIDetector`, `InjectionDetector`) + adaptateurs
+baseline regex (`RegexPIIDetector`, `RegexInjectionDetector`), zéro dépendance,
+zéro appel LLM ; remplaçables (Presidio, classifieur LLM) sans toucher au graphe.
+Un objet `InputGuard` compose les 3 contrôles (validation taille/vide →
+injection → masquage PII) et renvoie une `GuardDecision` pure (testable hors
+LangGraph). Nœud `guard_input` inséré **entre `START` et `router`** (kill switch
+`GUARDRAILS_ENABLED`) : masque la PII **en place** (overwrite par `id` via
+`add_messages`, donc la PII brute n'atteint jamais LLM/outils/store), et sur
+refus **retire** le message fautif de l'historique (`RemoveMessage`, pas de
+pollution des tours suivants) + réponse sûre + court-circuit vers `END` via
+l'arête conditionnelle `guard_route`. Refus générique (ne révèle pas la détection
+à l'attaquant). Tests unitaires purs 12/12 (`tests/test_guardrails.py`), suite
+complète 23/23, et vérif live hors-ligne : injection bloquée (0 LLM) + PII
+réécrite en place. **Restent : B (sortie/anti-fuite) et C (outils & mémoire).**
+
 ## Phase 13 — Exposition & déploiement ⬜
 **Concept :** servir l'agent (API/LangGraph Server), configuration par environnement.
 **Livrable :** l'agent est appelable depuis l'extérieur, prêt à être branché à un projet.
@@ -223,6 +239,10 @@ fondation.
 - [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
 - [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
-- [ ] Phase 11 — cycle de vie du support (Case + Ticket) ← **prochaine étape**
-- [ ] Phase 12 — sécurité & guardrails
+- [~] Phase 12 — sécurité & guardrails (12-A entrée : injection + PII + validation, **fait**) ← **en cours**
+- [ ] Phase 12 — reste : B (sortie/anti-fuite) + C (outils & mémoire)
+- [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12)*
 - [ ] Phase 13 — exposition & déploiement
+
+> Note : Phases 11 et 12 **réordonnées** — la sécurité (guardrails) passe avant le
+> cycle de vie du support, car elle est critique dès qu'un vrai client parle.

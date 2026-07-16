@@ -20,14 +20,21 @@ from collections.abc import Sequence
 from typing import Callable
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+)
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langgraph.graph import END
 from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from support_agent.graph.state import Route, SupportState
+from support_agent.guardrails import InputGuard
 from support_agent.llm import FALLBACK_EXCEPTIONS
 from support_agent.memory import AgentContext
 
@@ -59,6 +66,63 @@ def _with_fallbacks(
     return primary.with_fallbacks(
         list(fallbacks), exceptions_to_handle=FALLBACK_EXCEPTIONS
     )
+
+
+# --- Input guard (Phase 12-A: the first thing raw customer text hits) ------
+
+
+def make_guard_input(guard: InputGuard) -> Callable[[SupportState], dict]:
+    """Build the entry guard node: validate, screen for injection, mask PII.
+
+    Runs BEFORE the router. On a clean message it either passes through, or
+    rewrites the customer's last message IN PLACE (same id, so the `add_messages`
+    reducer replaces it) with a PII-masked version — the raw PII then never
+    reaches the LLM, the tools, or the store. On a refused message it removes the
+    offending text from history (so it cannot poison later turns), emits a safe
+    reply, and flags `input_blocked` so the entry edge short-circuits to END.
+    """
+
+    def guard_input(state: SupportState) -> dict:
+        last_human = next(
+            (m for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+            None,
+        )
+        if last_human is None:
+            return {"input_blocked": False}
+
+        decision = guard.check(str(last_human.content))
+
+        if decision.blocked:
+            logger.warning("Input guard blocked a message: reason=%s", decision.reason)
+            messages: list = []
+            # Drop the offending message so it does not reach the LLM later.
+            if last_human.id is not None:
+                messages.append(RemoveMessage(id=last_human.id))
+            messages.append(AIMessage(content=decision.user_message or GRACEFUL_ERROR_MESSAGE))
+            return {"input_blocked": True, "messages": messages}
+
+        updates: dict = {"input_blocked": False}
+        if decision.pii_entities:
+            logger.info(
+                "Input guard masked PII: %s", ", ".join(decision.pii_entities)
+            )
+        # Overwrite the message in place only if masking actually changed it.
+        if (
+            decision.sanitized_text != str(last_human.content)
+            and last_human.id is not None
+        ):
+            updates["messages"] = [
+                HumanMessage(content=decision.sanitized_text, id=last_human.id)
+            ]
+        return updates
+
+    return guard_input
+
+
+def guard_route(state: SupportState) -> str:
+    """Entry conditional edge: a blocked input ends the turn; else go to router."""
+    return END if state.get("input_blocked") else "router"
+
 
 # --- Router ----------------------------------------------------------------
 
