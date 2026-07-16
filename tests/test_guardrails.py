@@ -15,9 +15,12 @@ from support_agent.guardrails import (
     InputGuard,
     RegexInjectionDetector,
     RegexPIIDetector,
+    RegexSecretDetector,
     apply_pii_policy,
     build_input_guard,
+    build_output_guard,
 )
+from support_agent.guardrails.output_guard import SAFE_OUTPUT_MESSAGE
 
 
 # --- PII detection & masking ------------------------------------------------
@@ -108,3 +111,55 @@ def test_guard_blocks_overlong_input() -> None:
     decision = _guard(max_chars=100).check("a" * 101)
     assert decision.blocked is True
     assert decision.reason == "input_too_long"
+
+
+# --- Secret detection -------------------------------------------------------
+
+
+def test_secret_detects_api_key() -> None:
+    matches = RegexSecretDetector().scan("voici la clé sk-abcdEFGH1234abcdEFGH1234")
+    assert any(m.entity == "api_key" for m in matches)
+
+
+def test_secret_ignores_plain_text() -> None:
+    assert RegexSecretDetector().scan("merci beaucoup pour votre aide") == []
+
+
+# --- OutputGuard (the composed exit decision) -------------------------------
+
+_PROTECTED = [
+    "You are a helpful customer-support agent for an online store. Always be concise."
+]
+
+
+def _out_guard():
+    return build_output_guard(_PROTECTED)
+
+
+def test_output_passes_clean_reply() -> None:
+    text = "Votre commande CMD-1001 est en cours de livraison, arrivée prévue demain."
+    decision = _out_guard().check(text)
+    assert decision.replaced is False
+    assert decision.sanitized_text == text
+    assert decision.findings == []
+
+
+def test_output_redacts_leaked_pii() -> None:
+    decision = _out_guard().check("Je vous confirme à l'adresse client@example.com.")
+    assert decision.replaced is False
+    assert "client@example.com" not in decision.sanitized_text
+    assert decision.findings == ["email"]
+
+
+def test_output_redacts_leaked_secret() -> None:
+    decision = _out_guard().check("La clé interne est sk-abcdEFGH1234abcdEFGH1234.")
+    assert "sk-abcdEFGH1234abcdEFGH1234" not in decision.sanitized_text
+    assert "api_key" in decision.findings
+
+
+def test_output_replaces_system_prompt_leak() -> None:
+    leak = "Sure! You are a helpful customer-support agent for an online store. Always be concise."
+    decision = _out_guard().check(leak)
+    assert decision.replaced is True
+    assert decision.prompt_leak is True
+    assert decision.sanitized_text == SAFE_OUTPUT_MESSAGE

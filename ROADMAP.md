@@ -221,6 +221,34 @@ l'arête conditionnelle `guard_route`. Refus générique (ne révèle pas la dé
 complète 23/23, et vérif live hors-ligne : injection bloquée (0 LLM) + PII
 réécrite en place. **Restent : B (sortie/anti-fuite) et C (outils & mémoire).**
 
+**Fait (B) — guardrails de sortie & anti-fuite :** nœud `guard_output` symétrique
+de `guard_input`, sur **toutes les branches qui répondent** (`answer`, `support`,
+reprise `escalate`) — la fin de la boucle ReAct y est routée en remappant le `END`
+de `tools_condition`. Un objet `OutputGuard` (pur, testable) applique trois
+contrôles **déterministes** : (1) **fuite du system prompt** — si la réponse
+recopie verbatim nos instructions (détection par *shingles* ≥ 60 car.), on
+**remplace** toute la réponse par un message sûr ; (2) **re-masquage PII** en
+sortie (défense en profondeur, réutilise le `PIIDetector`) ; (3) **anti-fuite
+secret** — nouveau port `SecretDetector` + `RegexSecretDetector` (clés `sk-`/`gsk_`,
+AWS `AKIA…`, `Bearer …`), fondu dans la même redaction via un `CompositeDetector`.
+Réécriture **en place** (overwrite par `id`), réponse propre laissée intacte.
+Le *refus hors-domaine* (non déterministe) est volontairement laissé au niveau
+prompt / durcissement futur, pas dans ce nœud. Tests unitaires 6 de plus (18/18
+guardrails, suite complète 29/29), vérif live : graphe complet traversant
+`guard_output` sur les chemins answer + support, sans faux positif. **Reste : C
+(outils & mémoire).**
+
+**Durcissement futur des détecteurs (derrière les ports, sans toucher au graphe) :**
+la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents :
+- **PII → Presidio** (pas un LLM) : ajoute noms/adresses (NER) + validation
+  Luhn/IBAN, reste **local et gratuit en tokens**. Un LLM-détecteur enverrait la
+  PII brute à un LLM — à rebours de l'objectif « pas de PII vers le LLM ».
+- **Injection → petit classifieur** (Presidio hors sujet ici) : l'injection est
+  sémantique, le regex se contourne. Priorité à un **modèle local dédié**
+  (type Prompt-Guard) ; LLM-as-judge en repli (mais +1 appel LLM par tour).
+- Principe : *defense-in-depth* — garder le regex en passe rapide, brancher le
+  détecteur lourd derrière le **même port** seulement quand il laisse passer.
+
 ## Phase 13 — Exposition & déploiement ⬜
 **Concept :** servir l'agent (API/LangGraph Server), configuration par environnement.
 **Livrable :** l'agent est appelable depuis l'extérieur, prêt à être branché à un projet.
@@ -239,8 +267,8 @@ réécrite en place. **Restent : B (sortie/anti-fuite) et C (outils & mémoire).
 - [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
 - [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
-- [~] Phase 12 — sécurité & guardrails (12-A entrée : injection + PII + validation, **fait**) ← **en cours**
-- [ ] Phase 12 — reste : B (sortie/anti-fuite) + C (outils & mémoire)
+- [~] Phase 12 — sécurité & guardrails (12-A entrée + 12-B sortie/anti-fuite : **faits**) ← **en cours**
+- [ ] Phase 12 — reste : C (outils & mémoire)
 - [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12)*
 - [ ] Phase 13 — exposition & déploiement
 

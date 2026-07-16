@@ -3,13 +3,16 @@
 This is the "capot ouvert" replacement for `create_agent`: a `StateGraph` with
 named nodes and conditional edges we control ourselves.
 
-    START ─► guard_input ─┬─(blocked)─────────────────────────► END
-                          └─► router ─┬─(answer)──► answer ────► END
-                                      ├─(support)─► model ⇄ tools ─(ReAct)──► END
-                                      └─(escalate)► escalate ─(interrupt ⏸)─► END
+    START ─► guard_input ─┬─(blocked)──────────────────────────────────────► END
+                          └─► router ─┬─(answer)──► answer ────┐
+                                      ├─(support)─► model ⇄ tools ─(ReAct)─┼─► guard_output ─► END
+                                      └─(escalate)► escalate ─(interrupt ⏸)┘
 
 `guard_input` (Phase 12-A) validates, screens for prompt-injection and masks PII
 before anything else sees the message; a refused message short-circuits to END.
+`guard_output` (Phase 12-B) screens every outgoing reply — redacts leaked
+PII/secrets, replaces a reply that echoes the system prompt — just before it
+leaves. Both are gated by the `GUARDRAILS_ENABLED` kill switch.
 
 Memory is preserved exactly as before: the checkpointer keeps the conversation
 (short term), the store keeps the customer (long term), and `context_schema`
@@ -23,10 +26,14 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from support_agent.graph.nodes import (
+    ANSWER_SYSTEM_PROMPT,
+    ROUTER_SYSTEM_PROMPT,
+    SUPPORT_SYSTEM_PROMPT,
     escalate,
     guard_route,
     make_answer,
     make_guard_input,
+    make_guard_output,
     make_router,
     make_support_model,
     route_from_state,
@@ -34,7 +41,7 @@ from support_agent.graph.nodes import (
 from support_agent.actions import build_action_tools, get_backend
 from support_agent.config import get_settings
 from support_agent.graph.state import SupportState
-from support_agent.guardrails import build_input_guard
+from support_agent.guardrails import build_input_guard, build_output_guard
 from support_agent.knowledge import build_faq_tool, build_vector_store
 from support_agent.llm import get_chat_model, get_chat_model_fallbacks
 from support_agent.memory import (
@@ -74,17 +81,25 @@ def build_support_graph() -> CompiledStateGraph:
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("escalate", escalate)
 
-    # Entry guard (Phase 12-A): raw customer text hits this BEFORE the router.
-    # It validates, screens for prompt-injection and masks PII. A refused message
-    # short-circuits to END; a clean one flows on to the router. The kill switch
-    # keeps the graph identical to before when guardrails are disabled.
+    # Guardrails (Phase 12): the kill switch keeps the graph identical to before
+    # when disabled. When enabled, the entry guard (12-A) sits BEFORE the router
+    # and the exit guard (12-B) sits on every branch that answers the customer, so
+    # every reply is screened just before it leaves. `terminal` is where the three
+    # answering branches point: the exit guard when on, END otherwise.
     if settings.guardrails_enabled:
-        guard = build_input_guard(settings.guardrails_max_input_chars)
-        builder.add_node("guard_input", make_guard_input(guard))
+        input_guard = build_input_guard(settings.guardrails_max_input_chars)
+        output_guard = build_output_guard(
+            [ROUTER_SYSTEM_PROMPT, ANSWER_SYSTEM_PROMPT, SUPPORT_SYSTEM_PROMPT]
+        )
+        builder.add_node("guard_input", make_guard_input(input_guard))
+        builder.add_node("guard_output", make_guard_output(output_guard))
         builder.add_edge(START, "guard_input")
         builder.add_conditional_edges("guard_input", guard_route)
+        builder.add_edge("guard_output", END)
+        terminal = "guard_output"
     else:
         builder.add_edge(START, "router")
+        terminal = END
 
     # The routing decision: the conditional edge maps each `route` value to a node.
     builder.add_conditional_edges(
@@ -93,13 +108,16 @@ def build_support_graph() -> CompiledStateGraph:
         {"answer": "answer", "support": "model", "escalate": "escalate"},
     )
 
-    # The SUPPORT branch is a ReAct loop: model -> (tools -> model)* -> END.
-    # `tools_condition` returns "tools" if the LLM asked for a tool, else END.
-    builder.add_conditional_edges("model", tools_condition)
+    # The SUPPORT branch is a ReAct loop: model -> (tools -> model)* -> terminal.
+    # `tools_condition` returns "tools" if the LLM asked for a tool, else END —
+    # we remap that END to the exit guard (or real END when guardrails are off).
+    builder.add_conditional_edges(
+        "model", tools_condition, {"tools": "tools", END: terminal}
+    )
     builder.add_edge("tools", "model")
 
-    # The two leaf branches end the turn.
-    builder.add_edge("answer", END)
-    builder.add_edge("escalate", END)
+    # The two leaf branches end the turn (through the exit guard when enabled).
+    builder.add_edge("answer", terminal)
+    builder.add_edge("escalate", terminal)
 
     return builder.compile(checkpointer=checkpointer, store=store)

@@ -74,6 +74,23 @@ class PIIResult:
     blocked: bool  # True if a 'block'-strategy entity was present
 
 
+class CompositeDetector:
+    """Run several `PIIDetector`-shaped detectors and merge their matches.
+
+    Lets the output guard screen PII and secrets in one pass through the same
+    redaction machinery (both return `PIIMatch` spans).
+    """
+
+    def __init__(self, detectors: list[PIIDetector]) -> None:
+        self._detectors = detectors
+
+    def scan(self, text: str) -> list[PIIMatch]:
+        matches: list[PIIMatch] = []
+        for detector in self._detectors:
+            matches.extend(detector.scan(text))
+        return matches
+
+
 class RegexPIIDetector:
     """Baseline `PIIDetector`: a set of regexes, no external dependency."""
 

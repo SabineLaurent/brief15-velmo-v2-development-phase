@@ -20,8 +20,14 @@ from support_agent.guardrails.input_guard import (
     InputGuard,
     build_input_guard,
 )
+from support_agent.guardrails.output_guard import (
+    OutputDecision,
+    OutputGuard,
+    build_output_guard,
+)
 from support_agent.guardrails.pii import (
     DEFAULT_POLICY,
+    CompositeDetector,
     PIIDetector,
     PIIMatch,
     PIIResult,
@@ -29,18 +35,28 @@ from support_agent.guardrails.pii import (
     RegexPIIDetector,
     apply_pii_policy,
 )
+from support_agent.guardrails.secrets import (
+    RegexSecretDetector,
+    SecretDetector,
+)
 
 __all__ = [
     "DEFAULT_POLICY",
+    "CompositeDetector",
     "GuardDecision",
     "InjectionDetector",
     "InputGuard",
+    "OutputDecision",
+    "OutputGuard",
     "PIIDetector",
     "PIIMatch",
     "PIIResult",
     "PIIStrategy",
     "RegexInjectionDetector",
     "RegexPIIDetector",
+    "RegexSecretDetector",
+    "SecretDetector",
     "apply_pii_policy",
     "build_input_guard",
+    "build_output_guard",
 ]

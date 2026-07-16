@@ -34,7 +34,7 @@ from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from support_agent.graph.state import Route, SupportState
-from support_agent.guardrails import InputGuard
+from support_agent.guardrails import InputGuard, OutputGuard
 from support_agent.llm import FALLBACK_EXCEPTIONS
 from support_agent.memory import AgentContext
 
@@ -301,3 +301,35 @@ def escalate(state: SupportState, runtime: Runtime[AgentContext]) -> dict:
 
     # Deliver the human agent's reply to the customer as the agent's message.
     return {"messages": [AIMessage(content=human_reply)]}
+
+
+# --- Output guard (Phase 12-B: the last check before the reply leaves) ------
+
+
+def make_guard_output(guard: OutputGuard) -> Callable[[SupportState], dict]:
+    """Build the exit guard node: screen the reply for leaks, redact PII/secrets.
+
+    Runs on every path that answers the customer (answer / support / escalate
+    resume). It overwrites the last AI message IN PLACE (same id) with the
+    sanitized version, or with a safe message if the reply leaked our system
+    prompt. A clean reply passes through untouched (no state update).
+    """
+
+    def guard_output(state: SupportState) -> dict:
+        last = state["messages"][-1]
+        if not isinstance(last, AIMessage) or last.id is None:
+            return {}
+
+        decision = guard.check(str(last.content))
+        if not decision.replaced and decision.sanitized_text == str(last.content):
+            return {}  # nothing to change
+
+        if decision.replaced:
+            logger.warning("Output guard replaced a reply leaking the system prompt.")
+        elif decision.findings:
+            logger.info(
+                "Output guard redacted from reply: %s", ", ".join(decision.findings)
+            )
+        return {"messages": [AIMessage(content=decision.sanitized_text, id=last.id)]}
+
+    return guard_output
