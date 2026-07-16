@@ -15,17 +15,50 @@ and trace in LangSmith, instead of being hidden inside a prebuilt agent.
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Sequence
 from typing import Callable
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 from langgraph.runtime import Runtime
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
 from support_agent.graph.state import Route, SupportState
+from support_agent.llm import FALLBACK_EXCEPTIONS
 from support_agent.memory import AgentContext
+
+logger = logging.getLogger(__name__)
+
+# Last-resort reply shown to the customer when an LLM call fails for good (all
+# retries AND provider fallbacks exhausted). It is the ONE hard-coded user-facing
+# string: with the LLM down we cannot localize it, so we keep it short and in the
+# demo's language (French FAQ). Swap it for a localized/config value in real prod.
+GRACEFUL_ERROR_MESSAGE = (
+    "Désolé, je rencontre un problème technique momentané et ne peux pas traiter "
+    "votre demande à l'instant. Merci de réessayer dans quelques instants ; si le "
+    "problème persiste, un conseiller humain prendra le relais."
+)
+
+
+def _with_fallbacks(
+    primary: Runnable, fallbacks: Sequence[Runnable]
+) -> Runnable:
+    """Attach provider fallbacks to a (possibly tool-bound) runnable.
+
+    `RunnableWithFallbacks` does not expose `bind_tools` / `with_structured_output`,
+    so fallbacks MUST be composed at the leaf — after binding — which is exactly
+    what each node factory does before calling this. Returns `primary` unchanged
+    when no fallback is configured.
+    """
+    if not fallbacks:
+        return primary
+    return primary.with_fallbacks(
+        list(fallbacks), exceptions_to_handle=FALLBACK_EXCEPTIONS
+    )
 
 # --- Router ----------------------------------------------------------------
 
@@ -53,16 +86,29 @@ class RouteDecision(BaseModel):
     route: Route = Field(description="The single branch to route this message to.")
 
 
-def make_router(model: BaseChatModel) -> Callable[[SupportState], dict]:
+def make_router(
+    model: BaseChatModel, fallbacks: Sequence[BaseChatModel] = ()
+) -> Callable[[SupportState], dict]:
     """Build the router node: an LLM classification that writes `route` to state."""
     # Structured output => the LLM must return a valid `RouteDecision`, so we get
-    # a clean enum value instead of parsing free text.
-    classifier = model.with_structured_output(RouteDecision)
+    # a clean enum value instead of parsing free text. Fallbacks are composed at
+    # the leaf (each model gets the SAME structured-output binding, then we chain).
+    classifier = _with_fallbacks(
+        model.with_structured_output(RouteDecision),
+        [m.with_structured_output(RouteDecision) for m in fallbacks],
+    )
 
     def router(state: SupportState) -> dict:
         messages = [SystemMessage(ROUTER_SYSTEM_PROMPT), *state["messages"]]
-        decision: RouteDecision = classifier.invoke(messages)
-        return {"route": decision.route}
+        try:
+            decision: RouteDecision = classifier.invoke(messages)
+            return {"route": decision.route}
+        except Exception:
+            # Classification is unavailable (LLM down, or unparsable output). Fail
+            # safe to the lightest branch: `answer` will emit a graceful reply if
+            # the LLM is truly down, rather than crashing the whole turn.
+            logger.exception("Router classification failed; defaulting to 'answer'.")
+            return {"route": "answer"}
 
     return router
 
@@ -81,13 +127,20 @@ ANSWER_SYSTEM_PROMPT = (
 )
 
 
-def make_answer(model: BaseChatModel) -> Callable[[SupportState], dict]:
+def make_answer(
+    model: BaseChatModel, fallbacks: Sequence[BaseChatModel] = ()
+) -> Callable[[SupportState], dict]:
     """Build the small-talk node: a plain LLM reply, no tools."""
+    chain = _with_fallbacks(model, list(fallbacks))
 
     def answer(state: SupportState) -> dict:
         messages = [SystemMessage(ANSWER_SYSTEM_PROMPT), *state["messages"]]
-        reply = model.invoke(messages)
-        return {"messages": [reply]}
+        try:
+            reply = chain.invoke(messages)
+            return {"messages": [reply]}
+        except Exception:
+            logger.exception("Answer node LLM call failed; returning graceful reply.")
+            return {"messages": [AIMessage(content=GRACEFUL_ERROR_MESSAGE)]}
 
     return answer
 
@@ -121,7 +174,9 @@ SUPPORT_SYSTEM_PROMPT = (
 
 
 def make_support_model(
-    model: BaseChatModel, tools: list[BaseTool]
+    model: BaseChatModel,
+    tools: list[BaseTool],
+    fallbacks: Sequence[BaseChatModel] = (),
 ) -> Callable[[SupportState], dict]:
     """Build the support node: the LLM step of the ReAct loop (LLM + tools).
 
@@ -129,12 +184,21 @@ def make_support_model(
     the calls, then loops back here — that back-and-forth IS the ReAct loop we
     were getting for free from `create_agent`, now made explicit.
     """
-    model_with_tools = model.bind_tools(tools)
+    # Each model (primary + fallbacks) gets the SAME tools bound, then we chain
+    # them: if the primary provider is down, the fallback answers with tools too.
+    model_with_tools = _with_fallbacks(
+        model.bind_tools(tools),
+        [m.bind_tools(tools) for m in fallbacks],
+    )
 
     def support_model(state: SupportState) -> dict:
         messages = [SystemMessage(SUPPORT_SYSTEM_PROMPT), *state["messages"]]
-        reply = model_with_tools.invoke(messages)
-        return {"messages": [reply]}
+        try:
+            reply = model_with_tools.invoke(messages)
+            return {"messages": [reply]}
+        except Exception:
+            logger.exception("Support node LLM call failed; returning graceful reply.")
+            return {"messages": [AIMessage(content=GRACEFUL_ERROR_MESSAGE)]}
 
     return support_model
 

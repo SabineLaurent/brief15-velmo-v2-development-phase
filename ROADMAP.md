@@ -107,15 +107,25 @@ qui refuse les valeurs falsy (`_for_langsmith` → `{"results": []}`). Juge
 LLM-as-judge volontairement remis à plus tard. Cible `make eval`. Vérifié en
 live : 6/6 cas passent en pytest, expérience LangSmith EU sans erreur.
 
-## Phase 10 — Persistance & robustesse (durcissement pré-prod) 🚧
+## Phase 10 — Persistance & robustesse (durcissement pré-prod) ✅
 **Concept :** backends durables (checkpointer/store), retries/backoff/timeout,
 fallback provider — un agent servi redémarre et encaisse les erreurs transitoires.
 **Livrable :** l'agent survit à un redémarrage et ne casse pas sur un `429`/timeout.
 **Fait :** persistance durable via un switch unique `PERSISTENCE_BACKEND`
 (`memory` | `sqlite`) sur le checkpointer ET le store (index sémantique durable),
 survie inter-process vérifiée en live ; retries + timeout forwardés à tous les
-providers par la factory LLM. **Reste :** fallback provider et gestion d'erreurs
-explicite dans les nœuds du graphe.
+providers par la factory LLM. **Fallback provider** (`LLM_FALLBACK_PROVIDER` /
+`LLM_FALLBACK_MODEL`) : la factory expose `get_chat_model_fallbacks()` ; comme
+`RunnableWithFallbacks` ne propage pas `bind_tools`/`with_structured_output`, les
+fallbacks sont composés **au niveau feuille** dans chaque node-factory (après le
+binding), donc les nœuds restent agnostiques (ils ne nomment aucun provider).
+Bascule sur `Exception` large (`FALLBACK_EXCEPTIONS`) car les SDK lèvent leurs
+propres types. **Gestion d'erreurs explicite** dans les 3 nœuds qui appellent le
+LLM (`router` / `answer` / `support`) : try/except + log + dégradation gracieuse
+(`GRACEFUL_ERROR_MESSAGE` au lieu d'un crash de tour ; le router échoue en `answer`).
+Les tools sont déjà couverts par `ToolNode` (`handle_tool_errors`), `escalate`
+n'appelle pas le LLM. Tests unitaires purs (sans clé/réseau) : fallback + dégradation
+gracieuse, 5/5 (`tests/test_robustness.py`) ; suite complète 11/11.
 
 ## Phase 11 — Cycle de vie du support (Case + Ticket) ⬜
 **Concept :** modéliser un dossier de support comme en prod — un **Case** (dossier
@@ -170,7 +180,7 @@ rien d'interdit — critique dès qu'un vrai client lui parle.
 - [x] Phase 7 — escalade humaine / human-in-the-loop (pause + reprise vérifiées)
 - [x] Phase 8 — outils & actions (order status + création ticket, vérifiés en live)
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
-- [~] Phase 10 — persistance & robustesse (persistance SQLite OK ; reste fallback + erreurs nœuds)
+- [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
 - [ ] Phase 11 — cycle de vie du support (Case + Ticket) ← **prochaine étape**
 - [ ] Phase 12 — sécurité & guardrails
 - [ ] Phase 13 — exposition & déploiement

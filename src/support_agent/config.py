@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     llm_max_retries: int = 3
     llm_timeout: float | None = None
 
+    # --- Fallback provider (Phase 10, robustness) ---
+    # If the PRIMARY provider is fully down (persistent 429, outage, dead key)
+    # even after the retries above, transparently fall back to a SECOND provider.
+    # Empty = no fallback (single provider). Same agnostic spirit as the primary:
+    # it is just another (provider, model) pair, built through the same factory
+    # path, and it must have its own credential set (section 2 of `.env`).
+    llm_fallback_provider: str | None = None
+    llm_fallback_model: str | None = None
+
     # --- Embeddings (Phase 4, RAG) ---
     embeddings_provider: str = "mistral"
     embeddings_model: str = "mistral-embed"

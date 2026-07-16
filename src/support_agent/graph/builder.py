@@ -28,7 +28,7 @@ from support_agent.graph.nodes import (
 from support_agent.actions import build_action_tools, get_backend
 from support_agent.graph.state import SupportState
 from support_agent.knowledge import build_faq_tool, build_vector_store
-from support_agent.llm import get_chat_model
+from support_agent.llm import get_chat_model, get_chat_model_fallbacks
 from support_agent.memory import (
     AgentContext,
     build_memory_tools,
@@ -40,6 +40,9 @@ from support_agent.memory import (
 def build_support_graph() -> CompiledStateGraph:
     """Build and compile the explicit support agent graph."""
     model = get_chat_model()
+    # Optional secondary provider(s): if the primary is fully down, the LLM nodes
+    # fall over to these instead of crashing the turn (empty list = no fallback).
+    fallbacks = get_chat_model_fallbacks()
     checkpointer = get_checkpointer()  # short-term: this conversation (thread_id)
     store = get_store()  # long-term: this customer (user_id)
 
@@ -56,9 +59,9 @@ def build_support_graph() -> CompiledStateGraph:
     # `context_schema` lets nodes and tools read the runtime `user_id`.
     builder = StateGraph(SupportState, context_schema=AgentContext)
 
-    builder.add_node("router", make_router(model))
-    builder.add_node("answer", make_answer(model))
-    builder.add_node("model", make_support_model(model, tools))
+    builder.add_node("router", make_router(model, fallbacks))
+    builder.add_node("answer", make_answer(model, fallbacks))
+    builder.add_node("model", make_support_model(model, tools, fallbacks))
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("escalate", escalate)
 

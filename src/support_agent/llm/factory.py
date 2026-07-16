@@ -24,20 +24,25 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "azure_ai": "azure_ai",  # Azure AI Foundry native models (Azure AI Inference)
 }
 
+# Exceptions that trigger a fallback to the secondary provider. Kept broad ON
+# PURPOSE: provider SDKs raise their OWN exception types (that is the whole point
+# of being agnostic), so we cannot enumerate them here. Transient blips are
+# already absorbed by `max_retries`; this net is for "the primary is really down"
+# (persistent 429, outage, dead credential). Consumed by callers that compose
+# `.with_fallbacks(..., exceptions_to_handle=FALLBACK_EXCEPTIONS)`.
+FALLBACK_EXCEPTIONS: tuple[type[BaseException], ...] = (Exception,)
 
-def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
-    """Build the configured chat model as an abstract `BaseChatModel`.
 
-    Args:
-        settings: Optional settings override (handy for tests). Defaults to the
-            process-wide cached settings.
+def _build_chat_model(
+    provider: str, model: str, settings: Settings
+) -> BaseChatModel:
+    """Build one chat model from an explicit (provider, model) pair.
 
-    Returns:
-        A ready-to-use chat model exposing the standard LangChain interface
-        (`.invoke()`, `.stream()`, tool binding, ...).
+    This is the single place that knows how to turn a provider name into a
+    concrete `BaseChatModel`. Both the primary model and every fallback go
+    through here, so they share the exact same robustness knobs and branching.
     """
-    settings = settings or get_settings()
-    provider = settings.llm_provider.lower()
+    provider = provider.lower()
 
     # Robustness knobs forwarded to every provider so a transient 429 / network
     # blip is retried with backoff instead of crashing the turn. These are the
@@ -52,7 +57,7 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
     # auto-discovered from standard env vars (MISTRAL_API_KEY, GROQ_API_KEY, ...).
     if provider in _PROVIDER_ALIASES:
         return init_chat_model(
-            model=settings.llm_model,
+            model=model,
             model_provider=_PROVIDER_ALIASES[provider],
             temperature=settings.llm_temperature,
             **robustness,
@@ -62,7 +67,7 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
     # party, or Foundry exposed as OpenAI). Just point base_url at it.
     if provider == "openai_compatible":
         return init_chat_model(
-            model=settings.llm_model,
+            model=model,
             model_provider="openai",
             temperature=settings.llm_temperature,
             base_url=settings.llm_inference_endpoint,
@@ -80,7 +85,40 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
         )
 
     raise ValueError(
-        f"Unknown LLM_PROVIDER={settings.llm_provider!r}. "
+        f"Unknown provider={provider!r}. "
         f"Expected one of: {', '.join(sorted(_PROVIDER_ALIASES))}, "
         f"openai_compatible, custom."
     )
+
+
+def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
+    """Build the configured PRIMARY chat model as an abstract `BaseChatModel`.
+
+    Args:
+        settings: Optional settings override (handy for tests). Defaults to the
+            process-wide cached settings.
+
+    Returns:
+        A ready-to-use chat model exposing the standard LangChain interface
+        (`.invoke()`, `.stream()`, tool binding, ...).
+    """
+    settings = settings or get_settings()
+    return _build_chat_model(settings.llm_provider, settings.llm_model, settings)
+
+
+def get_chat_model_fallbacks(settings: Settings | None = None) -> list[BaseChatModel]:
+    """Build the configured fallback chat model(s), or `[]` if none is set.
+
+    Callers attach these to a (possibly tool-bound) runnable with
+    `.with_fallbacks(...)` so a fully-down primary provider does not crash the
+    turn. Returning a list keeps room for a future fallback CHAIN without
+    changing the call sites.
+    """
+    settings = settings or get_settings()
+    if not settings.llm_fallback_provider or not settings.llm_fallback_model:
+        return []
+    return [
+        _build_chat_model(
+            settings.llm_fallback_provider, settings.llm_fallback_model, settings
+        )
+    ]
