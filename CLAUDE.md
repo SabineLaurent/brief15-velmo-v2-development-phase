@@ -51,12 +51,18 @@ membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
         │   ├── knowledge/   # base FAQ : ingestion, embeddings, retriever (RAG)
         │   ├── graph/       # orchestration LangGraph (nœuds, arêtes, state)
         │   ├── actions/ · guardrails/ · eval/
-        │   └── agent.py     # point d'assemblage de l'agent
+        │   ├── agent.py     # CLI interactif (assemblage du graphe)
+        │   └── api.py       # ⭐ la couture stream_reply (porte de sortie, cache LangGraph)
         └── tests/
 ```
 
-> Scopes B (frontend) et C (backend) viendront comme `packages/frontend` /
-> `packages/backend`. Voir `docs/vision.md`.
+> Scope B (frontend) existe déjà : `packages/frontend/` (coquille Chainlit). Le
+> scope C (backend) viendra comme `packages/backend`. Voir `docs/vision.md`.
+>
+> 🧭 **Un `CLAUDE.md` par package.** Chaque membre porte son propre `CLAUDE.md`
+> (règles **locales**), lu **à la demande** quand je travaille dans ce sous-arbre.
+> Ce fichier racine reste la source des **invariants transverses** (toujours
+> chargés) ; les fichiers de package **précisent**, ils ne remplacent pas.
 
 ## Commandes
 
