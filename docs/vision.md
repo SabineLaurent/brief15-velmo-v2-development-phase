@@ -69,65 +69,30 @@ paralysie), on s'abstrait de ce qui est **volatil et coûteux à changer**.
   d'observabilité. Lock-in choisi, structurant, et terrain d'expérimentation
   volontaire pour ce projet.
 
-## 6. La structure repo : un mono-repo, outillé pour 2026
+## 6. Un dépôt unique pour des scopes découplés
 
-**Décision : mono-repo** (un seul dépôt), pas des repos séparés.
+Choix **stratégique** (le *pourquoi*, pas le *comment*) : les 3 scopes vivent dans
+**un seul dépôt**, pas dans des dépôts séparés. Pour un projet solo de portfolio,
+le mono-dépôt sert l'objectif — un seul clone, des changements atomiques à travers
+les coutures, et surtout un lecteur qui voit les **3 scopes côte à côte, frontières
+explicites**. Ça *prouve* qu'on sait découpler sans fragmenter (là où 3 dépôts
+séparés obligeraient à tout recoller à la main, sans bénéfice à cette échelle).
 
-**Pourquoi pas des repos séparés (polyrepo).** Le seul vrai bénéfice du polyrepo
-(équipes indépendantes, releases séparées, accès cloisonné) ne s'applique pas à
-un projet solo. On n'en paierait que les coûts : compatibilité inter-repos gérée
-à la main, pas de changement atomique à travers une couture, CI multipliées — et
-un lecteur devrait cloner 3 dépôts pour comprendre le système. À rebours de
-l'effet portfolio.
-
-**Pourquoi le mono-repo sert le portfolio.** Un seul clone, des changements
-atomiques à travers les coutures, une CI unique déclenchée par chemin — et
-surtout un reviewer voit les **3 scopes propres côte à côte, frontières
-explicites**. Ça *prouve* qu'on sait découpler sans fragmenter.
-
-**L'outillage (le point d'actualité).** Mono vs poly est consensuel ; ce qui date
-un projet, c'est le *comment*.
-
-- **Court terme, tout est Python** (cœur + Chainlit + back) → **uv workspace** :
-  plusieurs packages, chacun son `pyproject.toml`, **un seul `uv.lock` partagé**.
-  Réponse native et à jour, zéro outil en plus. La couture devient *littérale* :
-  le package `frontend` déclare `support-agent = { workspace = true }` et rien
-  d'autre — frontière appliquée au niveau des dépendances, pas par convention.
-- **Plus tard, si un front JS/React arrive** → *polyglot monorepo* (uv workspace
-  Python + dossier app JS). Task-runner léger (**Turborepo / Nx**) *seulement si
-  besoin*. On **évite Bazel / Pants** : surdimensionné pour un solo, nuit à la
-  lisibilité portfolio. On reste léger : `Makefile` + CI par chemin.
-
-**Structure cible :**
-
-```
-agnostic-consumer-support-AI-agent/     ← racine = workspace root
-├── pyproject.toml          # [tool.uv.workspace] members = ["packages/*"]
-├── uv.lock                 # UN lockfile partagé
-├── Makefile                # porte d'entrée unique (make run / ui / test…)
-├── docs/                   # docs partagées (vision, spec, archi, roadmap)
-└── packages/
-    ├── support-agent/      # Scope A — le cœur (l'actuel src/support_agent)
-    │   └── src/support_agent/
-    ├── frontend/           # Scope B — la coquille (Chainlit → puis web)
-    │   └── (dépend de support-agent en workspace = true)
-    └── backend/            # Scope C — plus tard (vrai SI, Postgres…)
-```
-
-**Coût de migration :** déplacer `src/support_agent/` → `packages/support-agent/`
-(+ ajuster `pyproject.toml`, `Makefile`, `CLAUDE.md`). À faire **avant** que le
-front existe = le moment le moins cher ; attendre = plus de churn.
+> 🔧 **La traduction physique** de ce choix (organisation des dossiers, outillage
+> uv workspace, arbre `packages/`, migration) est de l'architecture factuelle :
+> elle vit dans [`architecture.md`](architecture.md), pas ici.
 
 ## 7. Le frontend : deux niveaux de visibilité
 
-- **Étape 1 — visibilité immédiate** : coquille **Chainlit** (Python) branchée
-  sur le point d'entrée `stream_reply`. Chat web, streaming, affichage des outils.
-  Assumée *non-prod* : un GIF de 20 s pour le README, pas la porte d'entrée finale.
+- **Étape 1 — visibilité immédiate** : une coquille de démo, assumée *non-prod*,
+  pour *voir* l'agent parler (chat web, streaming). But : un GIF de 20 s pour le
+  README — pas la porte d'entrée finale.
 - **Étape 2 — vrai front déployé** : interface web séparée, **URL live**,
-  consommant l'API (Phase 13). Auth + streaming + backend durable côté couture.
+  consommant l'agent par la couture API (Phase 13).
 
 ---
 
 > 📌 Document vivant. On le met à jour quand un scope démarre, quand une couture
-> se matérialise (API), ou quand la structure repo évolue. Voir aussi
-> `ROADMAP.md` (le chemin) et `docs/perimetre-final.md` (la definition of done).
+> se matérialise (API), ou quand le cap évolue. Voir aussi `ROADMAP.md` (le
+> chemin), [`architecture.md`](architecture.md) (le COMMENT physique) et
+> `docs/perimetre-final.md` (la definition of done).

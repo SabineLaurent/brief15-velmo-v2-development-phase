@@ -133,7 +133,57 @@ décisions du graphe) est tracée automatiquement. Indispensable pour comprendre
 | Orchestration | LangGraph | Stateful, mémoire, human-in-the-loop natifs |
 | Abstraction LLM | `BaseChatModel` + factory | Cœur de l'agnosticisme |
 
-## 9. Principe de code à appliquer
+## 9. Structure du dépôt (mono-repo + uv workspace)
+
+> Traduction **physique** du choix stratégique « un dépôt, des scopes découplés »
+> (le *pourquoi* est dans [`vision.md`](vision.md)). Ici : le *comment* factuel.
+
+**Mécanique uv workspace.** Un *workspace* = plusieurs packages Python dans un même
+dépôt, gérés d'un bloc : chaque package a son propre `pyproject.toml` (ses
+dépendances), mais **tous partagent un unique `uv.lock` et un unique `.venv`**. Un
+package en dépend d'un autre via `dep = { workspace = true }` — la dépendance
+interne est alors éditable, sans publication. On garde `uv sync` / `uv run` /
+`make …` depuis la racine, comme aujourd'hui.
+
+**État actuel** : dépôt mono-package — `pyproject.toml` racine + code dans
+`src/support_agent/`.
+
+**Structure cible** (appliquée à l'étape **B1.0** du scope Frontend, voir
+`ROADMAP.md`) :
+
+```
+agnostic-consumer-support-AI-agent/     ← racine = workspace root
+├── pyproject.toml          # [tool.uv.workspace] members = ["packages/*"]
+├── uv.lock                 # UN lockfile partagé
+├── Makefile                # porte d'entrée unique (make run / ui / test…)
+├── docs/                   # docs partagées (vision, spec, archi, roadmap)
+└── packages/
+    ├── support-agent/      # Scope A — le cœur (l'actuel src/support_agent)
+    │   ├── pyproject.toml
+    │   └── src/support_agent/
+    ├── frontend/           # Scope B — la coquille (Chainlit → puis web)
+    │   ├── pyproject.toml   # dépend de support-agent en workspace = true
+    │   └── …
+    └── backend/            # Scope C — plus tard (vrai SI, Postgres…)
+```
+
+**Migration** (physique, à faire tant que le cœur est seul = moins de churn) :
+déplacer `src/support_agent/` → `packages/support-agent/`, découper le
+`pyproject.toml` (un « workspace root » + un par package), ajuster `Makefile` et
+la section « Structure » de `CLAUDE.md`. Les imports internes
+(`from support_agent…`) et le lockfile unique restent inchangés.
+
+**Évolution polyglotte** (si un front JS/React arrive) : uv workspace pour le
+Python + un dossier app JS ; task-runner léger (**Turborepo / Nx**) *seulement si
+besoin*. On **évite Bazel / Pants** (surdimensionné pour un solo). Reste léger :
+`Makefile` + CI par chemin.
+
+> 🧩 Le lockfile mutualisé du workspace **n'enferme dans aucune topologie de
+> déploiement** : un lockfile → N images conteneurs indépendantes ; front et BDD
+> restent interchangeables (API réseau + ports + variables d'env). Détail dans
+> [`workspace-et-deploiement.md`](workspace-et-deploiement.md).
+
+## 10. Principe de code à appliquer
 
 - clean code;
 - SoC;
