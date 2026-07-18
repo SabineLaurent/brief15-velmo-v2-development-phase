@@ -92,12 +92,17 @@ en B1.4). Lancer : `chainlit run packages/frontend/src/frontend/app.py -w` depui
 la **racine** (cwd où vivent `data/faq` + le SQLite). Les fichiers générés par
 Chainlit (`chainlit.md`, `.chainlit/`) sont `.gitignore` jusqu'à B1.6.
 
-## Phase B1.3 — Le streaming token par token ⬜
+## Phase B1.3 — Le streaming token par token ✅
 **Concept :** `msg.stream_token(token)` + `msg.update()`. **Pourquoi c'est
 critique** : un chat non-streamé qui répond en 6 s est *perçu comme cassé*
 (cf. [`perimetre-final.md`](perimetre-final.md) §6). Brancher le générateur de
 `stream_reply` sur le flux Chainlit.
 **Livrable :** la réponse s'écrit **au fil de l'eau**, comme un vrai assistant.
+**Fait :** diff **uniquement** dans `on_message` (le cerveau ne bouge pas) —
+`cl.Message(content="")` puis `await reply.stream_token(token)` par token,
+`await reply.update()` à la fin. Tout le streaming (run du graphe, filtre routeur)
+reste **derrière** `stream_reply` : le front ne touche jamais LangGraph, à
+l'inverse du tuto Chainlit classique qui ferait `graph.stream(...)` ici même.
 
 ## Phase B1.4 — Session, `thread_id` & identité ⬜
 **Concept :** `cl.user_session` (état par session) et `cl.context.session.id`
@@ -143,8 +148,8 @@ vision (§1).
 - [x] B1.0 — migration workspace (`packages/*`)
 - [x] B1.1 — couture `stream_reply` (côté agent)
 - [x] B1.2 — hello Chainlit (coquille minimale)
-- [ ] B1.3 — streaming token par token ← **prochaine étape**
-- [ ] B1.4 — session, `thread_id` & identité
+- [x] B1.3 — streaming token par token
+- [ ] B1.4 — session, `thread_id` & identité ← **prochaine étape**
 - [ ] B1.5 — sources FAQ & visibilité des étapes
 - [ ] B1.6 — escalade dans l'UI + polish + GIF
 - [ ] B2 — vrai front déployé (après Phase 13)
