@@ -9,9 +9,29 @@ on pourra remplacer Chainlit par un vrai front sans toucher au cerveau.
 
 ## Lancer
 
+Depuis la **racine du repo** (pas depuis ce dossier) :
+
 ```bash
-chainlit run packages/frontend/src/frontend/app.py -w
+uv run chainlit run packages/frontend/src/frontend/app.py -w
 ```
 
-`-w` = rechargement à chaud (watch) pendant le développement. Une porte d'entrée
-`make ui` viendra en phase B1.6.
+Puis ouvrir `http://localhost:8000`. `Ctrl-C` pour arrêter.
+
+### Décomposition de la commande
+
+| Morceau | Rôle |
+|---|---|
+| `uv run` | Exécute dans le **`.venv` partagé** du workspace (après sync auto). C'est ce qui met `chainlit` + `support_agent` dans le PATH sans activer de venv à la main. |
+| `chainlit run` | Sous-commande du CLI qui **démarre le serveur** de l'app (FastAPI/uvicorn + socket temps réel sous le capot) et sert la page de chat. |
+| `packages/…/app.py` | La **cible** : le fichier que Chainlit charge pour **découvrir les handlers** décorés (`@cl.on_chat_start`, `@cl.on_message`). Chemin **relatif au cwd**. |
+| `-w` (`--watch`) | **Rechargement à chaud** : Chainlit resurveille le fichier et recharge dès qu'on l'édite. Confort de dev (utile en B1.3) ; inutile en démo figée. |
+
+### Pourquoi **depuis la racine** ?
+
+Le cwd = la racine, car l'agent résout ses données en **chemins relatifs** :
+`./data/faq` (la FAQ) et `./data/agent_state.sqlite3` (la mémoire SQLite). Lancer
+d'ailleurs casserait ces chemins.
+
+> Détails : port par défaut `8000` (surcharge `--port 8765`) ; au 1er lancement
+> Chainlit génère `chainlit.md` + `.chainlit/` à la racine (`.gitignore` jusqu'à
+> B1.6). Une porte d'entrée `make ui` viendra aussi en B1.6.
