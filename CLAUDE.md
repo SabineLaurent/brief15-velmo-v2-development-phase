@@ -86,6 +86,7 @@ make check    # lint + tests
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Qui gère le streaming de la réponse (agent / API / front) ? » → `docs/streaming.md`
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
+- « C'est quoi ce mot d'anglais tech ? » → `docs/glossaire.md`
 - « Pourquoi cette structure de package (src layout, tiret/underscore) ? » → `docs/anatomie-package-workspace.md`
 
 ## Ce que Claude doit faire
