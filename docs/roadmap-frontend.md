@@ -54,7 +54,7 @@ front. La couture `stream_reply` est ce qui rend Chainlit **jetable**.
 **Fait :** commit `ed9fb1a` (voir [`architecture.md`](architecture.md) §9 et
 [`anatomie-package-workspace.md`](anatomie-package-workspace.md)).
 
-## Phase B1.1 — La couture API : `stream_reply` (côté agent) ⬜
+## Phase B1.1 — La couture API : `stream_reply` (côté agent) ✅
 **Concept :** un **contrat stable** entre l'agent et n'importe quel front — un
 point d'entrée unique qui **cache** LangGraph. Pourquoi : c'est ce qui garde le
 front interchangeable (on pourra jeter Chainlit).
@@ -69,6 +69,13 @@ Chainlit (un petit script qui itère sur le générateur).
 structurée, `answer`, `support`). En `stream_mode="messages"`, il faut **ne
 streamer que la réponse cliente**, pas la décision du routeur. Ce filtrage vit
 **dans la couture**, pas dans le front.
+**Fait :** `packages/support-agent/src/support_agent/api.py` — `stream_reply`
+async, ré-exportée par `support_agent`. Filtrage par nœud
+(`CUSTOMER_FACING_NODES = {answer, model}`, le `router` ne fuite jamais). Pont
+sync→async par thread + `asyncio.Queue` : on garde le checkpointer **sync**, donc
+le backend `sqlite` reste valide (pas d'`astream`/`AsyncSqliteSaver` imposé).
+Repli « réponse toujours livrée » si aucun token n'est streamé (input bloqué,
+erreur gracieuse, escalade). Smoke sans front : `uv run python -m support_agent.api`.
 
 ## Phase B1.2 — « Hello Chainlit » : la coquille minimale ⬜
 **Concept :** le **cycle de vie** d'une app Chainlit — `@cl.on_chat_start`,
@@ -127,8 +134,8 @@ vision (§1).
 
 ### Où on en est (scope B)
 - [x] B1.0 — migration workspace (`packages/*`)
-- [ ] B1.1 — couture `stream_reply` (côté agent) ← **prochaine étape**
-- [ ] B1.2 — hello Chainlit (coquille minimale)
+- [x] B1.1 — couture `stream_reply` (côté agent)
+- [ ] B1.2 — hello Chainlit (coquille minimale) ← **prochaine étape**
 - [ ] B1.3 — streaming token par token
 - [ ] B1.4 — session, `thread_id` & identité
 - [ ] B1.5 — sources FAQ & visibilité des étapes
