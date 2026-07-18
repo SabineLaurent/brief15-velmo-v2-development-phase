@@ -6,6 +6,17 @@ resolution-markers = [
     "python_full_version < '3.12'",
 ]
 
+[manifest]
+members = [
+    "support-agent",
+]
+
+[manifest.dependency-groups]
+dev = [
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "ruff", specifier = ">=0.6" },
+]
+
 [[package]]
 name = "aiosqlite"
 version = "0.22.1"
@@ -1054,7 +1065,7 @@ wheels = [
 [[package]]
 name = "support-agent"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "packages/support-agent" }
 dependencies = [
     { name = "langchain" },
     { name = "langchain-mistralai" },
@@ -1069,12 +1080,6 @@ dependencies = [
     { name = "python-dotenv" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "langchain", specifier = ">=0.3" },
@@ -1087,12 +1092,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "ruff", specifier = ">=0.6" },
 ]
 
 [[package]]
