@@ -43,17 +43,102 @@ plutôt que de les découvrir en production.
 > **Promus en phases** (voir ROADMAP) : *Persistance durable* et *Robustesse* →
 > **Phase 10** (persistance SQLite faite, fallback/erreurs restants) ; *Sécurité
 > & guardrails* → **Phase 12**. Le *cycle de vie du support* (Case + Ticket) est
-> devenu la **Phase 11**. Restent au radar :
+> devenu la **Phase 11**.
 
-1. **Coût & latence**
-   Choix du modèle par tâche (ex : un petit modèle suffit pour le nœud `router`),
-   streaming des réponses, caching, résumé de conversation pour les fils longs.
-   Un chatbot pro doit être rapide et maîtrisé côté budget.
+> 🧭 **À lire d'abord — la nature du gap.** Le socle *conceptuel* est déjà de
+> niveau pro (agnosticisme LLM, mémoire court/long terme, RAG, orchestration
+> explicite, human-in-the-loop, éval, robustesse, guardrails). Ce qui sépare
+> encore l'agent d'un vrai système de prod n'est donc **pas de l'architecture** :
+> c'est de l'**infrastructure, de l'opérationnel et de la conformité**. On classe
+> les manques par gravité, du bloquant au raffinement.
 
-2. **Cycle de vie de la mémoire**
-   Mise à jour / oubli des faits obsolètes. Aujourd'hui `save_memory` empile une
-   nouvelle entrée sans jamais corriger : si un client change d'avis, les deux
+### B.1 — Bloquants absolus (sans ça, « prod » est un abus de langage)
+
+1. **Exposition — l'agent n'est appelable par personne.**
+   C'est la **Phase 13** (pas faite). Aujourd'hui c'est un
+   `python -m support_agent.agent` en CLI : pas d'API, pas de serveur, pas de
+   contrat d'interface.
+
+2. **Authentification & autorisation** — le trou le plus dangereux.
+   Toute l'isolation (mémoire, tickets, evaluator `no_cross_user_leak`) repose sur
+   `user_id` **passé dans le contexte runtime**. Rien ne prouve que l'appelant
+   *est* ce `user_id`. Il faut une couche d'auth (token/session) qui **dérive**
+   `user_id` d'une identité vérifiée — sinon n'importe qui lit les commandes et la
+   mémoire de n'importe qui. Les guardrails protègent de l'injection, **pas** de
+   l'usurpation.
+
+3. **Backends réels, pas « InMemory ».**
+   Le défaut est en RAM, SQLite optionnel :
+   - `InMemorySupportBackend` → écrire l'adaptateur vers le **vrai SI** (commandes,
+     tickets). Le port `SupportBackend` est prêt, l'adaptateur reste à faire.
+   - Checkpointer/Store SQLite = mono-nœud → un service multi-instances a besoin de
+     **Postgres** (`PostgresSaver` / `PostgresStore`).
+   - FAQ en `InMemoryVectorStore` (4 fichiers réingérés au boot) → un **vector
+     store** persistant + un pipeline de ré-ingestion (la FAQ évolue).
+
+### B.2 — Qualité prod attendue (pas bloquant au boot, mais un pro le voit tout de suite)
+
+4. **Cycle de vie du support** — c'est la **Phase 11** : Case auto, statuts,
+   signature, détection de récurrence. Sans ça, pas de traçabilité des dossiers.
+
+5. **Observabilité au-delà du tracing.**
+   LangSmith trace les runs (idéal pour débuguer), mais il manque le triptyque
+   d'exploitation : **métriques** (latence p95, taux d'escalade, coût/conversation,
+   taux de résolution), **logs structurés** centralisés, **alerting/SLO**. « Est-ce
+   que l'agent va bien, là, maintenant ? » n'a aujourd'hui pas de réponse.
+
+6. **Coût & latence.**
+   Choix du modèle par tâche (un petit modèle suffit pour le nœud `router`),
+   **streaming** des réponses (UX indispensable en chat), caching, résumé de
+   conversation pour les fils longs. Un chat non-streamé qui répond en 6 s est
+   perçu comme cassé.
+
+7. **Rate-limiting distribué.**
+   Le `RateLimiter` de la Phase 12 est **in-process** (documenté comme à remplacer
+   par Redis). En multi-instances, la limite ne tient plus.
+
+### B.3 — Conformité & gouvernance (l'oubli fatal classique d'un projet « technique »)
+
+8. **RGPD / cycle de vie de la donnée.**
+   La PII est masquée avant persistance (bien), mais il manque : **rétention**
+   (purge auto), **droit à l'oubli** (supprimer *tout* d'un `user_id` sur demande),
+   consentement. Inclut le **cycle de vie de la mémoire** : `save_memory` empile
+   une nouvelle entrée sans jamais corriger → si un client change d'avis, deux
    faits contradictoires coexistent.
+
+9. **Gestion des secrets.**
+   Clés API dans `.env` → en prod : **secret manager** (Vault / KMS cloud),
+   rotation, aucune clé en clair sur disque.
+
+10. **La vraie boucle humaine.**
+    `interrupt()` met le graphe en pause en mémoire — mais côté opérateur, ni file
+    d'attente ni interface. Une escalade doit atterrir quelque part (queue,
+    dashboard agent, SLA de reprise).
+
+### B.4 — Rigueur d'ingénierie
+
+11. **CI/CD.**
+    `make check` existe (lint + tests) mais aucune **CI** ne le lance à chaque
+    push, ni de pipeline de déploiement. La non-régression n'est utile que si elle
+    est **automatique**.
+
+12. **Couverture de tests élargie.**
+    Aujourd'hui : guardrails, robustesse, éval. Manquent les nœuds du graphe, les
+    chemins d'erreur, et un test d'intégration bout-en-bout.
+
+### Priorisation (ordre qui minimise le risque réel)
+
+1. **Auth/authz** (2) + **backends durables Postgres & SI réel** (3) — sans ça,
+   le reste est cosmétique.
+2. **Exposition/API** (Phase 13) + **streaming** (6).
+3. **Observabilité opérationnelle** (5) + **CI** (11).
+4. **Conformité RGPD** (8) + **secrets** (9).
+5. **Phase 11** (cycle de vie) pour la complétude métier.
+
+> ⚠️ Conséquence pour la ROADMAP : pour mériter le mot *prod*, la **Phase 13**
+> (« exposition ») doit embarquer **auth + streaming + un backend durable**, pas
+> juste « un endpoint qui répond ». Le chemin pédagogique reste 11 → 13 ; c'est le
+> *contenu* de la 13 qui monte en exigence.
 
 ---
 
