@@ -24,6 +24,11 @@ chroma/
 # LangGraph / checkpoints locaux
 *.checkpoint
 
+# Chainlit (scope B) — fichiers générés au 1er lancement à la racine (cwd).
+# Le chainlit.md soigné + le thème arrivent en phase B1.6 ; d'ici là, on ignore.
+/.chainlit/
+/chainlit.md
+
 # OS / IDE
 .DS_Store
 .idea/

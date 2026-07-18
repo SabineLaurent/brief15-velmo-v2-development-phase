@@ -77,13 +77,20 @@ le backend `sqlite` reste valide (pas d'`astream`/`AsyncSqliteSaver` imposé).
 Repli « réponse toujours livrée » si aucun token n'est streamé (input bloqué,
 erreur gracieuse, escalade). Smoke sans front : `uv run python -m support_agent.api`.
 
-## Phase B1.2 — « Hello Chainlit » : la coquille minimale ⬜
+## Phase B1.2 — « Hello Chainlit » : la coquille minimale ✅
 **Concept :** le **cycle de vie** d'une app Chainlit — `@cl.on_chat_start`,
 `@cl.on_message`, `cl.Message(...).send()`, la commande `chainlit run`. Créer le
 membre `packages/frontend/` (dépend de `support-agent` via `workspace = true`).
 **Livrable :** une page de chat dans le navigateur qui appelle `stream_reply` et
 affiche la réponse **complète** (pas encore de streaming). *On voit l'agent parler.*
 **Pédagogie :** d'abord le câblage (un tour qui marche), le confort ensuite.
+**Fait :** membre `packages/frontend/` (Chainlit 2.11, dépendance workspace sur
+`support-agent`). `src/frontend/app.py` importe **uniquement** `stream_reply` —
+zéro import lang*. `on_message` draine le générateur puis envoie la réponse d'un
+coup (streaming = B1.3). `thread_id = cl.context.session.id` (identité formalisée
+en B1.4). Lancer : `chainlit run packages/frontend/src/frontend/app.py -w` depuis
+la **racine** (cwd où vivent `data/faq` + le SQLite). Les fichiers générés par
+Chainlit (`chainlit.md`, `.chainlit/`) sont `.gitignore` jusqu'à B1.6.
 
 ## Phase B1.3 — Le streaming token par token ⬜
 **Concept :** `msg.stream_token(token)` + `msg.update()`. **Pourquoi c'est
@@ -135,8 +142,8 @@ vision (§1).
 ### Où on en est (scope B)
 - [x] B1.0 — migration workspace (`packages/*`)
 - [x] B1.1 — couture `stream_reply` (côté agent)
-- [ ] B1.2 — hello Chainlit (coquille minimale) ← **prochaine étape**
-- [ ] B1.3 — streaming token par token
+- [x] B1.2 — hello Chainlit (coquille minimale)
+- [ ] B1.3 — streaming token par token ← **prochaine étape**
 - [ ] B1.4 — session, `thread_id` & identité
 - [ ] B1.5 — sources FAQ & visibilité des étapes
 - [ ] B1.6 — escalade dans l'UI + polish + GIF
