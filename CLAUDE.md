@@ -30,16 +30,33 @@ fournisseur du LLM comme au projet métier.
 
 ## Structure
 
+Mono-repo **uv workspace** (pourquoi : `docs/vision.md` ; comment physique :
+`docs/architecture.md` §9). La racine n'est pas un package : elle orchestre les
+membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
+
 ```
-src/support_agent/
-├── config.py        # Chargement typé de la config (.env) — Pydantic Settings
-├── llm/             # ⭐ Cœur agnostique : factory + adaptateurs providers
-├── memory/          # Mémoire court terme (checkpointer) + long terme (store)
-├── knowledge/       # Base FAQ : ingestion, embeddings, retriever (RAG)
-├── graph/           # Orchestration LangGraph (nœuds, arêtes, state)
-└── agent.py         # Point d'assemblage de l'agent
-docs/                # spec.md (le QUOI) + architecture.md (le COMMENT)
+./                          # racine = workspace root (virtuel)
+├── pyproject.toml          # [tool.uv.workspace] members = ["packages/*"] + dev
+├── uv.lock                 # UN lockfile partagé
+├── Makefile                # porte d'entrée unique (make run / test / check…)
+├── data/                   # runtime : FAQ (data/faq) + SQLite (chemins cwd-relatifs)
+├── docs/                   # spec.md (QUOI) + architecture.md (COMMENT) + vision.md
+└── packages/
+    └── support-agent/      # ⭐ Scope A — le cœur (l'agent)
+        ├── pyproject.toml   # le package + ses deps (build hatchling)
+        ├── src/support_agent/
+        │   ├── config.py    # config typée (.env) — Pydantic Settings
+        │   ├── llm/         # ⭐ cœur agnostique : factory + adaptateurs providers
+        │   ├── memory/      # mémoire court terme (checkpointer) + long terme (store)
+        │   ├── knowledge/   # base FAQ : ingestion, embeddings, retriever (RAG)
+        │   ├── graph/       # orchestration LangGraph (nœuds, arêtes, state)
+        │   ├── actions/ · guardrails/ · eval/
+        │   └── agent.py     # point d'assemblage de l'agent
+        └── tests/
 ```
+
+> Scopes B (frontend) et C (backend) viendront comme `packages/frontend` /
+> `packages/backend`. Voir `docs/vision.md`.
 
 ## Commandes
 
