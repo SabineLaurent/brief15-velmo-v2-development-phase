@@ -145,8 +145,13 @@ package en dépend d'un autre via `dep = { workspace = true }` — la dépendanc
 interne est alors éditable, sans publication. On garde `uv sync` / `uv run` /
 `make …` depuis la racine, comme aujourd'hui.
 
-**État actuel** : dépôt mono-package — `pyproject.toml` racine + code dans
-`src/support_agent/`.
+> 📦 **Anatomie d'un membre** (les 3 niveaux `support-agent/src/support_agent/`,
+> et le pourquoi du tiret vs underscore) : voir
+> [`anatomie-package-workspace.md`](anatomie-package-workspace.md).
+
+**État actuel** : migration B1.0 faite — le cœur vit dans
+`packages/support-agent/` (workspace root virtuel à la racine + le membre
+`support-agent`). Scopes B (frontend) et C (backend) pas encore matérialisés.
 
 **Structure cible** (appliquée à l'étape **B1.0** du scope Frontend, voir
 `ROADMAP.md`) :

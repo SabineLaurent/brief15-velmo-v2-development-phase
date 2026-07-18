@@ -5,6 +5,8 @@
 > déploiement ? »*. Réponse : **non** — le workspace organise le **code au dev**,
 > les conteneurs / l'API / les variables d'env organisent le **déploiement au
 > runtime**. Deux mondes distincts. Complète [`architecture.md`](architecture.md) §9.
+> Pour l'**anatomie d'un membre** (structure des dossiers, noms tiret/underscore) :
+> [`anatomie-package-workspace.md`](anatomie-package-workspace.md).
 
 ## Le nœud : `uv.lock` mutualisé ≠ conteneurs soudés
 

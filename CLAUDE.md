@@ -76,9 +76,10 @@ make check    # lint + tests
 - « Comment c'est conçu techniquement ? » → `docs/architecture.md`
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md`
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
-- « Comment on choisit le provider LLM ? » → `.env` + `src/support_agent/llm/`
+- « Comment on choisit le provider LLM ? » → `.env` + `packages/support-agent/src/support_agent/llm/`
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
+- « Pourquoi cette structure de package (src layout, tiret/underscore) ? » → `docs/anatomie-package-workspace.md`
 
 ## Ce que Claude doit faire
 
