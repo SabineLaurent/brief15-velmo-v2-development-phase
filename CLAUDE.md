@@ -74,7 +74,7 @@ make check    # lint + tests
 
 - « Quel est le besoin métier ? » → `docs/spec.md`
 - « Comment c'est conçu techniquement ? » → `docs/architecture.md`
-- « Quelles sont les étapes du tuto ? » → `ROADMAP.md`
+- « Quelles sont les étapes du tuto ? » → `ROADMAP.md` (scope A) · `docs/roadmap-frontend.md` (scope B)
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `packages/support-agent/src/support_agent/llm/`
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
