@@ -78,6 +78,7 @@ make check    # lint + tests
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `packages/support-agent/src/support_agent/llm/`
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
+- « Qui gère le streaming de la réponse (agent / API / front) ? » → `docs/streaming.md`
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
 - « Pourquoi cette structure de package (src layout, tiret/underscore) ? » → `docs/anatomie-package-workspace.md`
 

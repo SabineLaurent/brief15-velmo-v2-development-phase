@@ -103,6 +103,8 @@ critique** : un chat non-streamé qui répond en 6 s est *perçu comme cassé*
 `await reply.update()` à la fin. Tout le streaming (run du graphe, filtre routeur)
 reste **derrière** `stream_reply` : le front ne touche jamais LangGraph, à
 l'inverse du tuto Chainlit classique qui ferait `graph.stream(...)` ici même.
+**Répartition des rôles (agent produit / API transporte / front affiche) et
+placement du smoothing/typewriter :** voir [`streaming.md`](streaming.md).
 
 ## Phase B1.4 — Session, `thread_id` & identité ⬜
 **Concept :** `cl.user_session` (état par session) et `cl.context.session.id`
