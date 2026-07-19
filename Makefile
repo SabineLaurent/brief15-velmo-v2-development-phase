@@ -6,7 +6,7 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run eval test lint format check clean
+.PHONY: help setup install run eval latency test lint format check clean
 
 help: ## Affiche cette aide
 	@echo "Agnostic Support AI Agent — commandes disponibles :"
@@ -26,6 +26,9 @@ run: ## Lance l'agent de support
 
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run
+
+latency: ## Mesure le TTFT + la durée par nœud (cf. docs/latence.md)
+	$(UV) run python -m support_agent.latency
 
 test: ## Lance les tests (pytest)
 	$(UV) run pytest
