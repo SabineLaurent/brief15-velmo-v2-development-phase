@@ -44,6 +44,17 @@ bon LLM depuis `.env` → c'est le cœur concret de l'agnosticisme.
 Le **plan B automatique** : si le fournisseur principal est en panne, on bascule
 sur un secondaire sans planter le tour. *(Littéral. « se rabattre sur ».)*
 
+## hop
+
+*(Litt. « saut / bond ».)* Un **aller-retour complet vers le LLM** : ton code
+envoie un prompt → réseau → le modèle traite → la réponse revient. **Un appel =
+un hop.** Le coût d'un hop est surtout du **round-trip + traitement du prompt**
+(pas la puissance du modèle) : une question client qui enchaîne **3 hops
+séquentiels** (router → décision d'outil → réponse) paie **3×** ce coût fixe. D'où
+la hiérarchie des leviers de latence : **supprimer un hop** économise ~1 s d'un
+coup, alors que **prendre un modèle plus petit** ne change presque rien. Cf.
+`latence.md`.
+
 ## hot reload / watch (`-w`)
 
 Le **rechargement à chaud** : l'outil surveille les fichiers et recharge l'app
