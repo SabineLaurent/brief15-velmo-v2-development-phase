@@ -129,17 +129,21 @@ def guard_route(state: SupportState) -> str:
 ROUTER_SYSTEM_PROMPT = (
     "You are the router of a customer-support agent. Read the LAST user message "
     "(in the context of the conversation) and classify it into exactly one route:\n"
-    "- 'support': any factual request about orders, delivery, returns, refunds, "
-    "payment, account or warranty; anything that needs the FAQ or the memory of "
-    "what the customer told you before; OR any action the agent can take on the "
-    "customer's behalf, including looking up an order and opening a support "
-    "ticket for a defect or follow-up (the agent can create tickets itself).\n"
+    "- 'support': any request for information OR action about the store — orders, "
+    "delivery, returns, refunds, payment, account, warranty, OR what the store "
+    "sells and whether a product or service is available; anything that needs the "
+    "FAQ or the memory of what the customer told you before; OR any action the "
+    "agent can take on the customer's behalf, including looking up an order and "
+    "opening a support ticket for a defect or follow-up (the agent can create "
+    "tickets itself). When in doubt about a factual or product question, choose "
+    "'support': it checks the FAQ instead of guessing.\n"
     "- 'escalate': ONLY when the customer must reach a human right now — they "
     "explicitly ask for a human agent, or the case needs a live human decision "
     "(legal, formal dispute, distress). This pauses the conversation. Opening a "
     "ticket does NOT belong here: that is 'support'.\n"
-    "- 'answer': greetings, thanks, small talk, or a simple message that needs "
-    "no lookup.\n"
+    "- 'answer': ONLY purely social messages that carry no informational request — "
+    "greetings, thanks, goodbyes, small talk. If the message asks for ANY fact or "
+    "action, it is 'support', not 'answer'.\n"
     "Answer with the route only."
 )
 
@@ -247,6 +251,12 @@ def make_support_model(
     This node decides whether to answer or to call a tool. The `tools` node runs
     the calls, then loops back here — that back-and-forth IS the ReAct loop we
     were getting for free from `create_agent`, now made explicit.
+
+    Runs entirely on the STRONG model. We measured a per-pass cascade (fast model
+    for the tool-decision pass) and it did NOT help TTFT on our Azure deployment —
+    the small model was even slower on the tool-bound decision call, because the
+    cost is the round-trip + long prompt, not the model size. Only the `router`
+    keeps the fast model. See `docs/latence.md`.
     """
     # Each model (primary + fallbacks) gets the SAME tools bound, then we chain
     # them: if the primary provider is down, the fallback answers with tools too.

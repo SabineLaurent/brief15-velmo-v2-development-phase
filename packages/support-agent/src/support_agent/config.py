@@ -25,6 +25,11 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # An empty line in `.env` (`LLM_TIMEOUT=`) means "not set", not "empty
+        # string": fall back to the default below instead of feeding `""` to the
+        # validator. Without this, optional numeric fields fail to parse and
+        # optional string fields silently become `""` instead of `None`.
+        env_ignore_empty=True,
     )
 
     # --- LLM selection (the agnostic core) ---
@@ -53,6 +58,18 @@ class Settings(BaseSettings):
     # path, and it must have its own credential set (section 2 of `.env`).
     llm_fallback_provider: str | None = None
     llm_fallback_model: str | None = None
+
+    # --- Fast model role (latency: small -> strong cascade) ---
+    # The router and the support node's tool-decision pass are easy LLM calls that
+    # sit on the critical path BEFORE the first streamed token. Running them on a
+    # small fast model (e.g. gpt-5.6-luna next to gpt-5.6-sol) shrinks the pre-roll
+    # silence (time-to-first-token) while the strong model still writes the final,
+    # streamed answer. See `docs/latence.md`. Empty = no cascade: every node uses
+    # the primary model, exactly as before. `llm_fast_provider` defaults to the
+    # primary provider, so a fast deployment on the SAME endpoint (same base_url /
+    # api_key) needs only `llm_fast_model` to be set.
+    llm_fast_provider: str | None = None
+    llm_fast_model: str | None = None
 
     # --- Embeddings (Phase 4, RAG) ---
     embeddings_provider: str = "mistral"

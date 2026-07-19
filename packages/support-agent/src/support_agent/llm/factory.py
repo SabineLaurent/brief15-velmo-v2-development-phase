@@ -106,6 +106,27 @@ def get_chat_model(settings: Settings | None = None) -> BaseChatModel:
     return _build_chat_model(settings.llm_provider, settings.llm_model, settings)
 
 
+def get_fast_chat_model(settings: Settings | None = None) -> BaseChatModel:
+    """Build the FAST-role chat model (latency cascade), or the primary if unset.
+
+    The router and the support node's tool-decision pass are cheap, easy LLM calls
+    that sit on the critical path BEFORE the first streamed token. Running them on
+    a small fast model (a `.env` change: `LLM_FAST_MODEL`, e.g. gpt-5.6-luna)
+    shrinks the pre-roll silence (TTFT) while the strong model still writes the
+    final, streamed answer. See `docs/latence.md`.
+
+    Agnostic and safe by default: with no fast model configured we return the
+    primary model, so the graph behaves exactly as before (no cascade). The fast
+    provider defaults to the primary provider, so a fast deployment on the SAME
+    endpoint (same base_url / api_key) needs only `LLM_FAST_MODEL` to be set.
+    """
+    settings = settings or get_settings()
+    if not settings.llm_fast_model:
+        return get_chat_model(settings)
+    provider = settings.llm_fast_provider or settings.llm_provider
+    return _build_chat_model(provider, settings.llm_fast_model, settings)
+
+
 def get_chat_model_fallbacks(settings: Settings | None = None) -> list[BaseChatModel]:
     """Build the configured fallback chat model(s), or `[]` if none is set.
 

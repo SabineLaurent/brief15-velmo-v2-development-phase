@@ -47,7 +47,11 @@ from support_agent.guardrails import (
     build_tool_guard,
 )
 from support_agent.knowledge import build_faq_tool, build_vector_store
-from support_agent.llm import get_chat_model, get_chat_model_fallbacks
+from support_agent.llm import (
+    get_chat_model,
+    get_chat_model_fallbacks,
+    get_fast_chat_model,
+)
 from support_agent.memory import (
     AgentContext,
     build_memory_tools,
@@ -59,7 +63,14 @@ from support_agent.memory import (
 def build_support_graph() -> CompiledStateGraph:
     """Build and compile the explicit support agent graph."""
     settings = get_settings()
+    # Latency (see docs/latence.md): the ROUTER runs on the FAST model — the one
+    # place a small model measurably cut TTFT (short prompt, easy classification).
+    # Everything else stays on the STRONG model: measurement showed the fast model
+    # did not help (and even hurt) the tool-bound support passes on our infra, where
+    # the cost is the round-trip + long prompt, not the model size. With no fast
+    # model configured, `fast_model` IS `model`, so the graph behaves as before.
     model = get_chat_model()
+    fast_model = get_fast_chat_model()
     # Optional secondary provider(s): if the primary is fully down, the LLM nodes
     # fall over to these instead of crashing the turn (empty list = no fallback).
     fallbacks = get_chat_model_fallbacks()
@@ -91,7 +102,9 @@ def build_support_graph() -> CompiledStateGraph:
     # `context_schema` lets nodes and tools read the runtime `user_id`.
     builder = StateGraph(SupportState, context_schema=AgentContext)
 
-    builder.add_node("router", make_router(model, fallbacks))
+    # Router-only cascade: the fast model classifies the intent; small talk and the
+    # support ReAct loop stay on the strong model (see docs/latence.md).
+    builder.add_node("router", make_router(fast_model, fallbacks))
     builder.add_node("answer", make_answer(model, fallbacks))
     builder.add_node("model", make_support_model(model, tools, fallbacks))
     builder.add_node("tools", ToolNode(tools))
