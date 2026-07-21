@@ -163,9 +163,11 @@ outil, lire le résultat, continuer — jusqu'à la réponse. Ici : la boucle
 *(Litt. « gribouillage / brouillon ».)* Un espace ou fichier de **travail
 jetable** : essais, données locales, sorties intermédiaires — **hors du projet
 livré**, ni versionné ni partagé. L'analogie : la feuille de brouillon sur le côté
-du bureau, pas la copie rendue. Ici : le dossier `TEMP/` (base SQLite locale) mis
-au `.gitignore` pour rester chez soi. On parle de **scratch directory** (dossier
-temporaire). ⚠️ À ne pas confondre avec **from scratch** = « **à partir de zéro** »
+du bureau, pas la copie rendue. On parle de **scratch directory** (dossier
+temporaire). ⚠️ Contre-exemple instructif dans ce projet : le dossier `TEMP/` a
+été **renommé `database/`** (2026-07-21) précisément parce qu'il n'était *pas* du
+scratch — il contenait l'état durable de l'agent (conversations, souvenirs). Un
+dossier gitignoré n'est pas forcément jetable. ⚠️ À ne pas confondre avec **from scratch** = « **à partir de zéro** »
 (ex. « réécrire l'app from scratch »), un sens différent.
 
 ## SSE (*Server-Sent Events*)

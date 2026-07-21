@@ -39,7 +39,10 @@ membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
 ├── pyproject.toml          # [tool.uv.workspace] members = ["packages/*"] + dev
 ├── uv.lock                 # UN lockfile partagé
 ├── Makefile                # porte d'entrée unique (make run / test / check…)
-├── data/                   # runtime : FAQ (data/faq) + SQLite (chemins cwd-relatifs)
+├── data/                   # SOURCE versionnée, écrite par un humain : la FAQ
+├── database/               # RUNTIME gitignoré, écrit par l'agent (cwd-relatif) :
+│                           #   working_memory/ (thread_id) · agent_memory/ (user_id)
+│                           #   → carte dev ↔ prod : database/README.md
 ├── docs/                   # spec.md (QUOI) + architecture.md (COMMENT) + vision.md
 └── packages/
     └── support-agent/      # ⭐ Scope A — le cœur (l'agent)

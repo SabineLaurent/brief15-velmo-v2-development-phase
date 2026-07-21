@@ -58,7 +58,16 @@ sqlite_path: str = "./TEMP/database/memory/agent_state.sqlite3"
 
 `.env.example` documente `SQLITE_PATH=./data/agent_state.sqlite3`, et le `CLAUDE.md` du front référence aussi `./data/...`. Le défaut pointe vers `TEMP/` (qui vient d'être **gitignoré** — donc un `Settings()` sans `.env`, ou un test, écrit dans un dossier volatil). Ressemble à un reste de debug.
 
-**✅ Résolu (2026-07-21).** Trois chemins coexistaient : `.env.example` → `./data/...`, `.env` local → `./TEMP/database/agent_state.db`, défaut du code → `./TEMP/database/memory/...` (un sous-dossier `memory/` qui n'a jamais existé). **Décision : tout aligner sur `./TEMP/database/agent_state.db`** — et non sur `data/`, comme suggéré initialement ici. Raison : `data/` contient du **contenu source versionné** (la FAQ) ; y loger une base de conversations clients, c'est risquer de la commiter. `TEMP/` est déjà gitignoré en entier, et les dossiers parents sont créés à la connexion (`memory/sqlite_conn.py:29`). Alignés : `config.py`, `.env.example`, `packages/frontend/{CLAUDE,README}.md`, `COMPTE-RENDU-FONCTIONNEMENT`.
+**✅ Résolu (2026-07-21).** Trois chemins coexistaient : `.env.example` → `./data/...`, `.env` local → `./TEMP/database/agent_state.db`, défaut du code → `./TEMP/database/memory/...` (un sous-dossier `memory/` qui n'a jamais existé). **Décision : tout aligner** — et non sur `data/`, comme suggéré initialement ici. Raison : `data/` contient du **contenu source versionné** (la FAQ) ; y loger une base de conversations clients, c'est risquer de la commiter.
+
+**🔄 Amendé le même jour.** L'alignement s'est d'abord fait sur `./TEMP/database/agent_state.db`, puis `TEMP/` a été **remplacé par `database/`** : le dossier ne contenait rien de temporaire, il contenait l'**état durable** de l'agent — un nom qui ment est une dette en soi. Dans la foulée, le fichier unique a été **scindé par horizon de mémoire**, pour que chacun s'inspecte et se vide isolément en dev :
+
+```
+database/working_memory/checkpoints.db   SQLITE_CHECKPOINTS_PATH   (thread_id)
+database/agent_memory/memories.db        SQLITE_MEMORIES_PATH      (user_id)
+```
+
+Le réglage `SQLITE_PATH` **n'existe plus** (remplacé par les deux ci-dessus). La séparation est un confort de dev, **pas** une frontière d'architecture : en prod, les deux retournent dans une seule base Postgres. Carte complète : [`database/README.md`](../database/README.md). Alignés : `config.py`, `memory/{short_term,long_term,sqlite_conn}.py`, `.env.example`, `.gitignore`, `CLAUDE.md` racine, `packages/frontend/{CLAUDE,README}.md`, `docs/glossaire.md`.
 
 ### I2 — Providers annoncés mais paquets d'intégration non installés
 
