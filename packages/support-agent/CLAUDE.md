@@ -42,17 +42,10 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
 
 ## Faits opérationnels à garder en tête
 
-- **FAQ = index Chroma PERSISTANT** (`knowledge/ingest.py`), dans
-  `TEMP/database/chroma`. Au démarrage on **réutilise** l'index si son
-  **empreinte** correspond (fichiers FAQ + modèle d'embeddings + chunking) —
-  sinon reconstruction automatique. Donc : **0 appel d'embedding à chaud**, et
-  jamais de réponse servie depuis une FAQ périmée (`knowledge/fingerprint.py`).
-  Forcer : `make reindex` (app arrêtée). Pas de re-vectorisation *par question*
-  (seule la question est embeddée pour la recherche).
-- **Prod = même classe `Chroma`, en mode serveur** (`host`/`port` au lieu de
-  `persist_directory`) : la bascule reste **un seul fichier** (`ingest.py`).
-  ⚠️ Chroma met un client en cache **par dossier et par process** : supprimer le
-  dossier d'index pendant que l'app tourne casse le client (`readonly database`).
+- **FAQ = `InMemoryVectorStore` reconstruit à CHAQUE démarrage** (`knowledge/ingest.py`).
+  Pas de re-vectorisation *par question* (seule la question est embeddée pour la
+  recherche). Passer à un store persistant (Chroma / pgvector / Azure AI Search)
+  = changement **d'un seul fichier** (`ingest.py`), l'agent ne bouge pas.
 - **Persistance mémoire** (checkpointer + store) : switch `memory` / `sqlite` /
   `postgres` via `PERSISTENCE_BACKEND` (`.env`) — pas de code.
 - **Guardrails** : kill switch `GUARDRAILS_ENABLED` ; off = graphe identique à avant.

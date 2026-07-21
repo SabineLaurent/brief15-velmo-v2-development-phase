@@ -13,121 +13,93 @@
 
 | # | Chantier | Pourquoi maintenant | État |
 |---|---|---|---|
-| 1 | Index FAQ persistant (Chroma) | démarrage instantané ; Chroma = **cible prod** assumée | ⬜ |
-| 2 | Cache de la dimension d'embeddings | supprime le **dernier** appel réseau au démarrage | ⬜ |
-| 3 | Audit A2 — escalade cassée via la couture | bloque **B1.6** (le cas escalade dans l'UI) | ⬜ |
-| 4 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ⬜ |
-| 5 | B1.4 — session, `thread_id` & identité | reprise de la roadmap scope B | ⬜ |
-| 6 | Mémoire longue & changement de modèle d'embeddings | piège documenté, pas urgent | ⬜ |
-
-> Les chantiers **1 et 2 se font ensemble** : ils partagent le mécanisme
-> d'empreinte (*fingerprint*) et visent le même but — un démarrage sans appel réseau.
+| 1 | Audit A2 — escalade cassée via la couture | bloque **B1.6** (le cas escalade dans l'UI) | ⬜ |
+| 2 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ⬜ |
+| 3 | B1.4 — session, `thread_id` & identité | reprise de la roadmap scope B | ⬜ |
+| — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
+| — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
+| — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
+| — | Mémoire longue & changement de modèle d'embeddings | piège documenté, pas urgent | ⬜ |
 
 ---
 
-## Chantier 1 — Index FAQ persistant (Chroma) ⬜
+## 🚫 Abandonné — index FAQ persistant (Chroma)
 
-**Le problème.** `knowledge/ingest.py` reconstruit l'index à **chaque démarrage** :
-4 fichiers → 8 chunks → 1 appel d'embedding. Avec Chainlit `-w` (rechargement à
-chaque sauvegarde), c'est rejoué en boucle. Et le jour où la FAQ fait 500
-documents, ce n'est plus tenable.
+**Codé, mesuré, puis annulé** (revert de `e4e8447`, 2026-07-21). À garder comme
+exemple : la décision d'annuler valait mieux que le code.
 
-**La décision.** Chroma **embarqué** (dossier local) en dev, dans
-`TEMP/database/chroma/`. Chroma est la **cible prod** — en prod il tournera en
-**serveur** (`HttpClient`), et seul le mode de connexion changera dans `ingest.py`.
+**Ce qui a été construit :** index Chroma persistant sous `TEMP/database/chroma`,
+protégé par une empreinte (fichiers FAQ + modèle d'embeddings + découpage), IDs de
+chunks stables, `make reindex`, 15 tests. Tout fonctionnait, vérifié en live.
 
-**Le piège central : l'invalidation.** Un index persistant est une *projection* de
-`data/faq/`. Si la source bouge et pas la projection, l'agent répond sur une FAQ
-périmée **sans rien signaler**. D'où une **empreinte** vérifiée au démarrage.
+**Pourquoi c'était une erreur — deux raisons, la seconde étant décisive :**
 
-### Étapes
+1. **YAGNI.** Le gain mesuré : **1,63 s → 0,68 s au démarrage**, sur 4 fichiers /
+   8 chunks, en dev. Payé **26 paquets et ~160 Mo** (dont `onnxruntime` et un
+   client `kubernetes` totalement inutilisés ici).
+2. **Ce n'est pas le pattern prod.** En production, **l'application n'indexe pas
+   au démarrage** : l'ingestion est un **job découplé** (voir la section suivante).
+   On optimisait donc une étape qui, en prod, n'existe pas à cet endroit.
 
-- [x] **1.1 — Dépendance.** `uv add --package support-agent langchain-chroma`
-      (`langchain-chroma 1.1.0` + `chromadb 1.5.9`, OK avec `langchain-core 1.4.9`).
-      Coût mesuré : **26 paquets, ~160 Mo**.
-- [x] **1.2 — Config** (`config.py`) : **un seul** réglage, `knowledge_index_dir`.
-      Le plan en prévoyait 5 : `chunk_size` / `chunk_overlap` restent des
-      **constantes** dans `ingest.py` (personne ne règle un overlap depuis un
-      `.env`) — elles entrent dans l'empreinte sans être des réglages ; le nom de
-      collection est une constante ; le chemin d'empreinte est **dérivé**.
-- [x] **1.3 — Module d'empreinte** (`knowledge/fingerprint.py`).
-      SHA-256 sur : nom + contenu de chaque `*.md` (triés) **+** provider et
-      modèle d'embeddings **+** `chunk_size` / `chunk_overlap`, avec un
-      **séparateur `\x00`** entre les parties (sans lui, `("ab","c")` et
-      `("a","bc")` collisionnent → index périmé accepté).
-      ⚠️ **Correction du plan initial :** l'empreinte va **DANS** le dossier
-      d'index, pas à côté. Le raisonnement écrit ici était inversé — à côté, elle
-      **survit** à un `rm -rf chroma/` et certifie un index vide : l'agent perd sa
-      FAQ en silence. Dedans, supprimer le dossier emporte les deux.
-      `read_fingerprint` ne lève **jamais** : toute anomalie ⇒ `None` ⇒ rebuild.
-- [x] **1.4 — Réécriture de `build_vector_store`** (`ingest.py`) : empreinte
-      identique → ouvrir et rendre la main (0 appel d'embedding) ; sinon
-      `reset_collection()` (méthode confirmée via Context7 — la purge manuelle
-      prévue est inutile), `add_documents(ids=...)` avec des **IDs stables**
-      (`source:n°`), puis empreinte écrite **en dernier** (un plantage en cours ⇒
-      pas d'empreinte ⇒ rebuild au lieu d'un index partiel). Logs explicites.
-- [x] **1.5 — `make reindex`** : supprime le dossier d'index (l'empreinte étant
-      dedans, elle part avec). ⚠️ **App arrêtée** : Chroma cache un client par
-      dossier **et par process**, supprimer sous un client vivant donne
-      `readonly database`.
-- [x] **1.6 — Tests hors-ligne** (+15, suite à 48/48) : `test_fingerprint.py` (9,
-      purs) couvre les **deux moitiés** du contrat — l'empreinte change quand il
-      le faut (contenu, ajout/retrait, **renommage**, modèle, chunking) **et**
-      reste stable sinon (sans quoi un hash aléatoire passerait). `test_ingest.py`
-      (6) fait l'aller-retour Chroma avec un embedding factice **qui compte ses
-      appels** : démarrage à chaud = **0 embedding**, pas de duplication.
-- [x] **1.7 — Vérif live** (4 process séparés) : froid → rebuild (2 appels
-      embeddings HTTP, 1.63 s) ; chaud → **réutilisé, 0 appel** (0.68 s) ;
-      `livraison.md` modifié → **rebuild automatique**, nouvelle info retrouvée ;
-      fichier restauré → rebuild à nouveau. Empreinte écrite avec son contexte
-      lisible (modèle, découpage, 4 documents → 8 chunks).
-- [x] **1.8 — Docs** : `packages/support-agent/CLAUDE.md` (affirmait « reconstruit
-      à CHAQUE démarrage » — **était devenu faux**), `docs/architecture.md` §4,
-      `.env.example`, docstrings d'`ingest.py` / `fingerprint.py`.
+**Ce qui reste vrai et mérite d'être retenu :**
+- un index persistant est une **projection** de la source ; sans garde-fou, il
+  sert des réponses périmées **sans lever d'erreur** — c'est le vrai risque, et
+  c'est ce qu'une empreinte adresse ;
+- `add_documents` **empile** sur une collection persistante : sans IDs stables, on
+  duplique tout à chaque reconstruction ;
+- une empreinte **globale** impose de tout reconstruire pour un fichier modifié —
+  inacceptable à 200 fichiers, d'où l'incrémental **par fichier** en prod.
 
-### Pièges identifiés
-
-- **Duplication** : `add_documents` sur une collection persistante **empile** les
-  chunks à chaque démarrage. Neutralisé par les IDs stables + la purge explicite.
-- **Changement de modèle d'embeddings** : dimension de vecteurs différente →
-  la collection existante devient inutilisable. Couvert par l'empreinte (rebuild).
-- `TEMP/` est déjà gitignoré → **rien** à ajouter au `.gitignore`.
+**État actuel du code :** `InMemoryVectorStore` reconstruit à chaque démarrage
+(~1,6 s, zéro dépendance). Assumé comme pattern de démo.
 
 ---
 
-## Chantier 2 — Cache de la dimension d'embeddings ⬜
+## 📌 Phase 13 — Ingestion prod-grade de la base de connaissance
 
-**Le problème.** `memory/long_term.py:60` :
+**Le vrai sujet**, à traiter avec l'exposition/déploiement (Phase 13), pas avant.
 
-```python
-dims = len(embeddings.embed_query("probe"))
+**Le principe :** séparer **ingérer** de **servir**.
+
+```
+DEV (aujourd'hui)              PROD (cible)
+─────────────────              ────────────
+l'app démarre                  job d'ingestion (CI / cron / commande admin)
+  └─ indexe                      └─ met à jour l'index quand la FAQ change
+  └─ répond                                   │
+                               l'app démarre ─┘ se connecte, interroge
+                                 └─ n'indexe JAMAIS
 ```
 
-Un **appel réseau à chaque démarrage** pour découvrir un seul nombre (1024 pour
-`mistral-embed`) — qui ne change jamais tant que le modèle ne change pas. La
-sonde est astucieuse (aucune dimension codée en dur, agnosticisme préservé), mais
-sans cache elle annule une partie du gain du chantier 1.
+Sans ce découplage, N instances derrière un load-balancer ré-indexent chacune la
+même FAQ au démarrage, et se marchent dessus.
 
-⚠️ **Ce n'est pas un contrôle** — c'est de la mémoïsation : « ai-je déjà posé
-cette question pour ce modèle ? ». Le nom du modèle est une **clé de rangement**,
-pas un critère de validation. (Le vrai contrôle, c'est l'empreinte du chantier 1.)
-
-### Étapes
-
-- [ ] **2.1** — `get_embedding_dims(settings)` dans `llm/embeddings.py` : lit
-      `TEMP/database/embeddings_dims.json` (clé `"<provider>:<model>"`) ; absent →
-      sonde, puis écrit. Échec d'écriture (disque en lecture seule) → on continue
-      quand même, ce n'est qu'un cache.
-- [ ] **2.2** — `long_term.py` appelle cette fonction au lieu de sonder en direct.
-- [ ] **2.3** — Test hors-ligne : 2ᵉ appel = **0 sonde** (embeddings factice
-      comptant ses invocations) ; changement de modèle = nouvelle sonde.
-
-**Critère de succès des chantiers 1+2 :** au 2ᵉ démarrage consécutif, **zéro**
-appel d'embedding avant la première question du client.
+**À traiter alors :**
+- **Ingestion incrémentale** — hash **par fichier** : ne ré-embedder que ce qui a
+  changé, supprimer les chunks des fichiers disparus. (`langchain_core.indexing.index()`
+  existe avec `cleanup="incremental"`, mais exige un `RecordManager` **durable** —
+  seul `InMemoryRecordManager` est fourni.)
+- **Vector store partagé** — Chroma en mode serveur (`host`/`port`, même classe) ou
+  autre base managée ; l'index cesse d'être un fichier local.
+- **Qualité du retrieval** — le sujet qui compte vraiment pour un agent de support :
+  fraîcheur/versionnage de la FAQ, reranking, évaluation de la **recherche**
+  elle-même (pas seulement de la réponse finale), multi-tenant.
 
 ---
 
-## Chantier 3 — Audit A2 : escalade cassée via la couture ⬜
+## ⏸️ Suspendu — cache de la dimension d'embeddings
+
+`memory/long_term.py:60` sonde le modèle (`embed_query("probe")`) à chaque
+démarrage pour découvrir la dimension des vecteurs — **un** appel réseau.
+
+Mémoïser ce nombre est trivial (~10 lignes), mais le bénéfice l'est tout autant :
+un appel par démarrage de process. Le chantier n'existait que pour compléter
+l'index persistant (« zéro appel réseau au boot ») ; celui-ci abandonné, il perd
+sa raison d'être. **À reprendre uniquement si la sonde devient réellement gênante.**
+
+---
+
+## Chantier 1 — Audit A2 : escalade cassée via la couture ⬜
 
 Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md) §A2.
 Quand le routeur choisit `escalate`, le graphe se met en pause (`interrupt()`) ;
@@ -135,12 +107,12 @@ Quand le routeur choisit `escalate`, le graphe se met en pause (`interrupt()`) ;
 vide** dans Chainlit, et le payload `__interrupt__` est ignoré. Le CLI gère le cas,
 la couture non.
 
-**Pourquoi en 3ᵉ :** bloque **B1.6**, dont le livrable est précisément « le cas
+**Pourquoi en premier :** bloque **B1.6**, dont le livrable est précisément « le cas
 escalade honnêtement affiché ». Inutile d'avancer sur B tant que ça casse.
 
 ---
 
-## Chantier 4 — Audit A1 : guard de sortie contourné en streaming ⬜
+## Chantier 2 — Audit A1 : guard de sortie contourné en streaming ⬜
 
 Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md) §A1.
 `stream_reply` diffuse les tokens **avant** que `guard_output` ne s'exécute : sur
@@ -154,14 +126,14 @@ au moment de le traiter** — c'est un vrai arbitrage streaming ⇄ sécurité.
 
 ---
 
-## Chantier 5 — B1.4 : session, `thread_id` & identité ⬜
+## Chantier 3 — B1.4 : session, `thread_id` & identité ⬜
 
 Reprise normale de [`docs/roadmap-frontend.md`](docs/roadmap-frontend.md).
-À faire **après** 3 et 4, qui touchent la même couture.
+À faire **après** 1 et 2, qui touchent la même couture.
 
 ---
 
-## Chantier 6 — Mémoire longue & changement de modèle d'embeddings ⬜
+## Chantier 4 — Mémoire longue & changement de modèle d'embeddings ⬜
 
 Le store long terme indexe ses souvenirs avec les mêmes embeddings, **persistés en
 SQLite** depuis la Phase 10. Changer `EMBEDDINGS_MODEL` rendrait la recherche
@@ -177,6 +149,6 @@ si le cas se présente.
 
 ## Divers (petit, à caser)
 
-- [ ] Indexer [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md)
-      dans la section « Where things live » du `CLAUDE.md` racine — sinon il est
-      invisible pour une session future (commité mais introuvable après un `/clear`).
+- [x] Indexer [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md)
+      dans la section « Where things live » du `CLAUDE.md` racine (fait : `6575c0e`,
+      avec `TODO_priorities.md` et `vision.md`).
