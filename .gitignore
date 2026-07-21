@@ -37,3 +37,10 @@ chroma/
 # Temp / logs
 *.log
 TEMP/
+
+# État runtime écrit par l'agent (conversations, souvenirs, futur index FAQ).
+# Le dossier est ignoré SAUF son README, qui documente la carte dev ↔ prod.
+# L'ordre compte : la négation doit suivre le motif qui l'ignore, et le motif
+# doit viser le CONTENU (database/*) — `database/` seul rendrait `!` inopérant.
+database/*
+!database/README.md

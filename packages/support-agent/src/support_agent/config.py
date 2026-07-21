@@ -80,11 +80,18 @@ class Settings(BaseSettings):
     # term), same agnostic spirit as the LLM provider. "memory" = in-RAM (lost on
     # restart, fine for demos); "sqlite" = durable on disk (survives a restart).
     persistence_backend: str = "memory"
-    # Runtime state lives under TEMP/ (gitignored scratch), NOT under data/ —
-    # data/ holds versioned source content (the FAQ), so keeping a database of
-    # customer conversations out of it avoids ever committing one. Parent dirs
-    # are created on connect (see memory/sqlite_conn.py).
-    sqlite_path: str = "./TEMP/database/agent_state.db"
+    # Runtime state lives under database/ (gitignored), NOT under data/ — data/
+    # holds versioned source content (the FAQ), so keeping a database of customer
+    # conversations out of it avoids ever committing one. Parent dirs are created
+    # on connect (see memory/sqlite_conn.py).
+    #
+    # Two files, one per memory horizon, so each is readable/deletable on its own:
+    #   working memory -> the thread being executed (keyed by thread_id)
+    #   agent memory   -> what we know about a customer (keyed by user_id)
+    # Postgres collapses both back into a single database; that is expected — the
+    # split is a development-time affordance, not an architectural boundary.
+    sqlite_checkpoints_path: str = "./database/working_memory/checkpoints.db"
+    sqlite_memories_path: str = "./database/agent_memory/memories.db"
 
     # --- Guardrails (Phase 12, security) ---
     # `guardrails_enabled` is a kill switch: off = the graph is wired exactly as

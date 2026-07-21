@@ -1,9 +1,9 @@
 """Shared SQLite connection helper for the durable memory backends.
 
-Both the checkpointer (short term) and the store (long term) can persist to the
-same on-disk SQLite database. Each opens its own connection to that file via
-this helper, so the connection lifecycle is ours to manage (we keep it open for
-the process lifetime) instead of relying on a context manager.
+The checkpointer (short term) and the store (long term) each persist to their
+OWN SQLite file, and each opens its connection through this helper, so the
+connection lifecycle is ours to manage (we keep it open for the process
+lifetime) instead of relying on a context manager.
 """
 
 from __future__ import annotations
