@@ -6,7 +6,10 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run eval latency test lint format check clean
+.PHONY: help setup install run eval latency reindex test lint format check clean
+
+# Index vectoriel FAQ (doit rester aligné sur KNOWLEDGE_INDEX_DIR / config.py).
+KNOWLEDGE_INDEX_DIR ?= ./TEMP/database/chroma
 
 help: ## Affiche cette aide
 	@echo "Agnostic Support AI Agent — commandes disponibles :"
@@ -29,6 +32,11 @@ eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 
 latency: ## Mesure le TTFT + la durée par nœud (cf. docs/latence.md)
 	$(UV) run python -m support_agent.latency
+
+reindex: ## Force la reconstruction de l'index FAQ (app arrêtée)
+	@rm -rf "$(KNOWLEDGE_INDEX_DIR)"
+	@echo "→ index FAQ supprimé ($(KNOWLEDGE_INDEX_DIR)) : il sera reconstruit au prochain démarrage."
+	@echo "  (l'empreinte vit dans ce dossier, elle part avec — rien à nettoyer d'autre)"
 
 test: ## Lance les tests (pytest)
 	$(UV) run pytest

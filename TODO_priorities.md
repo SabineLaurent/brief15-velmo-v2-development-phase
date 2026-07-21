@@ -42,39 +42,48 @@ périmée **sans rien signaler**. D'où une **empreinte** vérifiée au démarra
 
 ### Étapes
 
-- [ ] **1.1 — Dépendance.** `uv add --package support-agent langchain-chroma`
-      (résolution vérifiée : `langchain-chroma 1.1.0` + `chromadb 1.5.9` OK avec
-      `langchain-core 1.4.9`). Coût mesuré : **26 paquets, ~160 Mo**.
-- [ ] **1.2 — Config** (`config.py`) : `knowledge_index_dir` (défaut
-      `./TEMP/database/chroma`) et `knowledge_collection_name` (défaut `faq`).
-      Sortir `chunk_size=800` / `chunk_overlap=120` du corps de fonction vers des
-      réglages — ils doivent entrer dans l'empreinte (cf. 1.3).
-- [ ] **1.3 — Module d'empreinte** (`knowledge/fingerprint.py`, neuf).
-      Un hash SHA-256 sur : nom + contenu de chaque `*.md` (triés) **+** provider
-      et modèle d'embeddings **+** `chunk_size` / `chunk_overlap`. Écrit dans
-      `TEMP/database/faq_index.meta.json` (à côté du dossier Chroma, pas dedans —
-      pour qu'un `rm -rf chroma/` ne laisse pas d'empreinte orpheline).
-      → **Fonction pure, testable sans réseau ni Chroma.**
-- [ ] **1.4 — Réécriture de `build_vector_store`** (`ingest.py`) :
-      - empreinte identique **et** dossier d'index présent → ouvrir Chroma et
-        rendre la main (**aucun** `add_documents`, **aucun** appel d'embedding) ;
-      - sinon → purger la collection, re-découper, `add_documents(ids=...)` avec
-        des **IDs stables** (hash de `source + n° de chunk + contenu`), puis écrire
-        l'empreinte.
-      - **Log explicite** dans les deux cas (« FAQ index loaded from cache » /
-        « rebuilding FAQ index: <raison> ») — sans ça, le comportement est invisible.
-- [ ] **1.5 — `make reindex`** : supprime dossier d'index + empreinte. La porte de
-      sortie quand on veut forcer, sans avoir à retenir des chemins.
-- [ ] **1.6 — Tests hors-ligne** : l'empreinte change bien si (a) un `.md` est
-      modifié, (b) le modèle d'embeddings change, (c) `chunk_size` change ; et
-      elle **ne** change **pas** sur deux appels identiques. Aller-retour Chroma
-      complet avec un embedding factice déterministe (donc **sans réseau**).
-- [ ] **1.7 — Vérif live** : deux démarrages consécutifs — le 2ᵉ doit logger le
-      cache hit ; puis modifier un `.md` et vérifier le rebuild automatique.
-- [ ] **1.8 — Docs.** ⚠️ `packages/support-agent/CLAUDE.md` affirme « FAQ =
-      `InMemoryVectorStore` reconstruit à CHAQUE démarrage » → **devient faux**.
-      Mettre à jour aussi : docstring d'`ingest.py`, `docs/architecture.md`,
-      `.env.example`, et noter que **prod = Chroma serveur**.
+- [x] **1.1 — Dépendance.** `uv add --package support-agent langchain-chroma`
+      (`langchain-chroma 1.1.0` + `chromadb 1.5.9`, OK avec `langchain-core 1.4.9`).
+      Coût mesuré : **26 paquets, ~160 Mo**.
+- [x] **1.2 — Config** (`config.py`) : **un seul** réglage, `knowledge_index_dir`.
+      Le plan en prévoyait 5 : `chunk_size` / `chunk_overlap` restent des
+      **constantes** dans `ingest.py` (personne ne règle un overlap depuis un
+      `.env`) — elles entrent dans l'empreinte sans être des réglages ; le nom de
+      collection est une constante ; le chemin d'empreinte est **dérivé**.
+- [x] **1.3 — Module d'empreinte** (`knowledge/fingerprint.py`).
+      SHA-256 sur : nom + contenu de chaque `*.md` (triés) **+** provider et
+      modèle d'embeddings **+** `chunk_size` / `chunk_overlap`, avec un
+      **séparateur `\x00`** entre les parties (sans lui, `("ab","c")` et
+      `("a","bc")` collisionnent → index périmé accepté).
+      ⚠️ **Correction du plan initial :** l'empreinte va **DANS** le dossier
+      d'index, pas à côté. Le raisonnement écrit ici était inversé — à côté, elle
+      **survit** à un `rm -rf chroma/` et certifie un index vide : l'agent perd sa
+      FAQ en silence. Dedans, supprimer le dossier emporte les deux.
+      `read_fingerprint` ne lève **jamais** : toute anomalie ⇒ `None` ⇒ rebuild.
+- [x] **1.4 — Réécriture de `build_vector_store`** (`ingest.py`) : empreinte
+      identique → ouvrir et rendre la main (0 appel d'embedding) ; sinon
+      `reset_collection()` (méthode confirmée via Context7 — la purge manuelle
+      prévue est inutile), `add_documents(ids=...)` avec des **IDs stables**
+      (`source:n°`), puis empreinte écrite **en dernier** (un plantage en cours ⇒
+      pas d'empreinte ⇒ rebuild au lieu d'un index partiel). Logs explicites.
+- [x] **1.5 — `make reindex`** : supprime le dossier d'index (l'empreinte étant
+      dedans, elle part avec). ⚠️ **App arrêtée** : Chroma cache un client par
+      dossier **et par process**, supprimer sous un client vivant donne
+      `readonly database`.
+- [x] **1.6 — Tests hors-ligne** (+15, suite à 48/48) : `test_fingerprint.py` (9,
+      purs) couvre les **deux moitiés** du contrat — l'empreinte change quand il
+      le faut (contenu, ajout/retrait, **renommage**, modèle, chunking) **et**
+      reste stable sinon (sans quoi un hash aléatoire passerait). `test_ingest.py`
+      (6) fait l'aller-retour Chroma avec un embedding factice **qui compte ses
+      appels** : démarrage à chaud = **0 embedding**, pas de duplication.
+- [x] **1.7 — Vérif live** (4 process séparés) : froid → rebuild (2 appels
+      embeddings HTTP, 1.63 s) ; chaud → **réutilisé, 0 appel** (0.68 s) ;
+      `livraison.md` modifié → **rebuild automatique**, nouvelle info retrouvée ;
+      fichier restauré → rebuild à nouveau. Empreinte écrite avec son contexte
+      lisible (modèle, découpage, 4 documents → 8 chunks).
+- [x] **1.8 — Docs** : `packages/support-agent/CLAUDE.md` (affirmait « reconstruit
+      à CHAQUE démarrage » — **était devenu faux**), `docs/architecture.md` §4,
+      `.env.example`, docstrings d'`ingest.py` / `fingerprint.py`.
 
 ### Pièges identifiés
 

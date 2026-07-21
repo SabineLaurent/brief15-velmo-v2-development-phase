@@ -92,8 +92,34 @@ Question client ─► embedding ─► recherche similarité ◄─────
                          chunks pertinents + question ─► LLM ─► réponse sourcée
 ```
 
-Le vector store est lui aussi choisi par config (au début : local/en mémoire ;
-plus tard : Chroma, pgvector, Azure AI Search…).
+Le vector store est **Chroma en mode embarqué**, persisté dans
+`TEMP/database/chroma` (`KNOWLEDGE_INDEX_DIR`). En prod : **la même classe
+`Chroma`**, en mode serveur (`host`/`port` au lieu de `persist_directory`) — la
+bascule ne touche qu'`ingest.py`.
+
+**L'index est une projection, pas une source.** La FAQ versionnée vit dans
+`data/faq/` ; l'index n'en est qu'une transformation, reconstructible à volonté —
+d'où son emplacement sous `TEMP/` (jetable) et non `data/`.
+
+Persister un index crée un risque : servir des vecteurs qui ne correspondent plus
+à la source. Un agent qui répond depuis une FAQ périmée **ne lève aucune erreur** —
+il a l'air de marcher. D'où une **empreinte** (`knowledge/fingerprint.py`) écrite
+dans le dossier d'index et vérifiée au démarrage :
+
+```
+empreinte = hash(  fichiers FAQ (nom + contenu)          ← CE QU'on indexe
+                 + provider & modèle d'embeddings         ← COMMENT on l'indexe
+                 + chunk_size & chunk_overlap          )
+```
+
+Elle couvre les trois façons d'invalider l'index : éditer/ajouter/renommer un
+fichier, changer de modèle (autre espace vectoriel ⇒ vecteurs incomparables),
+changer le découpage. Identique ⇒ on réutilise (**zéro appel d'embedding**) ;
+différente ou illisible ⇒ reconstruction. Le doute conduit **toujours** à
+reconstruire : le coût est un ré-embedding, le risque évité est une réponse fausse.
+
+Forcer une reconstruction : `make reindex` (app arrêtée — Chroma garde un client
+en cache par dossier et par process).
 
 ## 5. Orchestration : LangGraph — Phase 6
 

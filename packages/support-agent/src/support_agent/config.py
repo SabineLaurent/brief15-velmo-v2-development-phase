@@ -105,6 +105,10 @@ class Settings(BaseSettings):
 
     # --- Knowledge base (Phase 4) ---
     knowledge_dir: str = "./data/faq"
+    # Where the persistent vector index lives (Chroma, embedded mode). Under
+    # TEMP/ because the index is a rebuildable PROJECTION of `knowledge_dir`, not
+    # source content — losing it costs one re-embedding, nothing more.
+    knowledge_index_dir: str = "./TEMP/database/chroma"
 
 
 @lru_cache
