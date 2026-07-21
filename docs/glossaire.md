@@ -111,6 +111,29 @@ ne garder que ce qui crée de la valeur. L'idée a essaimé partout :
 **À retenir en une phrase :** *lean = garder ce qui a de la valeur, couper le
 superflu.*
 
+## memoization (*mémoïsation*)
+
+**Retenir le résultat d'un calcul pour ne pas le refaire.** Le mot vient de *memo*
+(le pense-bête) : la fonction note sa réponse sur un carnet, et à la question
+suivante regarde d'abord le carnet. ⚠️ Orthographe : *memo**i**zation*, **sans
+« r »** — ce n'est pas *memorization*, malgré les apparences.
+
+**Condition de validité :** la fonction doit rendre **toujours** le même résultat
+pour la même entrée (on la dit *pure* ou *déterministe*). « Quelle dimension fait
+`mistral-embed` ? » → toujours 1024, mémoïsable. « Quel est le statut de la
+commande 42 ? » → change avec le temps, **surtout pas** mémoïsable : on
+fabriquerait un bug invisible.
+
+Ici : la dimension des vecteurs d'embeddings, sondée une fois puis relue depuis un
+petit fichier JSON, au lieu d'un appel réseau à chaque démarrage.
+
+**À ne pas confondre avec une empreinte** (*fingerprint*), qui pose une question
+différente : la mémoïsation demande « **je connais déjà la réponse ?** » et suppose
+qu'elle ne change jamais ; l'empreinte demande « **ce qui est stocké est-il encore
+valide ?** » et suppose que la source a pu changer. La première fait gagner du
+temps ; la seconde protège la **justesse**. Cf. [`prompt-caching.md`](prompt-caching.md)
+pour un cache du même esprit, mais côté provider.
+
 ## monorepo / workspace
 
 *monorepo* = **un seul dépôt git** qui héberge plusieurs projets liés.
