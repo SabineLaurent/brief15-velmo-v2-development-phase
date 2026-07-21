@@ -1,8 +1,21 @@
 # Compte-rendu — Fonctionnement de l'agent de support client
 
+> ## 🗄️ ARCHIVE — instantané du 17/07/2026, **ne reflète plus le code actuel**
+>
+> Ce document décrit le code tel qu'il était au commit `64c3049` (fin de Phase 12).
+> Il est **figé** : il n'est pas mis à jour quand le code change, et il a déjà
+> divergé (il documentait par exemple un `SQLITE_PATH` qui n'est plus le bon).
+>
+> **Ne pas s'y fier pour connaître l'état courant.** Sources à jour :
+> `docs/architecture.md` (conception), le code lui-même (vérité), `ROADMAP.md`
+> (avancement), `TODO_priorities.md` (travail en cours).
+>
+> Conservé parce que la **synthèse pédagogique** garde de la valeur : c'est une
+> bonne vue d'ensemble du fonctionnement, à lire comme un cliché daté.
+
 > Document généré par analyse du code source (hors dossier `docs/`, exclu à la demande).
 > État du repo analysé : branche `main`, dernier commit `64c3049` (Phase 12 terminée).
-> Objectif : décrire de façon complète et fidèle **comment l'agent fonctionne aujourd'hui**.
+> Objectif : décrire de façon complète et fidèle **comment l'agent fonctionnait alors**.
 
 ---
 
