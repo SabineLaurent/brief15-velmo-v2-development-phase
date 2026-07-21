@@ -66,16 +66,31 @@ du graphe, le `thread_id` (mémoire courte) et le `user_id` (contexte runtime /
 mémoire longue), et **ne laisse fuiter aucun objet lang***. Testable **sans**
 Chainlit (un petit script qui itère sur le générateur).
 **Détail piège :** notre graphe a **plusieurs** nœuds LLM (`router` à sortie
-structurée, `answer`, `support`). En `stream_mode="messages"`, il faut **ne
-streamer que la réponse cliente**, pas la décision du routeur. Ce filtrage vit
-**dans la couture**, pas dans le front.
+structurée, `answer`, `support`). Il ne faut **livrer que la réponse cliente**,
+pas la décision du routeur ni le préambule interne de la boucle ReAct. Cette
+sélection vit **dans la couture**, pas dans le front.
 **Fait :** `packages/support-agent/src/support_agent/api.py` — `stream_reply`
-async, ré-exportée par `support_agent`. Filtrage par nœud
-(`CUSTOMER_FACING_NODES = {answer, model}`, le `router` ne fuite jamais). Pont
-sync→async par thread + `asyncio.Queue` : on garde le checkpointer **sync**, donc
-le backend `sqlite` reste valide (pas d'`astream`/`AsyncSqliteSaver` imposé).
-Repli « réponse toujours livrée » si aucun token n'est streamé (input bloqué,
-erreur gracieuse, escalade). Smoke sans front : `uv run python -m support_agent.api`.
+async, ré-exportée par `support_agent`. Pont sync→async par thread
+(`asyncio.to_thread`) : on garde le checkpointer **sync**, donc le backend
+`sqlite` reste valide (pas d'`astream`/`AsyncSqliteSaver` imposé).
+Smoke sans front : `uv run python -m support_agent.api`.
+
+> ⚠️ **Corrigé après revue.** La 1re version filtrait les **tokens** par nœud
+> (`CUSTOMER_FACING_NODES`) et les streamait en direct. C'était **faux** : le
+> garde de sortie (`guard_output`, phase 12-B) est un nœud **postérieur**, donc
+> tout ce qu'il caviarde ou remplace avait **déjà** été affiché — le garde ne
+> protégeait plus que le checkpoint. Trois autres bugs venaient avec : le
+> préambule de décision d'outil fuitait dans la réponse, l'escalade ne livrait
+> **rien**, et un plantage du graphe donnait une bulle **vide**.
+> La couture lit désormais l'**état terminal** du graphe (`invoke`) et livre le
+> message garanti-gardé, en **un seul chunk**. Elle ne connaît plus **aucun** nom
+> de nœud : impossible de la casser en renommant/recâblant le graphe.
+> **Le prix, assumé :** plus de streaming token par token — TTFT = temps total.
+> C'est inévitable, pas un manque : le garde inspecte la réponse **complète**
+> (il peut la remplacer si elle recopie le prompt système), donc rien ne peut
+> être libéré avant la fin. Garder et streamer sont **exclusifs**. Le vrai
+> remède au silence est la **phase B1.5** (montrer les étapes), pas l'affichage
+> anticipé d'un texte non vérifié. Voir [`streaming.md`](streaming.md).
 
 ## Phase B1.2 — « Hello Chainlit » : la coquille minimale ✅
 **Concept :** le **cycle de vie** d'une app Chainlit — `@cl.on_chat_start`,

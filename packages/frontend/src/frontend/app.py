@@ -16,8 +16,13 @@ Run it:
 
 Phase scope (deliberately minimal — one thing at a time):
 - B1.2: wire it end to end and show the full reply once it is ready.
-- B1.3 (here): stream the reply token by token as it is generated.
+- B1.3: consume the seam as a STREAM (`stream_token`) rather than a single
+  string. Note that the reply currently arrives as one chunk: the agent's output
+  guard must inspect the whole text before any of it may be shown, so token-level
+  streaming was removed from the seam on purpose (see `docs/streaming.md`). The
+  streaming CONTRACT stays — only the chunk size changed.
 - B1.4 (later): formalize session / thread_id / user identity.
+- B1.5 (later): show the graph's steps, so the wait is legible instead of silent.
 """
 
 from __future__ import annotations
@@ -30,6 +35,14 @@ from support_agent import stream_reply
 # real in level 2, where auth derives `user_id` from a logged-in identity.
 DEMO_USER_ID = "demo-user"
 
+# Last-resort text if the seam ever yields nothing at all. It should be
+# unreachable (the seam always delivers exactly one chunk), which is why it reads
+# like a bug report rather than a support reply: seeing it means the contract
+# broke, and a silent empty bubble would hide that.
+EMPTY_REPLY_MESSAGE = (
+    "⚠️ Aucune réponse n'a été reçue de l'agent. Consultez les logs du serveur."
+)
+
 
 @cl.on_chat_start
 async def on_chat_start() -> None:
@@ -41,15 +54,24 @@ async def on_chat_start() -> None:
 
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
-    """Forward one user message to the agent and stream its reply live.
+    """Forward one user message to the agent and render its reply.
 
-    B1.3: instead of waiting for the whole reply, we open an empty message and
-    push each token from the seam as it arrives (`stream_token`), then finalize
-    (`update`). This is what makes the chat feel alive — a reply that lands in
-    one block after several seconds is perceived as broken.
+    We open an empty message and push every chunk the seam yields
+    (`stream_token`), then finalize (`update`). The seam currently delivers the
+    reply in ONE chunk — the output guard has to inspect the complete text before
+    anything may be shown (see `support_agent.api`, design choice 1) — but we keep
+    consuming it as a stream: that is the contract, and the day the seam yields
+    more chunks (Phase B1.5's step-by-step progress) this handler is already right.
 
-    Note how little the front does: it never touches LangGraph. All the streaming
-    complexity (running the graph, filtering the router) lives behind
+    `stream_token` is what actually creates the message server-side, so a stream
+    that yields NOTHING would leave us calling `update()` on a message that was
+    never sent. The seam now guarantees at least one chunk, but the front does not
+    get to assume that — a UI must never depend on a promise made across a seam,
+    so we fall back to sending a visible message instead of silently showing
+    nothing.
+
+    Note how little the front does: it never touches LangGraph. All the complexity
+    (running the graph, guarding the reply, handling escalation) lives behind
     `stream_reply`. That is the seam paying off — the classic Chainlit tutorial
     would call `graph.stream(...)` right here; we deliberately do not.
 
@@ -60,8 +82,15 @@ async def on_message(message: cl.Message) -> None:
     thread_id = cl.context.session.id
 
     reply = cl.Message(content="")
-    async for token in stream_reply(
+    received = False
+    async for chunk in stream_reply(
         message.content, user_id=DEMO_USER_ID, thread_id=thread_id
     ):
-        await reply.stream_token(token)
-    await reply.update()
+        received = True
+        await reply.stream_token(chunk)
+
+    if received:
+        await reply.update()
+    else:
+        reply.content = EMPTY_REPLY_MESSAGE
+        await reply.send()

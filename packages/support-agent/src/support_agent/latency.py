@@ -12,10 +12,24 @@ How it measures (one pass, two stream modes at once):
   * "updates" fires when a node COMPLETES -> we time each node from the previous
     super-step boundary (`router`, `model` x2 for the ReAct loop, `tools`, ...).
   * "messages" carries streamed tokens -> the FIRST one from a customer-facing
-    node (same filter as the API seam) is the TTFT.
+    node is the INTERNAL first-token time.
 
-This runs the REAL compiled graph (via `api.get_agent`), so it measures exactly
-what a front end would experience. It makes real LLM calls (it costs tokens).
+This runs the REAL compiled graph (via `api.get_agent`), so the per-node timeline
+is the real one. It makes real LLM calls (it costs tokens).
+
+⚠️ Read the two headline numbers correctly — they are NOT the same thing:
+
+- **first LLM token** is an INTERNAL diagnostic: when the first customer-facing
+  node started producing text. It tells us where the pre-roll silence goes
+  (routing + tool decision + RAG), which is what the cascade work optimizes.
+- **delivered** is what the CUSTOMER actually experiences, and it equals the
+  total: `stream_reply` hands the front the guarded terminal message in one
+  chunk, so nothing is on screen before the graph finishes. See `api.py` design
+  choice 1 — the output guard needs the complete reply, so tokens cannot be
+  released early.
+
+Shrinking "first LLM token" therefore only helps the customer via the total. Keep
+optimizing it anyway: it is the part of the total we can actually attribute.
 
     make latency
     uv run python -m support_agent.latency "Je veux retourner un article"
@@ -30,7 +44,7 @@ import time
 import uuid
 from dataclasses import dataclass
 
-from support_agent.api import CUSTOMER_FACING_NODES, get_agent
+from support_agent.api import get_agent
 from support_agent.config import get_settings
 from support_agent.memory import AgentContext
 
@@ -38,6 +52,13 @@ from support_agent.memory import AgentContext
 # full support path (router -> tool decision -> FAQ retrieval -> answer), i.e.
 # the worst case for TTFT (three sequential LLM hops).
 DEFAULT_QUESTION = "Quels sont vos délais de livraison ?"
+
+# The nodes that produce customer-facing TEXT. This is a MEASUREMENT detail and
+# lives here, not in the seam: `api.py` reads the terminal state and is
+# deliberately shape-agnostic, so it has no list of node names to share. We keep
+# one here only to tell "the answer is being written" apart from the router's
+# internal structured-output call when timing the first token.
+CUSTOMER_FACING_NODES = frozenset({"answer", "model"})
 
 
 @dataclass
@@ -131,8 +152,8 @@ def measure_once(message: str, *, user_id: str, thread_id: str) -> Report:
                 nodes.append(NodeTiming(node_name, now - prev, input_tokens, cache_read))
                 prev = now
         elif mode == "messages":
-            # Same filter as the API seam: only customer-facing nodes count as a
-            # visible token, so the router's internal decision never skews TTFT.
+            # Only customer-facing nodes count as answer text, so the router's
+            # internal structured-output call never skews the first-token time.
             token, meta = chunk
             if meta.get("langgraph_node") not in CUSTOMER_FACING_NODES:
                 continue
@@ -162,9 +183,11 @@ def print_report(report: Report, *, run_label: str = "") -> None:
             cache = f"  cache {read}/{node.input_tokens}"
         print(f"    {node.name:<14} {node.duration_s:6.2f}s  {bar}{cache}")
     ttft = f"{report.ttft_s:.2f}s" if report.ttft_s is not None else "n/a (no stream)"
+    # `delivered` == total: the seam hands the front the guarded terminal message
+    # in one chunk, so the customer sees nothing before the graph finishes.
     print(
-        f"  → TTFT {ttft}  |  streaming {report.stream_s:.2f}s  "
-        f"|  total {report.total_s:.2f}s  |  {report.token_count} tokens"
+        f"  → first LLM token {ttft} (internal)  |  writing {report.stream_s:.2f}s  "
+        f"|  delivered {report.total_s:.2f}s  |  {report.token_count} tokens"
     )
     # Verdict: did the prompt cache bite this turn? Sum over LLM nodes that
     # reported usage. This is the whole point of the instrumentation.
@@ -202,20 +225,30 @@ def main() -> None:
     print(f"fast model   : {fast}")
 
     ttfts: list[float] = []
+    totals: list[float] = []
     for i in range(1, args.runs + 1):
         report = measure_once(
             args.question, user_id=args.user_id, thread_id=str(uuid.uuid4())
         )
         print_report(report, run_label=f"run {i}/{args.runs}")
+        totals.append(report.total_s)
         if report.ttft_s is not None:
             ttfts.append(report.ttft_s)
 
-    if len(ttfts) > 1:
+    def _summary(label: str, values: list[float]) -> None:
         print(
-            f"\nTTFT over {len(ttfts)} runs — "
-            f"median {statistics.median(ttfts):.2f}s  "
-            f"min {min(ttfts):.2f}s  max {max(ttfts):.2f}s"
+            f"{label} over {len(values)} runs — "
+            f"median {statistics.median(values):.2f}s  "
+            f"min {min(values):.2f}s  max {max(values):.2f}s"
         )
+
+    if len(totals) > 1:
+        # `delivered` first: it is the number the customer feels. The internal
+        # first-token time follows as the diagnostic that explains part of it.
+        print()
+        _summary("delivered (what the customer waits)", totals)
+        if len(ttfts) > 1:
+            _summary("first LLM token (internal)      ", ttfts)
 
 
 if __name__ == "__main__":

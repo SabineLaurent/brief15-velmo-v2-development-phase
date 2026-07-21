@@ -24,13 +24,20 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
 ## La couture (`api.py`) — la seule chose qu'un front voit
 
 - `stream_reply(message, *, user_id, thread_id)` **cache entièrement** LangGraph
-  (async generator de tokens). Rien de lang\* ne fuite.
-- **Filtrage** : on ne streame que les nœuds face-client
-  (`CUSTOMER_FACING_NODES = {answer, model}`) ; le **`router`** (sortie
-  structurée) ne fuite **jamais**. Ce filtrage vit dans la couture, pas dans le front.
-- Pont **sync→async par thread** pour garder le checkpointer **sync** (donc le
-  backend `sqlite` reste valide, pas d'`astream`/`AsyncSqliteSaver` imposé).
-  Répartition des rôles streaming : [`docs/streaming.md`](../../docs/streaming.md).
+  (async generator de `str`). Rien de lang\* ne fuite.
+- **Elle livre l'état TERMINAL du graphe**, pas les tokens des nœuds LLM — donc
+  le message **déjà passé par `guard_output`**, en **un seul chunk**.
+  ⚠️ Ne **jamais** revenir à un streaming token par token depuis `answer`/`model` :
+  le garde de sortie est un nœud **postérieur**, streamer en direct afficherait
+  au client ce que le garde allait caviarder. Garder ≠ streamer, c'est exclusif.
+- Corollaire : la couture ne connaît **aucun nom de nœud** — elle lit l'état.
+  Recâbler ou renommer le graphe ne peut pas la casser silencieusement.
+- **Tout chemin livre exactement un chunk non vide** : réponse normale, input
+  bloqué, plantage (`GRACEFUL_ERROR_MESSAGE`), escalade en pause
+  (`ESCALATION_PENDING_MESSAGE`). Un front ne doit jamais voir un flux vide.
+- Pont **sync→async par thread** (`asyncio.to_thread`) pour garder le checkpointer
+  **sync** (donc le backend `sqlite` reste valide, pas d'`astream`/`AsyncSqliteSaver`
+  imposé). Rôles : [`docs/streaming.md`](../../docs/streaming.md).
 
 ## Carte du package (le COMMENT détaillé → [`docs/architecture.md`](../../docs/architecture.md))
 

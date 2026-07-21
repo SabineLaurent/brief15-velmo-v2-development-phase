@@ -50,6 +50,16 @@ GRACEFUL_ERROR_MESSAGE = (
     "problème persiste, un conseiller humain prendra le relais."
 )
 
+# Shown to the customer while the graph is PAUSED on `escalate`, waiting for a
+# human operator to resume it. The `interrupt()` payload targets the operator, not
+# the customer, so without this the escalation turn would deliver nothing at all.
+# Same rationale as `GRACEFUL_ERROR_MESSAGE`: a hard-coded user-facing string in
+# the demo's language, to be localized/configured in real prod.
+ESCALATION_PENDING_MESSAGE = (
+    "Je transmets votre demande à un conseiller humain. Merci de patienter un "
+    "instant : il prend le relais dans cette conversation."
+)
+
 
 def _with_fallbacks(
     primary: Runnable, fallbacks: Sequence[Runnable]

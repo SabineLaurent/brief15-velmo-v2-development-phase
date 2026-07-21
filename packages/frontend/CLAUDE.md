@@ -26,10 +26,19 @@ parler* (niveau 1, cf. [`docs/roadmap-frontend.md`](../../docs/roadmap-frontend.
 
 ## Streaming : le front **affiche**, il ne produit pas
 
-- La production des tokens = l'agent (`stream_reply`, forme native = générateur).
-- Le front ne fait que **rendre au fil de l'eau** (`msg.stream_token(token)`),
+- La production du flux = l'agent (`stream_reply`, forme native = générateur).
+- Le front ne fait que **rendre au fil de l'eau** (`msg.stream_token(chunk)`),
   et c'est **la seule couche** qui peut décider d'une cadence (smoothing /
   typewriter) — jamais la couture. Détail : [`docs/streaming.md`](../../docs/streaming.md).
+- ⚠️ **Aujourd'hui la couture ne livre qu'UN chunk** (la réponse complète, déjà
+  passée par le garde de sortie : garder et streamer sont exclusifs). On continue
+  malgré tout à consommer un **flux** — c'est le contrat, et la phase B1.5 en
+  yieldera plusieurs sans toucher à ce fichier.
+- Ne **jamais** compenser en appelant le graphe directement pour récupérer des
+  tokens : ce serait afficher du texte que le garde n'a pas validé.
+- `stream_token` est ce qui **crée** le message côté serveur : `update()` sur un
+  message jamais envoyé ne s'affiche pas. D'où le repli `send()` si le flux est
+  vide — un front ne présume pas d'une garantie faite de l'autre côté d'une couture.
 
 ## Lancer / cwd
 
