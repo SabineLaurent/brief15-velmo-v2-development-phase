@@ -33,3 +33,7 @@ chroma/
 .DS_Store
 .idea/
 .vscode/
+
+# Temp / logs
+*.log
+TEMP/

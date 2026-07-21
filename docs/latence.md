@@ -128,30 +128,41 @@ question (« délais de livraison »), 3 runs chacune :
 
 ### Prompt caching — le prochain levier (vérifier avant de coder)
 
+> 📎 Concept détaillé (mécanisme, use cases, providers) : [`prompt-caching.md`](prompt-caching.md).
+
 Le vrai coût étant le **traitement du prompt** (long system prompt + schémas
 d'outils, **stables** d'un appel à l'autre), le prompt caching vise exactement ça.
-Sur notre chemin (Azure OpenAI v1 / `openai_compatible`) :
+Sur notre chemin (Azure OpenAI v1 / `openai_compatible`) : automatique pour tout
+prompt > 1024 tokens, **zéro code**, à condition que le **préfixe stable** soit en
+tête — ce qui est **déjà** notre structure (`SystemMessage(...)` en premier).
 
-- Il est **automatique** pour tout prompt > 1024 tokens sur les modèles récents —
-  **zéro code**.
-- Condition : le **préfixe stable** (system prompt + outils) doit être **en tête**
-  du prompt → c'est **déjà** notre structure (`SystemMessage(...)` en premier).
-- Donc il est **probablement déjà actif**. La bonne démarche n'est **pas** d'écrire
-  du caching spéculatif, mais de **vérifier** : lire
-  `response.usage_metadata.input_token_details.cache_read` (nb de tokens servis par
-  le cache). S'il reste à 0, alors agir (clé `prompt_cache_key` par nœud, vérifier
-  le support Azure du déploiement).
+**Mesuré (2026-07) — le cache mord.** Le harnais `make latency` remonte maintenant
+`cache_read` **par nœud** (il a fallu activer `stream_usage=True` dans la factory :
+le streaming masquait l'usage → `None`). Sur 6 runs **dans un seul process** de la
+question de référence (`thread_id` neuf → seul le préfixe est stable) :
 
-**Prochaine étape concrète :** instrumenter le harnais pour remonter `cache_read`,
-confirmer si le cache mord, et ne coder que si nécessaire. Ensuite seulement, le
-seul gros levier restant : **réduire le nombre de [hops](glossaire.md)** (supprimer
-ou fusionner le routeur ≈ un hop de moins ≈ ~1.2 s, mais ça casse le « capot
-ouvert » qu'on montre exprès).
+- **2e passage `model`** (la réponse, 1609 tokens) : `cache_read` **0 → 1152/1609
+  (~72 %)**, **froid run 1** puis **chaud et stable runs 2‑6**. C'est le gros bloc de
+  TTFT, et c'est lui qui se cache.
+- **1er passage `model`** (décision d'outil, 917 tokens) : **0** — **sous le seuil**
+  de 1024, jamais caché.
+- Le plafond ~72 % = seul le **préfixe** (système+outils) est caché ; **pas** les
+  chunks FAQ (suffixe variable). Effet TTFT : froid **3.65 s** → chaud **médiane
+  3.41 s** (~−0.24 s) — réel mais **noyé dans le bruit réseau**, invisible en démo.
+  ⚠️ mesurer en **un seul process** (`--runs N`) : en process séparés, le cache
+  Azure best-effort par réplica rejoue une loterie HIT/cold. Détail complet :
+  [`prompt-caching.md` §7](prompt-caching.md).
+
+**Rien de plus à coder côté caching** (le cache automatique suffit une fois chaud).
+Le seul gros levier restant : **réduire le nombre de [hops](glossaire.md)**
+(supprimer ou fusionner le routeur ≈ un hop de moins ≈ ~1.2 s, mais ça casse le
+« capot ouvert » qu'on montre exprès).
 
 ## Ce qu'on laisse **hors scope tuto** (cible niveau 2)
 
 À documenter comme prod-grade dans [`perimetre-final.md`](perimetre-final.md),
-**pas** à coder maintenant :
+**pas** à coder maintenant (mises en place « propres » détaillées, avec code
+illustratif, dans [`latence-patterns-prod.md`](latence-patterns-prod.md)) :
 
 - **Suppression du router** (redesign : un seul agent tool-calling) — casse le
   « capot ouvert » qu'on montre exprès. Gain ~1.25 s, risque fort.

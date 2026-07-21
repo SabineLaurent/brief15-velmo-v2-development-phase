@@ -86,6 +86,8 @@ make check    # lint + tests
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Qui gère le streaming de la réponse (agent / API / front) ? » → `docs/streaming.md`
 - « Pourquoi ~5 s avant la réponse, et comment fait la prod ? » → `docs/latence.md`
+- « Comment coder proprement les leviers prod (fusion router, router embeddings, retrieval parallèle, cache sémantique) ? » → `docs/latence-patterns-prod.md`
+- « C'est quoi le prompt caching, et quand ça aide ? » → `docs/prompt-caching.md`
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`
 - « C'est quoi ce mot d'anglais tech ? » → `docs/glossaire.md`
 - « Pourquoi cette structure de package (src layout, tiret/underscore) ? » → `docs/anatomie-package-workspace.md`

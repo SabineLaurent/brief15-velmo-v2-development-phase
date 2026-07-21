@@ -65,6 +65,12 @@ def _build_chat_model(
 
     # Case 2 — any OpenAI-compatible endpoint (self-hosted vLLM/Ollama, a third
     # party, or Foundry exposed as OpenAI). Just point base_url at it.
+    # `stream_usage=True`: OpenAI omits token usage on STREAMED responses unless we
+    # opt in (it then emits a final usage-only chunk). Without it, usage_metadata —
+    # and with it `input_token_details.cache_read`, our prompt-cache hit rate — is
+    # invisible on every streamed turn (the whole app streams). Safe here: this
+    # branch is always OpenAI-wire. Lets the latency harness verify caching, and
+    # cost/usage show up in LangSmith. See docs/prompt-caching.md.
     if provider == "openai_compatible":
         return init_chat_model(
             model=model,
@@ -72,6 +78,7 @@ def _build_chat_model(
             temperature=settings.llm_temperature,
             base_url=settings.llm_inference_endpoint,
             api_key=settings.llm_inference_api_key,
+            stream_usage=True,
             **robustness,
         )
 

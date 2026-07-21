@@ -42,10 +42,20 @@ DEFAULT_QUESTION = "Quels sont vos délais de livraison ?"
 
 @dataclass
 class NodeTiming:
-    """One graph node and how long it took (wall-clock, between super-steps)."""
+    """One graph node and how long it took (wall-clock, between super-steps).
+
+    When the node ran an LLM whose response carried usage, we also record the
+    input-token count and how many of those were served from the provider's
+    prompt cache (`cache_read`) — that is how we PROVE prompt caching bites
+    instead of assuming it (see docs/prompt-caching.md). Both are `None` when the
+    node exposed no usage (e.g. the router's structured-output call, or a
+    provider that does not report usage on a streamed response).
+    """
 
     name: str
     duration_s: float
+    input_tokens: int | None = None
+    cache_read: int | None = None
 
 
 @dataclass
@@ -58,6 +68,31 @@ class Report:
     stream_s: float  # from first to last streamed token
     total_s: float
     token_count: int
+
+
+def _extract_usage(payload: object) -> tuple[int | None, int | None]:
+    """Pull (input_tokens, cache_read) from a node's state update, if any.
+
+    An LLM node returns `{"messages": [AIMessage(...)]}`; the message carries
+    `usage_metadata` when the provider reports usage. We read `input_tokens` and
+    `input_token_details.cache_read` (the LangChain-normalised name for the tokens
+    served from the prompt cache — Azure/OpenAI's `cached_tokens`). Returns
+    `(None, None)` when the payload holds no message with usage.
+    """
+    if not isinstance(payload, dict):
+        return None, None
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return None, None
+    for msg in messages:
+        usage = getattr(msg, "usage_metadata", None)
+        if not usage:
+            continue
+        input_tokens = usage.get("input_tokens")
+        details = usage.get("input_token_details") or {}
+        cache_read = details.get("cache_read")
+        return input_tokens, cache_read
+    return None, None
 
 
 def measure_once(message: str, *, user_id: str, thread_id: str) -> Report:
@@ -91,8 +126,9 @@ def measure_once(message: str, *, user_id: str, thread_id: str) -> Report:
         if mode == "updates":
             # A node just finished: attribute the time since the last boundary to
             # it. `model` legitimately appears twice (decide, then answer).
-            for node_name in chunk:
-                nodes.append(NodeTiming(node_name, now - prev))
+            for node_name, payload in chunk.items():
+                input_tokens, cache_read = _extract_usage(payload)
+                nodes.append(NodeTiming(node_name, now - prev, input_tokens, cache_read))
                 prev = now
         elif mode == "messages":
             # Same filter as the API seam: only customer-facing nodes count as a
@@ -118,12 +154,26 @@ def print_report(report: Report, *, run_label: str = "") -> None:
     print(f"\n{header}question: {report.question!r}")
     for node in report.nodes:
         bar = "█" * min(40, round(node.duration_s * 10))
-        print(f"    {node.name:<14} {node.duration_s:6.2f}s  {bar}")
+        # Show the prompt-cache hit for LLM nodes that reported usage:
+        # cache_read / input_tokens (e.g. "cache 1856/2310").
+        cache = ""
+        if node.input_tokens is not None:
+            read = node.cache_read or 0
+            cache = f"  cache {read}/{node.input_tokens}"
+        print(f"    {node.name:<14} {node.duration_s:6.2f}s  {bar}{cache}")
     ttft = f"{report.ttft_s:.2f}s" if report.ttft_s is not None else "n/a (no stream)"
     print(
         f"  → TTFT {ttft}  |  streaming {report.stream_s:.2f}s  "
         f"|  total {report.total_s:.2f}s  |  {report.token_count} tokens"
     )
+    # Verdict: did the prompt cache bite this turn? Sum over LLM nodes that
+    # reported usage. This is the whole point of the instrumentation.
+    total_input = sum(n.input_tokens for n in report.nodes if n.input_tokens is not None)
+    total_cached = sum(n.cache_read for n in report.nodes if n.cache_read is not None)
+    if total_input:
+        pct = 100 * total_cached / total_input
+        verdict = "cache HIT" if total_cached else "cache cold (0 read)"
+        print(f"  → prompt cache: {total_cached}/{total_input} input tokens read ({pct:.0f}%) — {verdict}")
 
 
 def main() -> None:

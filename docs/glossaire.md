@@ -72,6 +72,17 @@ dès qu'on édite, **sans redémarrer** à la main. Pur confort de développemen
 un dispositif d'un coup. Ici `GUARDRAILS_ENABLED` : off = le graphe redevient
 **exactement** comme avant, sans surcoût.
 
+## KV cache (*Key-Value*)
+
+*(Interne au modèle.)* Le **« travail déjà mâché »** sur les tokens qu'un LLM a
+déjà lus. En traitant un texte, le modèle calcule pour chaque token une **clé (K)**
+et une **valeur (V)** — qui ne changent plus ensuite. Plutôt que de les recalculer
+à chaque token suivant, il les **garde en mémoire** : c'est le KV cache. Analogie :
+les **annotations** d'un contrat déjà lu, qu'on réutilise au lieu de tout
+re-décortiquer. C'est **ce que le prompt caching réutilise d'un appel à l'autre**
+quand le préfixe est identique (→ input moins cher + 1er token plus rapide). Cf.
+[`prompt-caching.md`](prompt-caching.md).
+
 ## lean
 
 **Prononciation :** « line ». **Sens littéral :** *maigre*, *sans gras*.
@@ -123,6 +134,16 @@ au lieu d'inventer. C'est ce qui **ancre** les réponses dans une vraie source.
 Le patron d'agent où le LLM **alterne raisonnement et actions** — appeler un
 outil, lire le résultat, continuer — jusqu'à la réponse. Ici : la boucle
 `model ⇄ tools` de la branche support.
+
+## scratch
+
+*(Litt. « gribouillage / brouillon ».)* Un espace ou fichier de **travail
+jetable** : essais, données locales, sorties intermédiaires — **hors du projet
+livré**, ni versionné ni partagé. L'analogie : la feuille de brouillon sur le côté
+du bureau, pas la copie rendue. Ici : le dossier `TEMP/` (base SQLite locale) mis
+au `.gitignore` pour rester chez soi. On parle de **scratch directory** (dossier
+temporaire). ⚠️ À ne pas confondre avec **from scratch** = « **à partir de zéro** »
+(ex. « réécrire l'app from scratch »), un sens différent.
 
 ## SSE (*Server-Sent Events*)
 
