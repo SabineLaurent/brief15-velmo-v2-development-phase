@@ -36,7 +36,7 @@ parler* (niveau 1, cf. [`docs/roadmap-frontend.md`](../../docs/roadmap-frontend.
 - **Toujours depuis la racine du repo**, pas depuis ce dossier :
   `uv run chainlit run packages/frontend/src/frontend/app.py -w`.
 - Raison : l'agent résout ses données en **chemins relatifs au cwd** (`./data/faq`,
-  `./data/agent_state.sqlite3`). Lancer d'ailleurs casse ces chemins.
+  `./TEMP/database/agent_state.db`). Lancer d'ailleurs casse ces chemins.
 - Chainlit génère `chainlit.md` + `.chainlit/` à la racine au 1er lancement :
   **gitignore** jusqu'à la phase B1.6 (écran d'accueil soigné + thème).
 - Détail de la commande : [`README.md`](README.md).

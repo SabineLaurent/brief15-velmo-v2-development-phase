@@ -29,7 +29,7 @@ Puis ouvrir `http://localhost:8000`. `Ctrl-C` pour arrêter.
 ### Pourquoi **depuis la racine** ?
 
 Le cwd = la racine, car l'agent résout ses données en **chemins relatifs** :
-`./data/faq` (la FAQ) et `./data/agent_state.sqlite3` (la mémoire SQLite). Lancer
+`./data/faq` (la FAQ) et `./TEMP/database/agent_state.db` (la mémoire SQLite). Lancer
 d'ailleurs casserait ces chemins.
 
 > Détails : port par défaut `8000` (surcharge `--port 8765`) ; au 1er lancement

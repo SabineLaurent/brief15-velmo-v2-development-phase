@@ -138,7 +138,7 @@ et lue une seule fois par process (`@lru_cache`). Principaux réglages :
 | `LLM_FALLBACK_PROVIDER` / `LLM_FALLBACK_MODEL` | vide | 2e provider si le principal est HS |
 | `EMBEDDINGS_PROVIDER` / `EMBEDDINGS_MODEL` | `mistral` / `mistral-embed` | Vecteurs (RAG + mémoire longue) |
 | `PERSISTENCE_BACKEND` | `memory` | `memory` (RAM) ou `sqlite` (durable) — pilote checkpointer **et** store |
-| `SQLITE_PATH` | `./data/agent_state.sqlite3` | Fichier SQLite si durable |
+| `SQLITE_PATH` | `./TEMP/database/agent_state.db` | Fichier SQLite si durable |
 | `GUARDRAILS_ENABLED` | `true` | Kill switch de toute la sécurité |
 | `GUARDRAILS_MAX_INPUT_CHARS` | `4000` | Plafond taille message (coût / DoS) |
 | `GUARDRAILS_MAX_TOOL_FIELD_CHARS` | `2000` | Plafond champs d'outils générés par le LLM |

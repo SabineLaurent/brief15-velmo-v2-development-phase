@@ -80,7 +80,11 @@ class Settings(BaseSettings):
     # term), same agnostic spirit as the LLM provider. "memory" = in-RAM (lost on
     # restart, fine for demos); "sqlite" = durable on disk (survives a restart).
     persistence_backend: str = "memory"
-    sqlite_path: str = "./data/agent_state.sqlite3"
+    # Runtime state lives under TEMP/ (gitignored scratch), NOT under data/ —
+    # data/ holds versioned source content (the FAQ), so keeping a database of
+    # customer conversations out of it avoids ever committing one. Parent dirs
+    # are created on connect (see memory/sqlite_conn.py).
+    sqlite_path: str = "./TEMP/database/agent_state.db"
 
     # --- Guardrails (Phase 12, security) ---
     # `guardrails_enabled` is a kill switch: off = the graph is wired exactly as
