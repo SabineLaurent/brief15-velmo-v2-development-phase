@@ -71,7 +71,7 @@ def get_store(settings: Settings | None = None) -> BaseStore:
         # Same self-managed connection as the checkpointer; `setup()` creates the
         # store tables (and the vector index, via the bundled sqlite-vec) on first
         # use. The semantic `index` config is identical to the in-memory store.
-        store = SqliteStore(open_sqlite_connection(settings.sqlite_memories_path), index=index)
+        store = SqliteStore(open_sqlite_connection(settings.agent_memory_db_path), index=index)
         store.setup()
         return store
 

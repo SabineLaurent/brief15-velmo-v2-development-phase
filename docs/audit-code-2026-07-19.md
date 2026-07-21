@@ -63,8 +63,8 @@ sqlite_path: str = "./TEMP/database/memory/agent_state.sqlite3"
 **🔄 Amendé le même jour.** L'alignement s'est d'abord fait sur `./TEMP/database/agent_state.db`, puis `TEMP/` a été **remplacé par `database/`** : le dossier ne contenait rien de temporaire, il contenait l'**état durable** de l'agent — un nom qui ment est une dette en soi. Dans la foulée, le fichier unique a été **scindé par horizon de mémoire**, pour que chacun s'inspecte et se vide isolément en dev :
 
 ```
-database/working_memory/checkpoints.db   SQLITE_CHECKPOINTS_PATH   (thread_id)
-database/agent_memory/memories.db        SQLITE_MEMORIES_PATH      (user_id)
+database/working_memory/checkpoints.db   WORKING_MEMORY_DB_PATH   (thread_id)
+database/agent_memory/memories.db        AGENT_MEMORY_DB_PATH     (user_id)
 ```
 
 Le réglage `SQLITE_PATH` **n'existe plus** (remplacé par les deux ci-dessus). La séparation est un confort de dev, **pas** une frontière d'architecture : en prod, les deux retournent dans une seule base Postgres. Carte complète : [`database/README.md`](../database/README.md). Alignés : `config.py`, `memory/{short_term,long_term,sqlite_conn}.py`, `.env.example`, `.gitignore`, `CLAUDE.md` racine, `packages/frontend/{CLAUDE,README}.md`, `docs/glossaire.md`.

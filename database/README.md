@@ -147,8 +147,14 @@ c'est l'**ingestion**, qui cesse d'être faite par l'application. Détail dans
 | Variable (`.env`) | Défaut |
 |---|---|
 | `PERSISTENCE_BACKEND` | `memory` (RAM, perdu au redémarrage) · `sqlite` · `postgres` (non câblé) |
-| `SQLITE_CHECKPOINTS_PATH` | `./database/working_memory/checkpoints.db` |
-| `SQLITE_MEMORIES_PATH` | `./database/agent_memory/memories.db` |
+| `WORKING_MEMORY_DB_PATH` | `./database/working_memory/checkpoints.db` |
+| `AGENT_MEMORY_DB_PATH` | `./database/agent_memory/memories.db` |
+
+Les deux variables sont nommées d'après le **rôle**, pas le moteur, et suffixées
+`_PATH` parce que c'est ce qu'elles contiennent — un chemin passé tel quel à
+`sqlite3.connect()`. La bascule Postgres ajoutera un **`DATABASE_URL`** distinct
+(déjà annoncé par les stubs de `memory/{short_term,long_term}.py`) : une chaîne de
+connexion n'est pas un chemin, et `PERSISTENCE_BACKEND` choisit laquelle est lue.
 
 Les chemins sont **relatifs au répertoire de lancement** : lance toujours depuis la
 **racine du repo** (`make run`, ou `chainlit run packages/frontend/...`). Les

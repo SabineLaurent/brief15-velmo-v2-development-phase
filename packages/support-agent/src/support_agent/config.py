@@ -90,8 +90,13 @@ class Settings(BaseSettings):
     #   agent memory   -> what we know about a customer (keyed by user_id)
     # Postgres collapses both back into a single database; that is expected — the
     # split is a development-time affordance, not an architectural boundary.
-    sqlite_checkpoints_path: str = "./database/working_memory/checkpoints.db"
-    sqlite_memories_path: str = "./database/agent_memory/memories.db"
+    #
+    # Named for the ROLE, not the engine, and suffixed `_PATH` because that is what
+    # they hold: a filesystem path handed straight to sqlite3.connect(). The
+    # Postgres switch will add a separate DATABASE_URL (a connection string is a
+    # different kind of value); `persistence_backend` picks which one is read.
+    working_memory_db_path: str = "./database/working_memory/checkpoints.db"
+    agent_memory_db_path: str = "./database/agent_memory/memories.db"
 
     # --- Guardrails (Phase 12, security) ---
     # `guardrails_enabled` is a kill switch: off = the graph is wired exactly as

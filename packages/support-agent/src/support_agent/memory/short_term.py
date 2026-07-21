@@ -42,7 +42,7 @@ def get_checkpointer(settings: Settings | None = None) -> BaseCheckpointSaver:
         # We own the connection (kept open for the process lifetime), so we build
         # the saver directly instead of using the `from_conn_string` context
         # manager. `setup()` creates the checkpoint tables on first use.
-        saver = SqliteSaver(open_sqlite_connection(settings.sqlite_checkpoints_path))
+        saver = SqliteSaver(open_sqlite_connection(settings.working_memory_db_path))
         saver.setup()
         return saver
 
