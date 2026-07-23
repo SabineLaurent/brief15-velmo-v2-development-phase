@@ -1,0 +1,44 @@
+%% ---------------------------------------------------------------------------
+%% Velmo 2.0 — Schéma de flux : mémoire à court terme (les ~30 tours)
+%% Date            : 2026-07-12
+%% Commit référence : 8a62a3a — feat: [MEMORY] add persistent long-term factual
+%%                    memory per user
+%% Point de départ  : un message de l'utilisateur dans le chat (CLI / canal).
+%% Périmètre        : le tampon court terme `MemoryManager._history` (RAM).
+%%                    Les étages long terme (épisodique / factuel) sont grisés :
+%%                    ils sont sollicités mais ne sont pas le sujet ici.
+%% ---------------------------------------------------------------------------
+flowchart TD
+    A(["Message utilisateur dans le chat<br/>(cli.py → agent.respond user_id, message)"]) --> B{"guardrails.check_input(message)<br/>autorisé ?"}
+
+    B -- "non (bloqué)" --> R1["refusal = gate_in.refusal ou DEFAULT_REFUSAL"]
+    R1 --> W0["memory.write(user_id, message, refusal)"]
+    W0 --> STOP(["return refusal — STOP"])
+
+    B -- "oui (autorisé)" --> READ["memory.read(user_id, message)"]
+
+    subgraph LECTURE["LECTURE — assemblage du contexte court terme"]
+        READ --> RC["history = list(self._history.get(user_id, []))<br/>copie du tampon RAM de CET utilisateur"]
+        RC --> RENDER["MemoryContext(history=…).render()<br/>→ lignes « role: content » injectables"]
+    end
+
+    RC -. "aussi sollicités (hors court terme)" .-> LT[["long terme<br/>épisodique + factuel"]]:::muted
+
+    RENDER --> H["_handle(user_id, message)<br/>routage déterministe → answer"]
+    H --> CO{"guardrails.check_output(answer)<br/>autorisé ?"}
+    CO -- "non" --> RA["answer = refusal"]
+    CO -- "oui" --> WRITE
+    RA --> WRITE
+
+    subgraph ECRITURE["ÉCRITURE — rétention de l'échange dans le tampon"]
+        WRITE["memory.write(user_id, message, answer)"] --> S1["turns = self._history.setdefault(user_id, [])"]
+        S1 --> S2["turns.append(('user', message))<br/>turns.append(('assistant', answer))"]
+        S2 --> TRIM{"_trim_to_budget :<br/>len(turns) > 1 ET _approx_tokens(turns) > 2000 ?"}
+        TRIM -- "oui" --> POP["turns.pop(0) — éviction FIFO du tour le plus ancien"]
+        POP --> TRIM
+        TRIM -- "non" --> DONE["tampon à jour (≤ token_budget)"]
+    end
+
+    DONE --> RET(["return answer"])
+
+    classDef muted fill:#eee,stroke:#bbb,color:#777,stroke-dasharray:3 3;

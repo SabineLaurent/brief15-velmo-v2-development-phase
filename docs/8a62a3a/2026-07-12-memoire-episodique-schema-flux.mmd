@@ -1,0 +1,52 @@
+%% ---------------------------------------------------------------------------
+%% Velmo 2.0 — Schéma de flux : mémoire long terme ÉPISODIQUE
+%% Date            : 2026-07-12
+%% Commit référence : 8a62a3a — feat: [MEMORY] add persistent long-term factual
+%%                    memory per user
+%% Point de départ  : un message de l'utilisateur dans le chat (CLI / canal).
+%% Périmètre        : l'étage épisodique (src/velmo/memory/episodic.py),
+%%                    interrogé par similarité. Backend choisi une fois à l'init
+%%                    par get_episodic_store() : Chroma (sémantique) si CHROMA_URL
+%%                    est défini et disponible, sinon repli LOCAL (recouvrement
+%%                    de tokens, hors-ligne). Le court terme est grisé.
+%% ---------------------------------------------------------------------------
+flowchart TD
+    A(["Message utilisateur dans le chat<br/>(cli.py → agent.respond user_id, message)"]) --> B{"guardrails.check_input(message)<br/>autorisé ?"}
+
+    B -- "non (bloqué)" --> W0["memory.write(user_id, message, refusal)<br/>→ épisodique mémorise AUSSI le refus"]
+    W0 --> STOP(["return refusal — STOP"])
+
+    B -- "oui (autorisé)" --> READ["memory.read(user_id, message)"]
+
+    subgraph LECTURE["LECTURE — rappel des souvenirs pertinents"]
+        READ --> AP["already_present = lignes « role: content »<br/>du tampon COURT TERME de cet user"]:::muted
+        READ --> SRCH["hits = self._episodic.search(user_id, message, k=3)"]
+        SRCH --> BK{"backend sélectionné<br/>à l'init"}
+        BK -- "repli local (hors-ligne)" --> L1["_tokens(query) → recouvrement<br/>score = |q ∩ tokens(texte)|<br/>garder score>0, trier desc, top-k"]
+        BK -- "Chroma (prod)" --> C1["collection.query(query_texts=[message],<br/>n_results=k, where={user_id})<br/>→ plus proches voisins (embeddings)"]
+        L1 --> DEDUP["episodic = [hit for hit in hits<br/>if hit not in already_present]<br/>(dédup vs court terme)"]
+        C1 --> DEDUP
+        AP -.-> DEDUP
+        DEDUP --> RENDER["MemoryContext(episodic=…).render()<br/>souvenirs ajoutés APRÈS history + facts"]
+    end
+
+    RENDER --> H["_handle(user_id, message)<br/>routage déterministe → answer"]
+    H --> CO{"guardrails.check_output(answer)<br/>autorisé ?"}
+    CO -- "non" --> RA["answer = refusal"]
+    CO -- "oui" --> WRITE
+    RA --> WRITE
+
+    subgraph ECRITURE["ÉCRITURE — indexer l'échange (persiste hors tampon)"]
+        WRITE["memory.write(user_id, message, answer)"] --> CT["(court terme : append + _trim_to_budget)"]:::muted
+        WRITE --> AD1["self._episodic.add(user_id, f'user: {message}')"]
+        WRITE --> AD2["self._episodic.add(user_id, f'assistant: {answer}')"]
+        AD1 --> STO{"backend"}
+        AD2 --> STO
+        STO -- "local" --> SL["_store.setdefault(user_id, []).append(text)"]
+        STO -- "Chroma" --> SC["collection.add(ids=[uuid], documents=[text],<br/>metadatas=[{user_id}])"]
+    end
+
+    SL --> RET(["return answer"])
+    SC --> RET
+
+    classDef muted fill:#eee,stroke:#bbb,color:#777,stroke-dasharray:3 3;

@@ -1,0 +1,49 @@
+%% ---------------------------------------------------------------------------
+%% Velmo 2.0 — Diagramme de flux (séquence) : mémoire à court terme
+%% Date            : 2026-07-12
+%% Commit référence : 8a62a3a — feat: [MEMORY] add persistent long-term factual
+%%                    memory per user
+%% Point de départ  : un message de l'utilisateur dans le chat (CLI / canal).
+%% Lecture          : les échanges dans le temps entre l'utilisateur, l'agent,
+%%                    les garde-fous, le MemoryManager et le tampon RAM.
+%% ---------------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    actor U as Utilisateur (chat / CLI)
+    participant AG as Agent (respond)
+    participant GR as GuardrailEngine
+    participant MM as MemoryManager
+    participant BUF as self._history[user_id]<br/>(tampon RAM, ~30 tours)
+
+    U->>AG: respond(user_id, message)
+
+    AG->>GR: check_input(message)
+    GR-->>AG: gate_in
+
+    alt entrée bloquée
+        AG->>MM: write(user_id, message, refusal)
+        MM->>BUF: append(user) + append(assistant) + _trim_to_budget
+        AG-->>U: refus poli (STOP)
+    else entrée autorisée
+        Note over AG,BUF: LECTURE — reconstituer le contexte
+        AG->>MM: read(user_id, message)
+        MM->>BUF: history = list(copie du tampon de cet utilisateur)
+        BUF-->>MM: tours récents (≤ token_budget)
+        MM-->>AG: MemoryContext(history, facts, episodic)
+        Note right of AG: .render() → « role: content »<br/>injectable dans le prompt
+
+        AG->>AG: _handle(user_id, message) → answer
+
+        AG->>GR: check_output(answer)
+        GR-->>AG: gate_out (answer ou refus)
+
+        Note over AG,BUF: ÉCRITURE — retenir l'échange
+        AG->>MM: write(user_id, message, answer)
+        MM->>BUF: setdefault(user_id, [])
+        MM->>BUF: append(('user', message))
+        MM->>BUF: append(('assistant', answer))
+        loop tant que _approx_tokens(turns) > 2000 et len > 1
+            MM->>BUF: turns.pop(0)  %% éviction FIFO du plus ancien
+        end
+        AG-->>U: answer
+    end

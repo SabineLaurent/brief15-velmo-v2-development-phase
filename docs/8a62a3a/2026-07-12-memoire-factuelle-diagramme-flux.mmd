@@ -1,0 +1,46 @@
+%% ---------------------------------------------------------------------------
+%% Velmo 2.0 — Diagramme de flux (séquence) : mémoire long terme FACTUELLE
+%% Date            : 2026-07-12
+%% Commit référence : 8a62a3a — feat: [MEMORY] add persistent long-term factual
+%%                    memory per user
+%% Point de départ  : un message de l'utilisateur dans le chat (CLI / canal).
+%% Deux flux montrés :
+%%   1) LECTURE des faits pendant respond() (déclenchée par le message).
+%%   2) ÉCRITURE via remember_fact(), point d'entrée explicite HORS respond().
+%% Backend : Postgres (prod) / repli SQLite en mémoire caché au niveau module.
+%% ---------------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    actor U as Utilisateur (chat / CLI)
+    participant AG as Agent (respond)
+    participant MM as MemoryManager
+    participant FS as FactsStore<br/>(Postgres / repli SQLite)
+    actor OP as Appelant explicite<br/>(opérateur / logique / test)
+
+    rect rgb(235,242,255)
+        Note over U,FS: LECTURE — déclenchée par le message (pendant respond)
+        U->>AG: respond(user_id, message)
+        AG->>MM: read(user_id, message)
+        MM->>FS: all_for(user_id)
+        FS->>FS: SELECT * FROM memory_facts WHERE user_id = ?
+        FS-->>MM: dict{key: value}
+        MM-->>AG: MemoryContext(history, facts, episodic)
+        Note right of AG: .render() → « fact:key=value »<br/>(après history, avant épisodique)
+        AG->>AG: _handle → answer → check_output
+        AG->>MM: write(user_id, message, answer)
+        Note right of MM: write ne touche QUE court terme + épisodique<br/>(les faits ne sont pas écrits ici)
+        AG-->>U: answer
+    end
+
+    rect rgb(235,255,240)
+        Note over OP,FS: ÉCRITURE — point d'entrée séparé, hors respond()
+        OP->>MM: remember_fact(user_id, key, value)
+        MM->>FS: set(user_id, key, value)
+        FS->>FS: get(MemoryFact, (user_id, key))
+        alt fait déjà présent
+            FS->>FS: existing.value = value  (mise à jour)
+        else nouveau fait
+            FS->>FS: add(MemoryFact(user_id, key, value))  (insertion)
+        end
+        FS->>FS: commit()  → persiste (survit à un nouveau MemoryManager, R2)
+    end

@@ -1,0 +1,52 @@
+%% ---------------------------------------------------------------------------
+%% Velmo 2.0 — Schéma de flux : mémoire long terme FACTUELLE
+%% Date            : 2026-07-12
+%% Commit référence : 8a62a3a — feat: [MEMORY] add persistent long-term factual
+%%                    memory per user
+%% Point de départ  : un message de l'utilisateur dans le chat (CLI / canal).
+%% Périmètre        : l'étage factuel (src/velmo/memory/facts.py), faits
+%%                    clé-valeur persistés. Backend choisi une fois par
+%%                    get_facts_store() : Postgres si DB_URL défini, sinon repli
+%%                    SQLite en mémoire mis en CACHE au niveau du module (survit
+%%                    à un nouveau MemoryManager → persistance multi-session R2).
+%% Note fidélité    : l'ÉCRITURE des faits n'est PAS déclenchée par respond().
+%%                    Elle passe par remember_fact(), un point d'entrée explicite
+%%                    (hors pipeline automatique). Les deux chemins sont montrés.
+%% ---------------------------------------------------------------------------
+flowchart TD
+    A(["Message utilisateur dans le chat<br/>(cli.py → agent.respond user_id, message)"]) --> B{"guardrails.check_input(message)<br/>autorisé ?"}
+
+    B -- "non (bloqué)" --> W0["memory.write(user_id, message, refusal)<br/>(court terme + épisodique — PAS les faits)"]:::muted
+    W0 --> STOP(["return refusal — STOP"])
+
+    B -- "oui (autorisé)" --> READ["memory.read(user_id, message)"]
+
+    subgraph LECTURE["LECTURE — charger les faits durables du client"]
+        READ --> ALL["facts = self._facts.all_for(user_id)"]
+        ALL --> BK{"backend sélectionné<br/>à l'init"}
+        BK -- "repli SQLite (hors-ligne)" --> Q1["SELECT * FROM memory_facts<br/>WHERE user_id = ?"]
+        BK -- "Postgres (prod)" --> Q2["SELECT * FROM memory_facts<br/>WHERE user_id = ?"]
+        Q1 --> DICT["dict{key: value}"]
+        Q2 --> DICT
+        DICT --> RENDER["MemoryContext(facts=…).render()<br/>lignes « fact:key=value »<br/>(après history, avant épisodique)"]
+    end
+
+    RENDER --> H["_handle(user_id, message)<br/>routage déterministe → answer"]
+    H --> CO{"guardrails.check_output(answer)<br/>autorisé ?"}
+    CO -- "non" --> RA["answer = refusal"]
+    CO -- "oui" --> WRITE
+    RA --> WRITE
+    WRITE["memory.write(user_id, message, answer)<br/>(court terme + épisodique — PAS les faits)"]:::muted --> RET(["return answer"])
+
+    %% --- Écriture des faits : point d'entrée SÉPARÉ, hors respond() ----------
+    EA(["Décision de retenir un fait durable<br/>(opérateur / logique applicative / test)"]) --> RF["memory.remember_fact(user_id, key, value)"]
+    subgraph ECRITURE["ÉCRITURE — upsert d'un fait (hors pipeline respond)"]
+        RF --> SET["self._facts.set(user_id, key, value)"]
+        SET --> GET{"session.get(MemoryFact,<br/>(user_id, key)) existe ?"}
+        GET -- "oui" --> UPD["existing.value = value (mise à jour)"]
+        GET -- "non" --> INS["session.add(MemoryFact(user_id, key, value))"]
+        UPD --> CMT["session.commit() → persiste"]
+        INS --> CMT
+    end
+
+    classDef muted fill:#eee,stroke:#bbb,color:#777,stroke-dasharray:3 3;

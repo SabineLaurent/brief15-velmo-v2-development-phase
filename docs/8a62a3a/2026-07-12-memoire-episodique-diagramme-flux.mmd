@@ -1,0 +1,53 @@
+%% ---------------------------------------------------------------------------
+%% Velmo 2.0 — Diagramme de flux (séquence) : mémoire long terme ÉPISODIQUE
+%% Date            : 2026-07-12
+%% Commit référence : 8a62a3a — feat: [MEMORY] add persistent long-term factual
+%%                    memory per user
+%% Point de départ  : un message de l'utilisateur dans le chat (CLI / canal).
+%% Lecture          : échanges dans le temps entre l'utilisateur, l'agent, les
+%%                    garde-fous, le MemoryManager et le store épisodique
+%%                    (Chroma en prod / repli local hors-ligne).
+%% ---------------------------------------------------------------------------
+sequenceDiagram
+    autonumber
+    actor U as Utilisateur (chat / CLI)
+    participant AG as Agent (respond)
+    participant GR as GuardrailEngine
+    participant MM as MemoryManager
+    participant EP as EpisodicStore<br/>(Chroma prod / repli local)
+
+    U->>AG: respond(user_id, message)
+
+    AG->>GR: check_input(message)
+    GR-->>AG: gate_in
+
+    alt entrée bloquée
+        AG->>MM: write(user_id, message, refusal)
+        MM->>EP: add(user_id, "user: …") + add(user_id, "assistant: refus")
+        AG-->>U: refus poli (STOP)
+    else entrée autorisée
+        Note over AG,EP: LECTURE — rappel par similarité
+        AG->>MM: read(user_id, message)
+        MM->>EP: search(user_id, message, k=3)
+        alt repli local (hors-ligne)
+            EP->>EP: recouvrement de tokens (score>0, tri, top-k)
+        else Chroma (prod)
+            EP->>EP: query(query_texts, n_results=k, where user_id) → embeddings
+        end
+        EP-->>MM: hits (≤ 3 souvenirs du bon user)
+        MM->>MM: episodic = hits \ lignes déjà dans le court terme (dédup)
+        MM-->>AG: MemoryContext(history, facts, episodic)
+        Note right of AG: .render() → souvenirs ajoutés<br/>APRÈS history + facts
+
+        AG->>AG: _handle(user_id, message) → answer
+
+        AG->>GR: check_output(answer)
+        GR-->>AG: gate_out (answer ou refus)
+
+        Note over AG,EP: ÉCRITURE — indexer l'échange (persiste hors tampon)
+        AG->>MM: write(user_id, message, answer)
+        MM->>EP: add(user_id, "user: " + message)
+        MM->>EP: add(user_id, "assistant: " + answer)
+        Note right of EP: local → setdefault().append()<br/>Chroma → add(ids=uuid, documents, metadatas=user_id)
+        AG-->>U: answer
+    end
