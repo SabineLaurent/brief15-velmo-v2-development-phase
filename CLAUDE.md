@@ -104,6 +104,8 @@ make check    # lint + tests
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md` (scope A) · `docs/roadmap-frontend.md` (scope B)
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Quels bugs / dettes connus traînent dans le code ? » → `docs/audit-code-2026-07-19.md`
+- « Où en est la sécurité de la surface réseau (étapes 1→4) ? » → `docs/revue-securite-2026-07-25.md`
+- « Quels défauts de **correction** (hors sécurité) restent ouverts ? » → `docs/revue-code-2026-07-25.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `packages/support-agent/src/support_agent/llm/`
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Qui gère le streaming de la réponse (agent / API / front) ? » → `docs/streaming.md`
