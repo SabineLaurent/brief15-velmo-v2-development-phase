@@ -1,0 +1,48 @@
+# Pile locale de l'agent — déploiement étape 2.
+# Plan d'ensemble : docs/plan-deploiement-2026-07-25.md
+#
+#   make docker-up      # construit si besoin, puis démarre en arrière-plan
+#   make docker-logs    # suit les logs
+#   make docker-down    # arrête (garde le volume)
+#
+# Une seule brique pour l'instant : `agent-api`. Postgres arrive à l'étape 3, le
+# conteneur `client` à l'étape 4. On n'ouvre qu'une étape à la fois.
+
+services:
+  agent-api:
+    build:
+      context: .
+      dockerfile: packages/support-agent/Dockerfile
+    image: support-agent:dev
+
+    # Les secrets viennent du .env de l'hôte au RUNTIME (jamais dans l'image,
+    # cf. .dockerignore). Sur Azure, ce bloc est remplacé par les secrets
+    # d'application du Container App — le conteneur, lui, ne change pas.
+    env_file:
+      - .env
+
+    environment:
+      # ⚠️ Piège subtil : `env_file` ÉCRASE les ENV de l'image. Le .env de l'hôte
+      # contient `KNOWLEDGE_DIR=./data/kb-velmo` (relatif au cwd de la machine),
+      # ce qui n'a aucun sens ici. Ce bloc `environment` a la priorité la plus
+      # haute : il rétablit les chemins absolus de l'image.
+      KNOWLEDGE_DIR: /app/data/kb-velmo
+      PERSISTENCE_BACKEND: sqlite
+      WORKING_MEMORY_DB_PATH: /app/database/working_memory/checkpoints.db
+      AGENT_MEMORY_DB_PATH: /app/database/agent_memory/memories.db
+
+    ports:
+      # hôte:conteneur — l'agent écoute sur 8000 dans le conteneur.
+      - "8000:8000"
+
+    volumes:
+      # L'état durable vit dans un volume NOMMÉ, pas dans le conteneur : c'est ce
+      # qui fait survivre conversations et souvenirs à un `docker compose down`.
+      # C'est aussi la démonstration de l'étape 2 — un système de fichiers de
+      # conteneur est éphémère, un volume ne l'est pas.
+      - agent-state:/app/database
+
+    restart: unless-stopped
+
+volumes:
+  agent-state:

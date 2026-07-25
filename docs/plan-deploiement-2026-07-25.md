@@ -4,8 +4,9 @@
 conteneur — vérifié d'abord en local en conditions quasi réelles, déployé *in fine*
 sur **Azure**.
 **Date :** 2026-07-25
-**Statut :** plan retenu. **Étape 1 faite** (service HTTP, vérifié en live) ; étapes
-2 à 5 à venir — l'avancement se suit dans [`../TODO_priorities.md`](../TODO_priorities.md).
+**Statut :** plan retenu. **Étapes 1 et 2 faites** (service HTTP + image Docker,
+vérifiées en live) ; étapes 3 à 5 à venir — l'avancement se suit dans
+[`../TODO_priorities.md`](../TODO_priorities.md).
 Ce document décrit la cible et le chemin, pas l'état du code (pour ça :
 [`architecture.md`](architecture.md)).
 **Portée :** exposition HTTP, images Docker, orchestration locale, hébergement Azure.
@@ -157,8 +158,31 @@ Une étape = un livrable vérifiable. On n'en ouvre **qu'une à la fois**.
   état sur un **volume** (SQLite) pour commencer.
 - **But pédagogique :** voir ce qu'un conteneur exige qu'un `make run` pardonnait —
   chemins, variables d'environnement, utilisateur, port exposé.
-- **Vérification :** `docker run -e MISTRAL_API_KEY=… -p 8000:8000` → agent appelable
-  depuis l'hôte.
+- **Vérification :** `make docker-up` → agent appelable depuis l'hôte.
+
+**Fait le 2026-07-25.** `packages/support-agent/Dockerfile` (multi-stage) + `compose.yaml`
++ `.dockerignore` + cibles `make docker-build/up/logs/down`. Vérifié en live : conteneur
+`healthy`, vraie réponse FAQ à travers HTTP, `401` sans clé, process en **non-root**
+(`appuser`), **aucun `.env` dans l'image**, ni `pytest` ni `ruff` (image de 509 Mo).
+Surtout : après un `docker compose down` puis `up`, l'agent **se souvient** du fil
+précédent — l'état vit dans le volume nommé, pas dans le conteneur.
+
+**Trois pièges rencontrés, qui valent d'être retenus :**
+
+1. **Un `--mount=type=bind` ne vit que le temps de son `RUN`.** La couche 2 ne
+   trouvait plus les manifestes racine (`No pyproject.toml found`) : il faut les
+   `COPY` pour la seconde synchro.
+2. **`env_file` de Compose ÉCRASE les `ENV` de l'image.** Le `.env` de l'hôte porte
+   `KNOWLEDGE_DIR=./data/kb-velmo` (relatif à *sa* racine), ce qui n'a aucun sens en
+   conteneur. D'où le bloc `environment:` de `compose.yaml`, de priorité supérieure,
+   qui rétablit les chemins absolus.
+3. **Même image de base dans les deux stages.** Un venv fige le chemin de son
+   interpréteur : le construire contre le Python managé d'`uv` puis l'exécuter sur
+   une autre base donne un venv qui pointe vers un interpréteur absent.
+
+**Mesure pour l'étape 5 :** le warm-up passe de **2,9 s sur l'hôte à 4,4 s en
+conteneur**. C'est ce chiffre — pas celui de l'hôte — qui doit décider du
+`minReplicas` sur ACA.
 
 ### Étape 3 — L'état durable : Postgres + pgvector
 

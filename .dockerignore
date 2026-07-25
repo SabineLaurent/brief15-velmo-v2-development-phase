@@ -1,0 +1,43 @@
+# Ce que Docker NE DOIT PAS envoyer au démon lors d'un build.
+# Deux enjeux distincts : la SÉCURITÉ (aucun secret dans une image, qui se pousse
+# ensuite sur un registre) et la VITESSE (le contexte est transféré à chaque build,
+# et un fichier ignoré ne peut pas invalider une couche de cache).
+
+# --- Secrets : la règle absolue ---------------------------------------------
+# Un `.env` copié dans une image y reste, lisible par quiconque tire l'image
+# (`docker history` suffit). Les secrets s'injectent au RUNTIME (-e / --env-file
+# en local, secrets d'application sur Azure), jamais au build.
+.env
+.env.*
+
+# --- État runtime écrit par l'agent -----------------------------------------
+# Conversations et souvenirs : ils appartiennent au VOLUME, pas à l'image.
+# Les embarquer livrerait la base de test à tout le monde, et chaque nouveau
+# message invaliderait le cache de build.
+database/
+TEMP/
+
+# --- Environnement Python local ---------------------------------------------
+# Le `.venv` de l'hôte est construit pour macOS : inutilisable dans l'image, où
+# `uv sync` reconstruit tout pour Linux. L'envoyer coûterait des centaines de Mo.
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Hors de cette tranche ---------------------------------------------------
+# L'image `agent-api` n'embarque que le cerveau. Le client Chainlit aura la sienne
+# (étape 4), et la doublure SQL n'est pas câblée dans `get_backend()`.
+packages/client/
+data/db-shop-velmo/
+
+# --- Inutile au runtime ------------------------------------------------------
+.git/
+.github/
+docs/
+.chainlit/
+chainlit.md
+compose.yaml
+Makefile

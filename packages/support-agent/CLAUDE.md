@@ -60,6 +60,23 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
 - `fastapi`/`uvicorn` sont un **extra** (`--extra server`) : le CLI et Chainlit
   n'ont pas à traîner un serveur web.
 
+## L'image (`Dockerfile`) — se construit depuis la RACINE
+
+- `make docker-up` (ou `docker build -f packages/support-agent/Dockerfile .`).
+  ⚠️ Le contexte est la **racine du repo**, jamais ce dossier : le build a besoin
+  de `uv.lock` + du `pyproject.toml` racine pour installer une tranche reproductible.
+- **Multi-stage** : `uv sync --frozen --no-dev --no-install-workspace` met les deps
+  lourdes dans une couche cachée à part, puis `--no-editable` installe notre code en
+  wheel → le stage runtime ne copie que le `.venv`, sans les sources.
+- **Non négociable dans l'image** : utilisateur **non-root**, **aucun `.env`**
+  (les secrets s'injectent au runtime), `--host 0.0.0.0` dans le `CMD`,
+  `PYTHONUNBUFFERED=1` (sinon les logs restent bloqués dans le tampon).
+- `database/` = **volume**, jamais l'image. `data/kb-velmo` = source versionnée,
+  donc **dans** l'image.
+- Pièges déjà payés (détail : [`docs/plan-deploiement-2026-07-25.md`](../../docs/plan-deploiement-2026-07-25.md)) :
+  un `--mount=type=bind` ne survit pas à son `RUN` · `env_file` de Compose **écrase**
+  les `ENV` de l'image · même image de base obligatoire dans les deux stages.
+
 ## Carte du package (le COMMENT détaillé → [`docs/architecture.md`](../../docs/architecture.md))
 
 `config.py` (Settings .env) · `llm/` factory + embeddings (agnostique) ·

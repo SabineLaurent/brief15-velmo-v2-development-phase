@@ -6,7 +6,8 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run serve eval latency test lint format check clean
+.PHONY: help setup install run serve eval latency test lint format check clean \
+        docker-build docker-up docker-logs docker-down
 
 help: ## Affiche cette aide
 	@echo "Agnostic Support AI Agent — commandes disponibles :"
@@ -43,6 +44,19 @@ format: ## Formate le code (ruff)
 	$(UV) run ruff format .
 
 check: lint test ## Contrôle qualité complet (lint + tests)
+
+docker-build: ## Construit l'image de l'agent (contexte = racine du repo)
+	docker build -f packages/support-agent/Dockerfile -t support-agent:dev .
+
+docker-up: ## Démarre la pile conteneurisée en arrière-plan (construit si besoin)
+	docker compose up --build -d
+	@echo "→ agent sur http://localhost:8000  (make docker-logs pour suivre le démarrage)"
+
+docker-logs: ## Suit les logs de la pile (Ctrl-C pour sortir, les conteneurs continuent)
+	docker compose logs -f
+
+docker-down: ## Arrête la pile (le volume d'état est CONSERVÉ)
+	docker compose down
 
 clean: ## Supprime les caches Python et outils
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
