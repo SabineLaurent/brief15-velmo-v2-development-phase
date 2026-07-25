@@ -59,8 +59,10 @@ membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
         └── tests/
 ```
 
-> Scope B (frontend) existe déjà : `packages/frontend/` (coquille Chainlit). Le
-> scope C (backend) viendra comme `packages/backend`. Voir `docs/vision.md`.
+> Scope B (frontend) existe déjà : `packages/client/` — distribution
+> `client-chainlit`, module `src/client_chainlit/` (coquille Chainlit). Chainlit
+> est **une** implémentation de client, d'où le nom. Le scope C (backend) viendra
+> comme `packages/backend`. Voir `docs/vision.md`.
 >
 > 🧭 **Un `CLAUDE.md` par package.** Chaque membre porte son propre `CLAUDE.md`
 > (règles **locales**), lu **à la demande** quand je travaille dans ce sous-arbre.
@@ -85,6 +87,7 @@ make check    # lint + tests
 - « Quel est le besoin métier ? » → `docs/spec.md`
 - « Pourquoi ce projet, et pourquoi 3 scopes ? » → `docs/vision.md`
 - « Comment c'est conçu techniquement ? » → `docs/architecture.md`
+- « Quels blocs on déploie, et quelle base pour quoi ? » → `docs/architecture-cible-2026-07-25.md`
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md` (scope A) · `docs/roadmap-frontend.md` (scope B)
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Quels bugs / dettes connus traînent dans le code ? » → `docs/audit-code-2026-07-19.md`

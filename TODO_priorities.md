@@ -13,9 +13,10 @@
 
 | # | Chantier | Pourquoi maintenant | État |
 |---|---|---|---|
-| 1 | Audit A2 — escalade cassée via la couture | bloque **B1.6** (le cas escalade dans l'UI) | ⬜ |
-| 2 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ⬜ |
+| 1 | Audit A2 — escalade cassée via la couture | bloquait **B1.6** (le cas escalade dans l'UI) | ✅ |
+| 2 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ✅ |
 | 3 | B1.4 — session, `thread_id` & identité | reprise de la roadmap scope B | ⬜ |
+| 4 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -99,30 +100,60 @@ sa raison d'être. **À reprendre uniquement si la sonde devient réellement gê
 
 ---
 
-## Chantier 1 — Audit A2 : escalade cassée via la couture ⬜
+## Chantier 1 — Audit A2 : escalade cassée via la couture ✅
 
 Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md) §A2.
 Quand le routeur choisit `escalate`, le graphe se met en pause (`interrupt()`) ;
-`stream_reply` ne streame rien et son repli ne trouve pas d'`AIMessage` → **bulle
-vide** dans Chainlit, et le payload `__interrupt__` est ignoré. Le CLI gère le cas,
-la couture non.
+`stream_reply` ne streamait rien et son repli ne trouvait pas d'`AIMessage` →
+**bulle vide** dans Chainlit, payload `__interrupt__` ignoré.
 
-**Pourquoi en premier :** bloque **B1.6**, dont le livrable est précisément « le cas
-escalade honnêtement affiché ». Inutile d'avancer sur B tant que ça casse.
+**Résolu** (`519f254`) : `api.py` teste `result.get("__interrupt__")` et livre
+`ESCALATION_PENDING_MESSAGE`. La règle qui en découle est désormais un invariant
+documenté du package : *tout chemin livre exactement un chunk non vide*
+(réponse normale, input bloqué, plantage, escalade en pause).
 
 ---
 
-## Chantier 2 — Audit A1 : guard de sortie contourné en streaming ⬜
+## Chantier 2 — Audit A1 : guard de sortie contourné en streaming ✅
 
 Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md) §A1.
-`stream_reply` diffuse les tokens **avant** que `guard_output` ne s'exécute : sur
+`stream_reply` diffusait les tokens **avant** que `guard_output` ne s'exécute : sur
 le seul chemin client réel (Chainlit), la rédaction PII/secrets et la protection
-anti-fuite du system prompt sont **cosmétiques**. Le guard ne mord que sur les
-chemins non streamés (CLI, éval).
+anti-fuite du system prompt étaient **cosmétiques**.
 
-Trois correctifs possibles (bufferisation / guard incrémental dans `_pump` /
-a minima corriger la docstring mensongère + documenter la limite). **À trancher
-au moment de le traiter** — c'est un vrai arbitrage streaming ⇄ sécurité.
+**Résolu** (`519f254`) : l'arbitrage streaming ⇄ sécurité a été tranché en faveur
+de la **sécurité**. La couture ne streame plus les tokens des nœuds `answer`/`model` ;
+elle livre l'**état terminal du graphe**, donc le message déjà passé par
+`guard_output`, en un seul chunk. Garder et streamer sont exclusifs : c'est
+maintenant écrit noir sur blanc dans `packages/support-agent/CLAUDE.md`, avec
+l'interdiction explicite de revenir en arrière.
+
+⚠️ Conséquence à assumer côté UI : plus d'effet machine à écrire tant que la
+réponse n'est pas complète. Si la latence perçue devient gênante, le levier est
+la **phase B1.5** (plusieurs chunks côté couture) ou le *smoothing* côté front —
+jamais un accès direct au graphe.
+
+---
+
+## Chantier 4 — Reliquat d'audit : I2, Q1, Q2 ⬜
+
+Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md). Les trois
+seuls findings encore ouverts (A1, A2, I1 et Q3 sont réglés) :
+
+- **I2 — providers annoncés sans paquet d'intégration.** `groq`, `google_genai`,
+  `azure_ai` sont dans `_PROVIDER_ALIASES` et `.env.example`, mais les paquets
+  `langchain-*` correspondants ne sont pas installés (`pyproject.toml:20` n'est
+  qu'un commentaire) → `ImportError` brut au runtime. Correctif minimal : envelopper
+  l'erreur avec un message actionnable (« installe `langchain-groq` »).
+- **Q1 — `honest_refusal` trop laxiste.** `eval/evaluators.py:61-62` compte
+  `"support"` et `"contact"` comme signaux de refus honnête : deux mots omniprésents
+  chez un agent *de support*. L'évaluateur passe donc presque toujours.
+- **Q2 — les évaluateurs supposent `content: str`.** Certains providers renvoient
+  une liste de blocs → `AttributeError`. Fragile pour l'agnosticisme revendiqué.
+
+**Une fois les trois traités :** archiver l'audit dans `docs/archive/` avec son
+bandeau (règle de [`docs/archive/README.md`](docs/archive/README.md)) — il devient
+un instantané daté, pas une liste de tâches.
 
 ---
 
@@ -138,7 +169,7 @@ Reprise normale de [`docs/roadmap-frontend.md`](docs/roadmap-frontend.md).
 Le store long terme indexe ses souvenirs avec les mêmes embeddings, **persistés en
 SQLite** depuis la Phase 10. Changer `EMBEDDINGS_MODEL` rendrait la recherche
 mémoire silencieusement incohérente — et contrairement à la FAQ (reconstructible
-depuis `data/faq/`), les souvenirs n'existent **que** dans la base : il faudrait
+depuis `data/kb-velmo/`), les souvenirs n'existent **que** dans la base : il faudrait
 les **ré-embedder** un par un. C'est une **migration**, pas un rebuild.
 
 Ne se déclenche que si on change de modèle d'embeddings — improbable en tuto.

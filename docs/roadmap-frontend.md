@@ -49,7 +49,7 @@ front. La couture `stream_reply` est ce qui rend Chainlit **jetable**.
 
 ## Phase B1.0 — Migration workspace ✅
 **Objectif :** transformer le mono-package en **uv workspace** pour accueillir
-`packages/frontend/` à côté de `packages/support-agent/` sans tout mélanger.
+`packages/client/` à côté de `packages/support-agent/` sans tout mélanger.
 **Livrable :** arborescence `packages/*`, un `uv.lock` + `.venv` partagés.
 **Fait :** commit `ed9fb1a` (voir [`architecture.md`](architecture.md) §9 et
 [`anatomie-package-workspace.md`](anatomie-package-workspace.md)).
@@ -95,17 +95,22 @@ Smoke sans front : `uv run python -m support_agent.api`.
 ## Phase B1.2 — « Hello Chainlit » : la coquille minimale ✅
 **Concept :** le **cycle de vie** d'une app Chainlit — `@cl.on_chat_start`,
 `@cl.on_message`, `cl.Message(...).send()`, la commande `chainlit run`. Créer le
-membre `packages/frontend/` (dépend de `support-agent` via `workspace = true`).
+membre `packages/client/` (dépend de `support-agent` via `workspace = true`).
 **Livrable :** une page de chat dans le navigateur qui appelle `stream_reply` et
 affiche la réponse **complète** (pas encore de streaming). *On voit l'agent parler.*
 **Pédagogie :** d'abord le câblage (un tour qui marche), le confort ensuite.
-**Fait :** membre `packages/frontend/` (Chainlit 2.11, dépendance workspace sur
-`support-agent`). `src/frontend/app.py` importe **uniquement** `stream_reply` —
+**Fait :** membre `packages/client/` (Chainlit 2.11, dépendance workspace sur
+`support-agent`). `src/client_chainlit/app.py` importe **uniquement** `stream_reply` —
 zéro import lang*. `on_message` draine le générateur puis envoie la réponse d'un
 coup (streaming = B1.3). `thread_id = cl.context.session.id` (identité formalisée
-en B1.4). Lancer : `chainlit run packages/frontend/src/frontend/app.py -w` depuis
-la **racine** (cwd où vivent `data/faq` + le SQLite). Les fichiers générés par
+en B1.4). Lancer : `chainlit run packages/client/src/client_chainlit/app.py -w` depuis
+la **racine** (cwd où vivent `data/kb-velmo` + le SQLite). Les fichiers générés par
 Chainlit (`chainlit.md`, `.chainlit/`) sont `.gitignore` jusqu'à B1.6.
+
+> 📛 Le membre s'appelait `packages/frontend/` (distribution `frontend`, module
+> `src/frontend/`) jusqu'au 2026-07-25. Renommé en `packages/client/` —
+> distribution `client-chainlit`, module `src/client_chainlit/` — parce que
+> Chainlit est **une** implémentation de client parmi d'autres.
 
 ## Phase B1.3 — Le streaming token par token ✅
 **Concept :** `msg.stream_token(token)` + `msg.update()`. **Pourquoi c'est

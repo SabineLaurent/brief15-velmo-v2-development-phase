@@ -1,7 +1,10 @@
 # `database/` — l'état runtime, en développement
 
-> Tout ce que l'**agent** écrit pendant qu'il tourne. Rien ici n'est versionné,
-> **sauf ce README** (voir `.gitignore` : `database/*` puis `!database/README.md`).
+> Tout ce que l'**agent** écrit pendant qu'il tourne. **Aucune donnée** n'est
+> versionnée ici : le `.gitignore` écarte les bases (`*.db`) et les fichiers de
+> checkpoint (`database/*/*.bin`). Seuls sont suivis ce README et un `.gitkeep`
+> par sous-dossier — pour que l'**arborescence** existe après un `git clone`,
+> sans que son **contenu** ne parte dans l'historique.
 >
 > ⚠️ Ce dossier ne **simule** pas la production. Il la **cartographie**. La
 > différence est expliquée plus bas, et elle compte.
@@ -157,5 +160,5 @@ Les deux variables sont nommées d'après le **rôle**, pas le moteur, et suffix
 connexion n'est pas un chemin, et `PERSISTENCE_BACKEND` choisit laquelle est lue.
 
 Les chemins sont **relatifs au répertoire de lancement** : lance toujours depuis la
-**racine du repo** (`make run`, ou `chainlit run packages/frontend/...`). Les
+**racine du repo** (`make run`, ou `chainlit run packages/client/...`). Les
 dossiers parents sont créés à la connexion (`memory/sqlite_conn.py`).

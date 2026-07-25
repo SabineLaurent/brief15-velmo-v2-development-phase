@@ -36,13 +36,20 @@ make run     # lance l'agent de support
 | Fichier | Contenu |
 |---|---|
 | [`ROADMAP.md`](ROADMAP.md) | Le tuto étape par étape — **commence ici** |
+| [`TODO_priorities.md`](TODO_priorities.md) | Ce qu'on fait ensuite et dans quel ordre (transverse) |
 | [`docs/spec.md`](docs/spec.md) | Le **QUOI** : périmètre fonctionnel, cas d'usage |
+| [`docs/vision.md`](docs/vision.md) | Le **POURQUOI** : les 3 scopes découplés |
 | [`docs/architecture.md`](docs/architecture.md) | Le **COMMENT** : conception technique, mémoire, agnosticisme |
+| [`docs/architecture-cible-2026-07-25.md`](docs/architecture-cible-2026-07-25.md) | Les blocs déployés et le rangement des données (cible) |
 | [`docs/methodologie.md`](docs/methodologie.md) | La méthode de travail (prompt réutilisable pour de futurs projets) |
 | [`CLAUDE.md`](CLAUDE.md) | Règles & conventions du projet |
 
 ## Statut
 
-🚧 En construction — Phases 0 à 4 terminées (structure, LLM agnostique,
-observabilité LangSmith, mémoire court terme, RAG / FAQ). Prochaine : Phase 5
-(mémoire long terme cross-session).
+🚧 En construction — Phases 0 à 10 et 12 terminées : LLM agnostique, observabilité
+LangSmith, mémoire court + long terme, RAG / FAQ, orchestration LangGraph, escalade
+humaine, outils & actions métier, évaluation, persistance & robustesse, sécurité &
+guardrails. Prochaine : **Phase 11** (cycle de vie du support — Case + Ticket),
+réordonnée après la 12. Puis Phase 13 (exposition & déploiement).
+
+État détaillé : section « Où on en est » de [`ROADMAP.md`](ROADMAP.md).

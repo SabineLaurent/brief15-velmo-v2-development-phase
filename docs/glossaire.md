@@ -139,7 +139,7 @@ pour un cache du même esprit, mais côté provider.
 *monorepo* = **un seul dépôt git** qui héberge plusieurs projets liés.
 *workspace* (uv) = la **mécanique** qui les fait cohabiter proprement (un
 `uv.lock` + un `.venv` **partagés**). Ici : `packages/support-agent`,
-`packages/frontend`… Cf. `anatomie-package-workspace.md`.
+`packages/client`… Cf. `anatomie-package-workspace.md`.
 
 ## MVP (*Minimum Viable Product*)
 
