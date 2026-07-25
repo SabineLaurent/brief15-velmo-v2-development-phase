@@ -27,10 +27,13 @@ TEMP/
 .ruff_cache/
 .mypy_cache/
 
-# --- Hors de cette tranche ---------------------------------------------------
-# L'image `agent-api` n'embarque que le cerveau. Le client Chainlit aura la sienne
-# (étape 4), et la doublure SQL n'est pas câblée dans `get_backend()`.
-packages/client/
+# --- Hors des tranches --------------------------------------------------------
+# ⚠️ Ce fichier est PARTAGÉ par les deux images (`agent-api` et `client`) : il dit
+# ce qui n'entre pas dans le CONTEXTE de build, pas ce qui entre dans une image.
+# `packages/client/` était exclu ici jusqu'à l'étape 3 ; il ne peut plus l'être,
+# puisque l'image du client se construit désormais depuis ce même contexte.
+# Ce qui garantit que le cerveau ne finit pas dans l'image du client, ce n'est pas
+# cette liste : c'est que chaque Dockerfile ne `COPY` que SA tranche.
 data/db-shop-velmo/
 
 # --- Inutile au runtime ------------------------------------------------------

@@ -16,7 +16,7 @@
 | 1 | Audit A2 — escalade cassée via la couture | bloquait **B1.6** (le cas escalade dans l'UI) | ✅ |
 | 2 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ✅ |
 | 3 | **Déploiement conteneurisé** (Docker → Azure), 5 étapes | l'agent doit devenir un **service appelable** — objectif de livraison de la formation | 🚧 |
-| 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe | ⬜ |
+| 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 5 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
@@ -153,8 +153,15 @@ pas défendable — donc B1.4 y gagne en attendant.
 | 1 | Service HTTP : `POST /chat` (SSE), `/health`, `/ready`, clé de service + tests de contrat de la couture | ✅ |
 | 2 | Image Docker de la tranche `support-agent` (état sur volume) | ✅ |
 | 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ✅ |
-| 4 | Conteneur `client` : Chainlit devient client **HTTP** | ⬜ |
+| 4 | Conteneur `client` : Chainlit devient client **HTTP** | ✅ |
 | 5 | Azure : ACR + Container Apps + Flexible Server, **identité prouvée** | ⬜ |
+
+**Étape 4 close (2026-07-25) — ce qu'elle a prouvé, chiffré :** `app.py` a changé
+d'**une ligne d'import**, le corps du handler d'**aucun caractère**. `support-agent`
+est sorti des dépendances de `packages/client` ; l'image du client (405 Mo) ne
+contient ni `support_agent`, ni `langgraph`, ni `langchain` — vérifié dans l'image
+construite, pas déduit. Le client ne reçoit plus que **deux variables**
+(`AGENT_API_URL`, `AGENT_API_KEY`) là où il voyait tout le `.env` de l'agent.
 
 **Décidé et à ne pas rouvrir sans raison neuve :** le rail de déploiement LangGraph
 (`langgraph.json` / LangSmith Deployment) est **écarté** — son contrat public est le

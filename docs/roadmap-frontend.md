@@ -36,6 +36,14 @@ parle à **un seul point d'entrée stable** côté agent :
                             ↑ LA COUTURE (contrat)
 ```
 
+> 📌 **Mise à jour du 2026-07-25 — l'étape 4 du déploiement a franchi ce schéma.**
+> Les phases B1.x ci-dessous décrivent l'état **au moment où elles ont été faites**
+> (Chainlit importait `stream_reply` du paquet `support_agent`, même process). Ce
+> n'est plus le cas : `packages/client` **ne dépend plus** de `support-agent` et
+> appelle l'agent en **HTTP/SSE** (`client_chainlit/agent_client.py`, même
+> signature). Le niveau 2 n'attend donc plus rien : sa couture existe.
+> Détail : [`plan-deploiement-2026-07-25.md`](plan-deploiement-2026-07-25.md) §Étape 4.
+
 ⚠️ Les tutos Chainlit classiques font `graph.stream(...)` **dans** l'app front —
 on s'en écarte **volontairement** : ce couplage nous interdirait de swapper le
 front. La couture `stream_reply` est ce qui rend Chainlit **jetable**.

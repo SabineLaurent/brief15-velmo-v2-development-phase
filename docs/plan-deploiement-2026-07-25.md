@@ -250,6 +250,77 @@ démarrage. Le chiffre qui décidera du `minReplicas` est donc inchangé.
   découplage est prouvé, pas revendiqué.
 - **Vérification :** deux conteneurs, l'un ne connaissant de l'autre que son URL.
 
+**Fait le 2026-07-25.** Nouveau `packages/client/src/client_chainlit/agent_client.py`
+(la couture **par-dessus le réseau**), `packages/client/Dockerfile`, service `client`
+dans `compose.yaml`, et 15 tests de contrat hors ligne
+(`packages/client/tests/test_agent_client.py`).
+
+**Le chiffre qui répond à la question posée :** `app.py` a changé d'**UNE ligne**.
+
+```diff
+- from support_agent import stream_reply          # un process, un appel Python
++ from client_chainlit.agent_client import stream_reply   # un réseau, un POST SSE
+```
+
+Le corps du handler n'a pas bougé d'un caractère, parce que le client HTTP expose
+**exactement** la même signature `stream_reply(message, *, user_id, thread_id)`.
+Une couture qu'il faut renégocier quand le transport change n'en était pas une.
+
+**Le geste qui rend le découplage vérifiable :** `support-agent` a été **retiré des
+dépendances** de `packages/client`. Ce n'est plus une règle de style qu'on se
+rappelle, c'est un fait du graphe de dépendances. Contrôlé dans l'image construite :
+
+| Module | Dans l'image `client` |
+|---|---|
+| `chainlit`, `httpx_sse`, `client_chainlit` | présents |
+| `support_agent`, `langgraph`, `langchain` | **absents** |
+
+⚠️ Nuance honnête : le `.venv` **partagé** du workspace contient toujours
+`support_agent` (le groupe dev l'installe pour les tests). Ce qui attrape une
+régression, c'est donc le **build de l'image**, pas la machine de dev.
+
+**Ce que le réseau ajoute, et qu'il fallait traiter :** l'appel en mémoire ne
+pouvait pas échouer *pour des raisons de transport*. Le client HTTP, si :
+connexion refusée, 401, timeout de lecture, flux coupé en deux. L'invariant du
+package (« tout chemin livre exactement un chunk non vide ») est donc **réaffirmé
+côté client**, sans quoi une panne réseau s'afficherait dans Chainlit comme une
+**bulle vide**. La cause réelle part dans les logs ; le client, lui, voit une phrase.
+
+**Deux pièges payés :**
+
+1. **Chainlit écrit dans le cwd, et il le fait à l'IMPORT.** `chainlit/config.py`
+   appelle `FILES_DIRECTORY.mkdir()` pendant l'import du CLI — donc avant tout
+   argument de ligne de commande. En non-root dans un `/app` appartenant à root, le
+   conteneur meurt sur `PermissionError: /app/.files` **avant d'avoir logué quoi que
+   ce soit**. La solution n'est pas d'énumérer ses dossiers (`.files`, `.chainlit`,
+   `chainlit.md` — cette liste appartient à Chainlit) mais de lui donner un **cwd
+   inscriptible** : `WORKDIR /home/appuser`. Les sources restent dans `/app`,
+   trouvées par `PYTHONPATH`.
+2. **Le `.dockerignore` est PARTAGÉ par les deux images.** Il excluait
+   `packages/client/` — parfait tant qu'une seule image se construisait, fatal dès
+   la seconde. Ce qui garantit que le cerveau n'entre pas dans l'image du client,
+   ce n'est pas cette liste : c'est que **chaque Dockerfile ne `COPY` que sa
+   tranche**.
+
+**Un choix inverse de celui de l'agent, assumé :** l'image du client **copie ses
+sources** au lieu d'installer une roue (`--no-editable`). Raison concrète :
+`chainlit run` prend un **chemin de fichier**. Installer *aussi* la roue mettrait
+un second exemplaire du module dans `site-packages` — exactement le piège de
+péremption que le Dockerfile de l'agent évite. Un seul exemplaire, atteignable à
+la fois comme chemin (pour le CLI) et comme paquet (pour l'import), via `PYTHONPATH`.
+
+**Vérifié en live :** les trois conteneurs *healthy* dans l'ordre
+(`postgres` → `agent-api` → `client`, chaîné par `depends_on: service_healthy`),
+puis une vraie conversation lancée **depuis le conteneur `client`**, avec ses
+propres variables : réponse FAQ sourcée, et **mémoire courte conservée d'un tour à
+l'autre** à travers le réseau (l'agent se souvient du prénom donné au tour
+précédent). Image client : **405 Mo** (contre 544 Mo pour l'agent).
+
+**Ce que le client ne reçoit PAS**, et c'est le vrai bénéfice de sécurité : pas de
+clé LLM, pas d'URL de base de données, pas de `KNOWLEDGE_DIR`. **Deux variables**,
+`AGENT_API_URL` et `AGENT_API_KEY`. Jusqu'à l'étape 3, il connaissait tout ça —
+non par besoin, mais parce qu'il partageait le process.
+
 ### Étape 5 — Azure
 
 - **But technique :** **ACR** pour les images, **ACA** pour l'exécution (ingress

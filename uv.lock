@@ -410,13 +410,15 @@ version = "0.1.0"
 source = { editable = "packages/client" }
 dependencies = [
     { name = "chainlit" },
-    { name = "support-agent" },
+    { name = "httpx" },
+    { name = "httpx-sse" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "chainlit", specifier = ">=2.0" },
-    { name = "support-agent", editable = "packages/support-agent" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "httpx-sse", specifier = ">=0.4" },
 ]
 
 [[package]]

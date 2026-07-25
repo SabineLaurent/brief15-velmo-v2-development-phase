@@ -64,6 +64,11 @@ membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
 > est **une** implémentation de client, d'où le nom. Le scope C (backend) viendra
 > comme `packages/backend`. Voir `docs/vision.md`.
 >
+> ⭐ Depuis l'**étape 4 du déploiement**, `packages/client` ne dépend **plus** de
+> `support-agent` : il appelle l'agent en **HTTP** (`agent_client.py`, même
+> signature que la couture). Ne pas réintroduire cet import — c'est la preuve du
+> découplage, et elle est vérifiée par le build de l'image du client.
+>
 > 🧭 **Un `CLAUDE.md` par package.** Chaque membre porte son propre `CLAUDE.md`
 > (règles **locales**), lu **à la demande** quand je travaille dans ce sous-arbre.
 > Ce fichier racine reste la source des **invariants transverses** (toujours
@@ -75,7 +80,10 @@ Passe par le `Makefile` (porte d'entrée unique ; `make help` pour la liste) :
 
 ```bash
 make setup    # uv sync + crée .env depuis .env.example
-make run      # lance l'agent (uv run python -m support_agent.agent)
+make run      # lance l'agent en CLI (uv run python -m support_agent.agent)
+make serve    # expose l'agent en HTTP/SSE sur :8000
+make ui       # lance l'UI Chainlit sur :8001 (client HTTP → a besoin de `make serve`)
+make docker-up  # la pile complète en conteneurs : postgres + agent-api + client
 make test     # tests (pytest)
 make lint     # ruff check
 make check    # lint + tests

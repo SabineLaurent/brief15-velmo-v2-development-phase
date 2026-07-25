@@ -6,7 +6,7 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run serve eval latency test lint format check clean \
+.PHONY: help setup install run serve ui eval latency test lint format check clean \
         docker-build docker-up docker-logs docker-down
 
 help: ## Affiche cette aide
@@ -28,6 +28,10 @@ run: ## Lance l'agent de support
 serve: ## Expose l'agent en HTTP (API SSE sur :8000, cf. docs/plan-deploiement-2026-07-25.md)
 	$(UV) run --extra server uvicorn support_agent.server:app --reload --port 8000
 
+ui: ## Lance l'UI Chainlit sur :8001 (client HTTP — `make serve` doit tourner à côté)
+	@echo "→ l'UI appelle $${AGENT_API_URL:-http://localhost:8000} ; lance 'make serve' dans un autre terminal si ce n'est pas fait."
+	$(UV) run chainlit run packages/client/src/client_chainlit/app.py -w --port 8001
+
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run
 
@@ -45,12 +49,13 @@ format: ## Formate le code (ruff)
 
 check: lint test ## Contrôle qualité complet (lint + tests)
 
-docker-build: ## Construit l'image de l'agent (contexte = racine du repo)
+docker-build: ## Construit les images (agent + client ; contexte = racine du repo)
 	docker build -f packages/support-agent/Dockerfile -t support-agent:dev .
+	docker build -f packages/client/Dockerfile -t client-chainlit:dev .
 
 docker-up: ## Démarre la pile conteneurisée en arrière-plan (construit si besoin)
 	docker compose up --build -d
-	@echo "→ agent sur http://localhost:8000  (make docker-logs pour suivre le démarrage)"
+	@echo "→ UI sur http://localhost:8001  ·  agent sur http://localhost:8000  (make docker-logs pour suivre le démarrage)"
 
 docker-logs: ## Suit les logs de la pile (Ctrl-C pour sortir, les conteneurs continuent)
 	docker compose logs -f

@@ -1,9 +1,17 @@
 """The Chainlit demo shell (Phase B1.2): "Hello Chainlit".
 
 The whole point of this file is what it does NOT contain: no graph, no node, no
-LangGraph import. It talks to the agent through the single seam `stream_reply`
-(see `support_agent.api`). That is what keeps the front throwaway — we could
-swap Chainlit for React without touching the brain.
+LangGraph import. It talks to the agent through the single seam `stream_reply`.
+That is what keeps the front throwaway — we could swap Chainlit for React
+without touching the brain.
+
+⭐ Deployment step 4 happened HERE, and it is one line: `stream_reply` used to be
+imported from `support_agent` (same process, a Python call) and now comes from
+`client_chainlit.agent_client` (another container, an HTTP/SSE call). The handler
+below did not change by a single character, because the network client exposes
+the SAME signature. That is the seam being worth its cost, demonstrated rather
+than claimed — and `packages/client` no longer declares `support-agent` as a
+dependency at all, so the client's image cannot even contain the brain.
 
 Chainlit lifecycle used here:
 
@@ -29,7 +37,7 @@ from __future__ import annotations
 
 import chainlit as cl
 
-from support_agent import stream_reply
+from client_chainlit.agent_client import stream_reply
 
 # Simulated customer id: no auth in the demo (the long-term memory key). Made
 # real in level 2, where auth derives `user_id` from a logged-in identity.
@@ -58,10 +66,10 @@ async def on_message(message: cl.Message) -> None:
 
     We open an empty message and push every chunk the seam yields
     (`stream_token`), then finalize (`update`). The seam currently delivers the
-    reply in ONE chunk — the output guard has to inspect the complete text before
-    anything may be shown (see `support_agent.api`, design choice 1) — but we keep
-    consuming it as a stream: that is the contract, and the day the seam yields
-    more chunks (Phase B1.5's step-by-step progress) this handler is already right.
+    reply in ONE chunk — the agent's output guard has to inspect the complete text
+    before anything may be shown (see `docs/streaming.md`) — but we keep consuming
+    it as a stream: that is the contract, and the day the seam yields more chunks
+    (Phase B1.5's step-by-step progress) this handler is already right.
 
     `stream_token` is what actually creates the message server-side, so a stream
     that yields NOTHING would leave us calling `update()` on a message that was
@@ -72,8 +80,9 @@ async def on_message(message: cl.Message) -> None:
 
     Note how little the front does: it never touches LangGraph. All the complexity
     (running the graph, guarding the reply, handling escalation) lives behind
-    `stream_reply`. That is the seam paying off — the classic Chainlit tutorial
-    would call `graph.stream(...)` right here; we deliberately do not.
+    `stream_reply` — since step 4, behind an HTTP call as well. That is the seam
+    paying off — the classic Chainlit tutorial would call `graph.stream(...)` right
+    here; we deliberately do not, and now we physically could not.
 
     We use the Chainlit session id as the short-term-memory `thread_id`, so the
     agent remembers this conversation across turns. Formalizing identity

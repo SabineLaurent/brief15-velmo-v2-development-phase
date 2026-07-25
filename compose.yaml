@@ -5,8 +5,11 @@
 #   make docker-logs    # suit les logs
 #   make docker-down    # arrête (garde le volume)
 #
-# Deux briques : `agent-api` et sa base `postgres`. Le conteneur `client` arrive
-# à l'étape 4. On n'ouvre qu'une étape à la fois.
+# Trois briques : `client` → `agent-api` → `postgres`. Chacune ne connaît que la
+# suivante, et seulement par son NOM DE SERVICE (DNS interne de Compose).
+#
+#   navigateur ──:8001──► client ──http://agent-api:8000──► agent-api ──► postgres
+#                          (UI)         (la couture, en HTTP)    (cerveau)  (état)
 
 services:
   # La base unique de l'agent (étape 3). UN Postgres porte les DEUX horizons de
@@ -78,6 +81,46 @@ services:
     ports:
       # hôte:conteneur — l'agent écoute sur 8000 dans le conteneur.
       - "8000:8000"
+
+    restart: unless-stopped
+
+  # L'UI de démo (étape 4). Elle n'importe plus le cerveau : elle l'APPELLE.
+  # Regarde ce que ce bloc NE contient pas — ni clé LLM, ni URL de base, ni
+  # `KNOWLEDGE_DIR`. Un client n'a aucune raison de connaître ces choses, et
+  # jusqu'à l'étape 3 il les connaissait toutes parce qu'il partageait le process.
+  client:
+    build:
+      context: .
+      dockerfile: packages/client/Dockerfile
+    image: client-chainlit:dev
+
+    # Pas d'`env_file: .env` ici, VOLONTAIREMENT. Le .env porte les secrets du
+    # cerveau (clés LLM, mot de passe Postgres) ; les injecter dans le client les
+    # exposerait dans un conteneur qui sert des pages web à un navigateur, sans
+    # aucun usage. Le client reçoit exactement deux variables :
+    environment:
+      # Le nom du SERVICE, pas localhost : deux conteneurs = deux piles réseau.
+      # C'est la seule chose que le client sait de l'agent. Sur Azure, cette URL
+      # devient l'ingress HTTPS du Container App — et c'est le seul changement.
+      AGENT_API_URL: http://agent-api:8000
+      # La clé de SERVICE que le client PRÉSENTE (« ai-je le droit d'appeler cet
+      # agent ? ») — à ne pas confondre avec `user_id`, qui dit DE QUI on parle.
+      # Interpolée depuis le .env de l'hôte par Compose lui-même : le fichier
+      # n'entre pas dans le conteneur, seule cette valeur en sort. Vide = aucun
+      # en-tête envoyé, ce qui ne marche que si l'agent tourne en mode ouvert.
+      AGENT_API_KEY: ${API_KEY:-}
+
+    depends_on:
+      agent-api:
+        # `service_healthy` s'appuie sur le HEALTHCHECK de l'image de l'agent, qui
+        # couvre son warm-up (~4,4 s en conteneur). Sans ça, la première question
+        # posée dans l'UI partirait vers un service encore en train d'indexer.
+        condition: service_healthy
+
+    ports:
+      # 8001 côté hôte : 8000 est déjà pris par `agent-api`. Dans le conteneur,
+      # Chainlit écoute bien sur 8000 — l'UI s'ouvre sur http://localhost:8001.
+      - "8001:8000"
 
     restart: unless-stopped
 

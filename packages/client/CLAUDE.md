@@ -15,22 +15,55 @@ parler* (niveau 1, cf. [`docs/roadmap-frontend.md`](../../docs/roadmap-frontend.
 Chainlit est **une** implémentation de client, pas *le* client. Ajouter un second
 client ne doit pas obliger à renommer celui-ci.
 
-## Invariant n°1 : le front ne connaît JAMAIS lang\* (NON NÉGOCIABLE)
+## Invariant n°1 : le front ne connaît JAMAIS le cerveau (NON NÉGOCIABLE)
 
-- Ce package importe **uniquement** la couture : `from support_agent import stream_reply`.
-- **Interdit** ici : `langgraph`, `langchain`, un `graph`, un `state`, un nœud,
-  `stream_mode=...`. Toute cette complexité vit **derrière** `stream_reply`.
-- Pourquoi : c'est précisément ce couplage-zéro qui rend Chainlit **remplaçable**
-  (par du React en B2) sans toucher au cerveau. Le tuto Chainlit classique fait
-  `graph.stream(...)` dans le handler — on s'en écarte **volontairement**.
+Depuis l'**étape 4 du déploiement**, cet invariant est plus fort qu'avant : le
+front ne connaît plus le paquet `support_agent` **du tout**. Il connaît une **URL**.
 
-> Test mental avant d'ajouter un import : « est-ce que React aurait ce même
+- Ce package importe **uniquement** la couture, désormais en version réseau :
+  `from client_chainlit.agent_client import stream_reply`.
+- **Interdit** ici : `support_agent`, `langgraph`, `langchain`, un `graph`, un
+  `state`, un nœud, `stream_mode=...`. Tout ça vit derrière `AGENT_API_URL`.
+- `support-agent` a été **retiré des dépendances** (`pyproject.toml`) : le
+  découplage est un fait du graphe de dépendances, pas une règle qu'on se rappelle.
+  ⚠️ Le `.venv` **partagé** contient quand même `support_agent` (groupe dev) — ce
+  qui attrape une régression, c'est le **build de l'image du client**.
+- Pourquoi : c'est ce couplage-zéro qui rend Chainlit **remplaçable** (par du React
+  en B2) sans toucher au cerveau. Le tuto Chainlit classique fait `graph.stream(...)`
+  dans le handler — on s'en écarte **volontairement**, et maintenant on ne pourrait
+  physiquement plus le faire.
+
+> Test mental avant d'ajouter un import : « est-ce que du React aurait cet
 > import ? » Si non, il n'a rien à faire ici — la logique remonte dans la couture
-> (`packages/support-agent/src/support_agent/api.py`).
+> (`packages/support-agent/src/support_agent/api.py`), pas dans le client.
+
+## `agent_client.py` — la couture par-dessus le réseau
+
+- **Même signature** que la couture in-process : `stream_reply(message, *, user_id,
+  thread_id) -> AsyncIterator[str]`. C'est ce qui a permis à `app.py` de ne changer
+  que d'**une ligne d'import** à l'étape 4. Ne pas la faire diverger.
+- **Ce module ne connaît ni l'UI ni l'agent** : pas d'`import chainlit`, pas
+  d'`import support_agent`. Pur transport — le même fichier servirait un React.
+- **Il doit livrer exactement un chunk non vide, sur TOUT chemin** — y compris les
+  pannes que l'appel en mémoire n'avait pas : connexion refusée, 401, timeout, flux
+  coupé. Sinon Chainlit affiche une **bulle vide** sur panne réseau. La cause réelle
+  va dans les **logs** ; le client voit une phrase.
+- **Deux identités, deux canaux** : `AGENT_API_KEY` en **en-tête** (l'APPELANT
+  a-t-il le droit ?), `user_id` dans le **corps** (DE QUI parle-t-on ?). Ne jamais
+  les mélanger. Prouver le `user_id` est le travail du **serveur** (étape 5) : un
+  client ne peut pas être ce qui prouve sa propre identité.
+- **Types d'événements SSE inconnus = ignorés**, jamais une erreur : c'est ce qui
+  permettra à B1.5 d'ajouter des étapes/sources sans casser ce client.
+- Les deux variables se lisent **à l'appel** (`get_agent_api_url()` /
+  `get_agent_api_key()`), pas à l'import — sinon un `.env` chargé après l'import du
+  module serait ignoré, et les tests ne pourraient rien surcharger.
 
 ## Streaming : le front **affiche**, il ne produit pas
 
-- La production du flux = l'agent (`stream_reply`, forme native = générateur).
+- La production du flux = l'agent (`stream_reply`, forme native = générateur) ;
+  depuis l'étape 4, il est **transporté** en SSE par `server.py` et **reconstitué**
+  en générateur par `agent_client.py`. Trois couches, mêmes rôles qu'avant :
+  l'agent produit, l'API transporte, le front affiche.
 - Le front ne fait que **rendre au fil de l'eau** (`msg.stream_token(chunk)`),
   et c'est **la seule couche** qui peut décider d'une cadence (smoothing /
   typewriter) — jamais la couture. Détail : [`docs/streaming.md`](../../docs/streaming.md).
@@ -46,13 +79,19 @@ client ne doit pas obliger à renommer celui-ci.
 
 ## Lancer / cwd
 
-- **Toujours depuis la racine du repo**, pas depuis ce dossier :
-  `uv run chainlit run packages/client/src/client_chainlit/app.py -w`.
-- Raison : l'agent résout ses données en **chemins relatifs au cwd**
-  (`./data/kb-velmo` via `KNOWLEDGE_DIR`, `./database/…` — cf.
-  [`database/README.md`](../../database/README.md)). Lancer d'ailleurs casse ces chemins.
-- Chainlit génère `chainlit.md` + `.chainlit/` à la racine au 1er lancement :
+- **Il faut DEUX process depuis l'étape 4** : `make serve` (l'agent, sur `:8000`)
+  puis `make ui` (Chainlit, sur `:8001`). Le client seul affiche une UI qui répond
+  « service injoignable » — c'est le comportement correct, pas un bug.
+- En conteneur : `make docker-up` lance les trois briques, UI sur
+  **http://localhost:8001**.
+- **Toujours depuis la racine du repo**, pas depuis ce dossier. Ce package n'a plus
+  besoin du cwd pour lui-même (il ne lit plus ni `./data/` ni `./database/` : c'est
+  l'agent qui le fait, dans son process), mais Chainlit résout le chemin de
+  `app.py` **relativement au cwd**, et c'est là que `.env` est lu.
+- Chainlit génère `chainlit.md` + `.chainlit/` **dans le cwd** au 1er lancement :
   **gitignore** jusqu'à la phase B1.6 (écran d'accueil soigné + thème).
+  ⚠️ Il crée ces dossiers **à l'import** de son CLI — d'où le `WORKDIR /home/appuser`
+  du `Dockerfile` (voir son commentaire : un cwd non inscriptible = crash muet).
 - Détail de la commande : [`README.md`](README.md).
 
 ## Identité (démo)
@@ -61,6 +100,12 @@ client ne doit pas obliger à renommer celui-ci.
   conversation mémorisée.
 - `user_id` (mémoire longue) = **simulé** (`"demo-user"`, pas d'auth). Trou n°2
   assumé non-prod, résolu au niveau 2. Formalisation propre : phase B1.4.
+- ⚠️ Depuis l'étape 4, ces deux valeurs **traversent le réseau** dans le corps de la
+  requête. Le `user_id` y est donc **déclaré**, pas prouvé : n'importe quel appelant
+  peut écrire celui d'un autre. Le refermer se fait **côté serveur**
+  (`support_agent.server._resolve_user_id`, étape 5), jamais ici — ajouter une
+  vérification dans le client ne prouverait rien, un client pouvant mentir sur tout
+  ce qu'il envoie.
 
 ## Avant d'écrire du code Chainlit
 

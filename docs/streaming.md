@@ -118,15 +118,32 @@ n'aura qu'à yielder plus de chunks : **aucun front à modifier**.
 
 ## Où on en est concrètement
 
-- **Aujourd'hui (niveau 1, in-process).** `stream_reply` yield directement à
-  Chainlit — **zéro réseau**. Le front fait `async for chunk in stream_reply(...)`
-  puis `msg.stream_token(chunk)`. Le flux ne contient **qu'un chunk** (la réponse
-  gardée), mais le front le consomme **comme un flux** : le jour où B1.5 en
-  yield plusieurs, le handler est déjà correct.
-- **Demain (niveau 2, front découplé).** La **Phase 13 du scope A** ajoute l'API
-  HTTP : c'est **elle** qui portera le streaming sur le réseau (SSE), en
-  enveloppant la **même** `stream_reply`. Le React n'aura qu'à consommer le flux.
-  Voir [`roadmap-frontend.md`](roadmap-frontend.md) §B2.
+- **Aujourd'hui : les trois couches existent pour de vrai** (déploiement étapes 1
+  et 4). Le flux traverse le réseau et retrouve sa forme de générateur de l'autre
+  côté :
+
+  ```
+  graphe ──► stream_reply()      produit   (support_agent/api.py)
+         ──► StreamingResponse   transporte en SSE   (support_agent/server.py)
+         ──► stream_reply()      reconstitue le générateur (client_chainlit/agent_client.py)
+         ──► msg.stream_token()  affiche   (client_chainlit/app.py)
+  ```
+
+  Le point à retenir : les deux `stream_reply` ont **la même signature**. Le front
+  fait toujours `async for chunk in stream_reply(...)` — il ne sait pas, et n'a pas
+  à savoir, qu'il y a un réseau au milieu. C'est ce qui a permis à `app.py` de ne
+  changer que d'une ligne d'import quand Chainlit est devenu un client HTTP.
+- Le flux ne contient toujours **qu'un chunk** (la réponse gardée), mais chaque
+  couche le traite **comme un flux** : le jour où B1.5 en yield plusieurs, rien à
+  reprendre. Le transport SSE est déjà **typé** (`{"type": "chunk"|"error"|"done"}`)
+  pour que de nouveaux types d'événements n'obligent aucun client à changer.
+- **Une contrainte que seul le réseau impose :** le client HTTP doit traduire ses
+  propres pannes (connexion refusée, 401, timeout) en **un** message affichable.
+  L'invariant « tout chemin livre exactement un chunk non vide » se réaffirme donc
+  à chaque couche — une promesse faite de l'autre côté d'une couture ne se présume pas.
+- **Demain (niveau 2, front React).** Rien de nouveau à construire côté agent :
+  le React consommera **le même** `POST /chat` en SSE, avec `fetch` +
+  `ReadableStream`. Voir [`roadmap-frontend.md`](roadmap-frontend.md) §B2.
 
 ---
 
