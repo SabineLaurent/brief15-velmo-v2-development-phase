@@ -316,6 +316,35 @@ propres variables : réponse FAQ sourcée, et **mémoire courte conservée d'un 
 l'autre** à travers le réseau (l'agent se souvient du prénom donné au tour
 précédent). Image client : **405 Mo** (contre 544 Mo pour l'agent).
 
+**Contre-épreuve, depuis le conteneur `client`, corroborée des deux côtés** — le
+client seul ne prouve rien, un client cassé refusant tout lui aussi :
+
+| Cas | Ce que le client affiche | Ce que le serveur logue |
+|---|---|---|
+| **Témoin positif** (bonne clé) | réponse FAQ, 5,1 s | `POST /chat 200 OK` |
+| Mauvaise clé | « le service a refusé la demande », 0,0 s | `POST /chat 401` |
+| Aucune clé | « le service a refusé la demande », 0,0 s | `POST /chat 401` |
+| Agent injoignable | « momentanément injoignable », 0,0 s | **aucune ligne** |
+
+Trois lectures, dans l'ordre d'importance. **Un chunk non vide dans les quatre
+cas** : l'invariant tient à travers le réseau. **Les refus tombent en 0,0 s**, donc
+*avant* tout appel au LLM — la clé de service est aussi une protection budgétaire,
+pas seulement un contrôle d'accès. Et la **ligne absente** du 4ᵉ cas est celle qui
+vaut le plus : elle prouve que « injoignable » vient d'un échec de **transport**,
+et non d'un refus serveur qu'on aurait mal étiqueté.
+
+**Un incident d'environnement, instructif :** une coupure internet pendant les
+tests a produit trois symptômes qui semblaient sans rapport — le témoin positif en
+échec, le CLI Docker figé, et le dashboard sans logs. Une seule cause : le
+conteneur ne pouvait plus **sortir** (confirmé après coup par un
+`ConnectTimeout` LangSmith dans ses logs), et Docker Desktop se bloque sur perte
+réseau. Deux leçons durables. Un `Quit` de Docker Desktop **ne tue pas**
+`com.docker.backend` : il faut `pkill -9`, sinon l'application refuse de se rouvrir.
+Et un arrêt brutal de la VM **casse le tuyau de logs** des conteneurs : ils
+fonctionnent, mais n'écrivent plus rien de visible — un `docker compose up -d
+--force-recreate <service>` le rétablit. Sans le témoin positif, on aurait conclu
+« la clé est vérifiée » alors que le client n'atteignait plus rien.
+
 **Ce que le client ne reçoit PAS**, et c'est le vrai bénéfice de sécurité : pas de
 clé LLM, pas d'URL de base de données, pas de `KNOWLEDGE_DIR`. **Deux variables**,
 `AGENT_API_URL` et `AGENT_API_KEY`. Jusqu'à l'étape 3, il connaissait tout ça —
