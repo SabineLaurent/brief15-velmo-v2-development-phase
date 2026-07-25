@@ -57,6 +57,14 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
 - **Démarrage fail-closed** : sans `API_KEY` et sans `API_ALLOW_UNAUTHENTICATED=true`
   explicite, le process **refuse de démarrer**. Ne pas « assouplir » ça : c'est ce
   qui empêche de déployer une porte ouverte par oubli de variable.
+- 🎚️ **Le curseur local ⇄ réaliste** : `API_ALLOW_UNAUTHENTICATED` peut valoir
+  `true` dans le `.env` de dev (l'auth devient du bruit quand on code une feature,
+  et `make serve` n'écoute que sur `127.0.0.1`). Le conteneur, lui, **force `false`**
+  via le bloc `environment` de `compose.yaml`, qui écrase `env_file`. Découpage
+  **structurel, pas disciplinaire** : le cran de réalisme arrive avec Docker et ne
+  peut pas être annulé par confort local. Ne pas retirer cette ligne du Compose.
+- Corollaire : ce drapeau est une décision **du serveur**. Un client ne décide
+  jamais s'il doit s'authentifier — il présente une clé, ou il n'en présente pas.
 - `fastapi`/`uvicorn` sont un **extra** (`--extra server`) : le CLI et Chainlit
   n'ont pas à traîner un serveur web.
 

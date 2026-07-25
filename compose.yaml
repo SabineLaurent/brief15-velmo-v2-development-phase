@@ -78,6 +78,16 @@ services:
       PERSISTENCE_BACKEND: postgres
       DATABASE_URL: postgres://agent:agent@postgres:5432/agent
       DATABASE_SCHEMA: agent_state
+      # 🔒 Le conteneur exige TOUJOURS la clé de service, quoi que dise le .env.
+      # C'est ce qui rend le découpage structurel plutôt que disciplinaire :
+      #   hors Docker → tu peux mettre API_ALLOW_UNAUTHENTICATED=true dans ton
+      #     .env, l'auth cesse d'être du bruit pendant que tu codes une feature ;
+      #   en conteneur → cette ligne écrase le .env, donc la pile « proche de la
+      #     prod » ne peut pas devenir une porte ouverte par confort local.
+      # Sans elle, `env_file: .env` propagerait le `true` ici — et on croirait
+      # tester une pile authentifiée. Le drapeau appartient au SERVEUR : un client
+      # ne décide jamais s'il doit s'authentifier, il présente ou il ne présente pas.
+      API_ALLOW_UNAUTHENTICATED: "false"
       # Non lus tant que le backend est `postgres`, mais laissés corrects : le
       # .env de l'hôte les porte en relatif (`./database/…`), ce qui n'a aucun
       # sens ici. Repasser à `sqlite` pour comparer doit rester sans piège —
