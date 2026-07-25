@@ -12,10 +12,12 @@
 #                          (UI)         (la couture, en HTTP)    (cerveau)  (état)
 #
 # ⚠️ Les ports publiés sont volontairement DIFFÉRENTS de ceux du dev local
-# (`make serve` :8000 · `make ui` :8001). Pourquoi : sur macOS, deux serveurs
-# peuvent se lier au même port sans erreur (le plus spécifique gagne), donc une
-# collision ne se voit PAS — on croit tester sa pile locale et on interroge le
-# conteneur. Vécu le 2026-07-25. Ici, l'URL dit qui répond :
+# (`make serve` :8000 · `make ui` :8001). Pourquoi : Docker publie sur `0.0.0.0`
+# et uvicorn écoute sur `127.0.0.1` — DEUX ADRESSES différentes, donc aucun
+# `Errno 48`, et c'est la plus spécifique qui reçoit la connexion. La collision ne
+# se voit PAS : on croit tester sa pile locale et on interroge le conteneur.
+# (Deux process sur la MÊME adresse, eux, échouent bien franchement.)
+# Vécu le 2026-07-25, un test entier invalidé. Ici, l'URL dit qui répond :
 #   dev local  → agent :8000  · UI :8001
 #   conteneurs → agent :8100  · UI :8101
 # Rien ne change À L'INTÉRIEUR : les deux services écoutent toujours sur 8000, et

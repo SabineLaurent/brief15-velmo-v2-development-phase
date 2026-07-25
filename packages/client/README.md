@@ -61,12 +61,15 @@ serveur est absent, pas un bug.
 | **Dev local** (`make serve` / `make ui`) | `8000` | `8001` |
 | **Conteneurs** (`make docker-up`) | `8100` | `8101` |
 
-Pas un détail de confort : sur macOS, deux serveurs peuvent se lier au **même**
-port sans la moindre erreur (le plus spécifique gagne, en silence). On croit alors
-tester sa pile locale et on interroge en fait le conteneur — c'est arrivé le
-2026-07-25, et ça a invalidé un test entier. Avec des ports disjoints, **l'URL dit
-qui répond**. Rien ne change à l'intérieur des conteneurs : ils écoutent toujours
-sur `8000`, seule la publication côté hôte diffère.
+Pas un détail de confort. Deux process sur la **même adresse** échouent bien
+franchement (`Errno 48 — Address already in use`). Mais Docker publie sur
+`0.0.0.0:8000` tandis qu'uvicorn écoute sur `127.0.0.1:8000` : **deux adresses
+différentes**, donc aucune erreur, et c'est la plus spécifique qui reçoit la
+connexion. La collision est alors **silencieuse** — on croit tester sa pile locale
+et on interroge le conteneur. C'est arrivé le 2026-07-25, et ça a invalidé un test
+entier. Avec des ports disjoints, **l'URL dit qui répond**. Rien ne change à
+l'intérieur des conteneurs : ils écoutent toujours sur `8000`, seule la
+publication côté hôte diffère.
 
 **Les deux variables que ce client lit** (cf. `.env.example` §9) :
 

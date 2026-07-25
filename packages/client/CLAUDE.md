@@ -85,12 +85,14 @@ front ne connaît plus le paquet `support_agent` **du tout**. Il connaît une **
 - En conteneur : `make docker-up` lance les trois briques, UI sur
   **http://localhost:8101**, agent sur `:8100`.
 - ⚠️ **Deux jeux de ports disjoints — `80xx` local, `81xx` conteneur — et ce n'est
-  pas cosmétique.** Sur macOS, deux serveurs se lient au même port **sans erreur**
-  (le plus spécifique gagne, en silence) : on croit tester sa pile locale et on
-  interroge le conteneur. Vécu le 2026-07-25, un test entier invalidé. Ne pas
-  réunifier ces ports « pour simplifier ». Corollaire de méthode : une sonde
-  `curl` sur un port prouve que **quelque chose** répond, jamais **qui** — pour
-  identifier l'interlocuteur, regarder ses logs, pas son port.
+  pas cosmétique.** Docker publie sur `0.0.0.0`, uvicorn écoute sur `127.0.0.1` :
+  **deux adresses**, donc **aucun `Errno 48`**, et c'est la plus spécifique qui
+  reçoit. La collision est silencieuse — on croit tester sa pile locale et on
+  interroge le conteneur (vécu le 2026-07-25, un test entier invalidé). À ne pas
+  confondre avec deux process sur la même adresse, qui échouent franchement.
+  Ne pas réunifier ces ports « pour simplifier ». Corollaire de méthode : une
+  sonde `curl` sur un port prouve que **quelque chose** répond, jamais **qui** —
+  pour identifier l'interlocuteur, regarder ses logs, pas son port.
 - **Toujours depuis la racine du repo**, pas depuis ce dossier. Ce package n'a plus
   besoin du cwd pour lui-même (il ne lit plus ni `./data/` ni `./database/` : c'est
   l'agent qui le fait, dans son process), mais Chainlit résout le chemin de
