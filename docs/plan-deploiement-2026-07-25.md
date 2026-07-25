@@ -62,7 +62,7 @@ du travail réel (🔴) :
 | `user_id` non signé (trou §5.1 de l'archi cible) | 🔴 sur Internet, c'est une faille, plus une note de doc |
 | Chemins relatifs au **cwd** (`./data/kb-velmo`, `./database/…`) | 🟠 tient si on maîtrise le `WORKDIR`, mais fragile → chemins absolus par variable d'env |
 | `load_dotenv()` + `env_file=".env"` | 🟢 **non-problème** : Pydantic Settings lit l'environnement en priorité. Le `.env` ne doit simplement jamais entrer dans l'image |
-| L'app indexe la FAQ au boot (~1,6 s + appels embeddings) | 🟠 tolérable à 1 réplique ; le healthcheck doit attendre la fin |
+| L'app indexe la FAQ au boot (**2,9 s mesurés** + 2 appels embeddings) | 🟠 tolérable à 1 réplique ; le healthcheck doit attendre la fin |
 | Un seul `.venv` de workspace | 🟠 l'image doit builder **une tranche**, pas tout le monorepo (§4) |
 
 Le reste — factory LLM, ports, couture `stream_reply` — est déjà taillé pour ça.
@@ -197,7 +197,9 @@ Une étape = un livrable vérifiable. On n'en ouvre **qu'une à la fois**.
 
 ⚠️ **Piège Azure à traiter à cette étape :** ACA peut descendre à **zéro réplique**.
 Chaque réveil ré-indexerait la FAQ — appels embeddings facturés + latence de démarrage
-à froid. C'est là que l'invariant n°5 (« l'application n'indexe jamais en production »)
+à froid. Le coût est **mesuré** depuis l'étape 1 : le serveur logue son warm-up au
+démarrage, **2,9 s** sur la FAQ Velmo (16 fichiers, 2 appels embeddings). C'est ce
+chiffre, et non une intuition, qui doit décider du `minReplicas`. C'est là que l'invariant n°5 (« l'application n'indexe jamais en production »)
 cesse d'être de la doctrine et devient une ligne de facture. Deux issues :
 `minReplicas: 1`, ou sortir l'ingestion du boot pour de vrai.
 

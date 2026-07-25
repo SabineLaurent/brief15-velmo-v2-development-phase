@@ -21,7 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from support_agent import server
-from support_agent.config import get_settings
+from support_agent.config import Settings, get_settings
 
 API_KEY = "test-key"
 
@@ -35,19 +35,33 @@ def _sse_events(body: str) -> list[dict]:
     ]
 
 
+def _use_settings(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
+    """Force the settings the server sees, ignoring the developer's `.env` entirely.
+
+    Environment variables are NOT enough here, and the reason is worth knowing:
+    `config.py` calls `load_dotenv()` at import time, which copies `.env` into
+    `os.environ`. So `monkeypatch.delenv("API_KEY")` does not make the key absent
+    — `.env` already put it there. A test that relied on env vars alone would
+    pass or fail depending on whether the developer had run `make serve` once.
+
+    Passing the fields as constructor kwargs wins over both `.env` and the
+    environment, which is the only way to assert "no key configured" for real.
+
+    Two injection points are needed because the server reads settings two ways:
+    the lifespan calls `get_settings()` directly, while the routes receive it
+    through `Depends`, which resolves the ORIGINAL function object.
+    """
+    settings = Settings(_env_file=None, **overrides)  # type: ignore[call-arg]
+    monkeypatch.setattr(server, "get_settings", lambda: settings)
+    server.app.dependency_overrides[get_settings] = lambda: settings
+
+
 @pytest.fixture(autouse=True)
 def _isolate_settings(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Pin the auth settings for every test, whatever the developer's `.env` says.
-
-    `get_settings` is `lru_cache`d, so the cache must be cleared on BOTH sides:
-    entering (to drop whatever a previous test or the real `.env` produced) and
-    leaving (so a cached test value never leaks into another test).
-    """
-    monkeypatch.setenv("API_KEY", API_KEY)
-    monkeypatch.setenv("API_ALLOW_UNAUTHENTICATED", "false")
-    get_settings.cache_clear()
+    """Default for every test: authentication ON, with a known key."""
+    _use_settings(monkeypatch, api_key=API_KEY, api_allow_unauthenticated=False)
     yield
-    get_settings.cache_clear()
+    server.app.dependency_overrides.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -79,9 +93,7 @@ def test_refuses_to_start_without_authentication(monkeypatch: pytest.MonkeyPatch
     The accident this prevents: deploying with the secret forgotten and serving a
     paid LLM to the whole internet, with nothing anywhere saying so.
     """
-    monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.setenv("API_ALLOW_UNAUTHENTICATED", "false")
-    get_settings.cache_clear()
+    _use_settings(monkeypatch, api_key=None, api_allow_unauthenticated=False)
 
     with pytest.raises(RuntimeError, match="Refusing to start"):
         with TestClient(server.app):
@@ -92,9 +104,7 @@ def test_starts_unauthenticated_when_explicitly_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The insecure mode exists for local runs — but only when asked for by name."""
-    monkeypatch.delenv("API_KEY", raising=False)
-    monkeypatch.setenv("API_ALLOW_UNAUTHENTICATED", "true")
-    get_settings.cache_clear()
+    _use_settings(monkeypatch, api_key=None, api_allow_unauthenticated=True)
 
     with TestClient(server.app) as client:
         response = client.post("/chat", json={"message": "Bonjour"})

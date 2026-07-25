@@ -32,6 +32,7 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -44,6 +45,23 @@ from support_agent.api import get_agent, stream_reply
 from support_agent.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
+
+# uvicorn installs handlers on ITS OWN loggers only; the root logger keeps none,
+# so everything we log below WARNING is silently dropped. (Warnings still show:
+# Python's last-resort handler covers WARNING and above — which is why the
+# "authentication disabled" alarm was never at risk.) `server.py` is an
+# application entry point, so configuring logging is legitimately its job.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s | %(message)s",
+)
+
+# ...but do not inherit httpx's chattiness: at INFO it logs one line per HTTP
+# request, so every embeddings call and every LLM hop lands in the console. Two
+# reasons to quiet it. It drowns our own messages, and those URLs are a provider's
+# endpoint — the kind of detail that belongs in LangSmith traces (where it is
+# access-controlled), not in stdout that may be shipped to a log aggregator.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # SSE (Server-Sent Events) frame: one event is `data: <payload>` followed by a
 # BLANK line — that blank line is what tells the client the event is complete.
@@ -130,8 +148,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
        boot, because nothing ever tells you.
 
     2. Build the graph HERE, not on the first request. Building it costs the
-       embeddings probe plus the whole FAQ index (~1.6 s today), and it runs in a
-       worker thread so the event loop stays free. Doing it at startup means
+       embeddings probe plus the whole FAQ index (~2.9 s measured on the 16-file
+       Velmo FAQ), and it runs in a worker thread so the event loop stays free.
+       Doing it at startup means
        `/ready` can answer truthfully, and the first customer does not pay for it.
        ⚠️ This is also what makes scale-to-zero expensive on Azure Container
        Apps: every cold start re-indexes. See the plan doc, step 5.
@@ -150,9 +169,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             "can reach this port can spend your LLM credits. Local runs only."
         )
 
+    started = time.perf_counter()
     await asyncio.to_thread(get_agent)
     app.state.ready = True
-    logger.info("Agent warmed up; ready to serve.")
+    # This duration is not decoration: it is exactly what a cold start costs, so
+    # it is the number that decides `minReplicas` on Azure Container Apps.
+    logger.info("Agent warmed up in %.2f s; ready to serve.", time.perf_counter() - started)
     yield
 
 
