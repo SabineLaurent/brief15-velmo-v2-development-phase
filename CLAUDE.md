@@ -88,6 +88,7 @@ make check    # lint + tests
 - « Pourquoi ce projet, et pourquoi 3 scopes ? » → `docs/vision.md`
 - « Comment c'est conçu techniquement ? » → `docs/architecture.md`
 - « Quels blocs on déploie, et quelle base pour quoi ? » → `docs/architecture-cible-2026-07-25.md`
+- « Comment on conteneurise et on déploie (Docker → Azure) ? » → `docs/plan-deploiement-2026-07-25.md`
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md` (scope A) · `docs/roadmap-frontend.md` (scope B)
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
 - « Quels bugs / dettes connus traînent dans le code ? » → `docs/audit-code-2026-07-19.md`
