@@ -21,6 +21,11 @@ data/**/index/
 *.sqlite3
 chroma/
 *.db
+# Fichiers annexes du mode WAL de SQLite : même statut que la base elle-même
+# (ils contiennent les transactions pas encore fusionnées, donc de la conversation).
+*.db-shm
+*.db-wal
+*.db-journal
 
 # LangGraph / checkpoints locaux
 *.checkpoint
@@ -45,5 +50,11 @@ TEMP/
 # doit viser le CONTENU (database/*) — `database/` seul rendrait `!` inopérant.
 !database/README.md
 
-database/*/*.bin
+# Défense en profondeur : le motif `database/*` annoncé par le commentaire
+# ci-dessus MANQUAIT, si bien que seuls `*.db` et `*.bin` étaient écartés — les
+# annexes `-wal`/`-shm` de SQLite se sont donc retrouvées commitées (4e4e2e9).
+# On ignore désormais TOUT le contenu des sous-dossiers ; ne survivent que le
+# squelette de dossiers (`.gitkeep`) et le README.
+database/*/*
+!database/*/.gitkeep
 
