@@ -11,10 +11,17 @@ dependencies = [
     "langchain-openai>=1.3.5",
     "langchain-text-splitters>=1.1.2",
     "langgraph>=1.0",
+    "langgraph-checkpoint-postgres>=2.0",
     "langgraph-checkpoint-sqlite>=3.1.0",
     "langsmith>=0.1",
     # Config typée depuis .env
     "numpy>=2.4.6",
+    # The `[binary]` extra is NOT optional in practice: plain `psycopg` is only a
+    # wrapper and needs a libpq to talk to, which neither a dev machine nor a
+    # `python:slim` image has by default ("no pq wrapper available" at import).
+    # The extra ships a prebuilt libpq inside the wheel, so nothing system-level
+    # has to be installed in the container.
+    "psycopg[binary]>=3.2",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
     # NOTE : les intégrations providers (langchain-mistralai, langchain-groq,

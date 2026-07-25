@@ -123,7 +123,9 @@ rm database/working_memory/checkpoints.db
 
 Ce n'est **pas** une frontière d'architecture : en production, les deux retournent
 dans **une seule base Postgres**. Ne construis donc rien qui dépende du fait qu'ils
-soient deux fichiers.
+soient deux fichiers. Ce n'est plus une intention : en backend `postgres`, les huit
+tables (`checkpoints*`, `store*`, …) cohabitent bien dans le schéma `agent_state`
+d'une base unique.
 
 ## Ce qui change en production
 
@@ -149,15 +151,34 @@ c'est l'**ingestion**, qui cesse d'être faite par l'application. Détail dans
 
 | Variable (`.env`) | Défaut |
 |---|---|
-| `PERSISTENCE_BACKEND` | `memory` (RAM, perdu au redémarrage) · `sqlite` · `postgres` (non câblé) |
-| `WORKING_MEMORY_DB_PATH` | `./database/working_memory/checkpoints.db` |
-| `AGENT_MEMORY_DB_PATH` | `./database/agent_memory/memories.db` |
+| `PERSISTENCE_BACKEND` | `memory` (RAM, perdu au redémarrage) · `sqlite` · `postgres` |
+| `WORKING_MEMORY_DB_PATH` | `./database/working_memory/checkpoints.db` (backend `sqlite`) |
+| `AGENT_MEMORY_DB_PATH` | `./database/agent_memory/memories.db` (backend `sqlite`) |
+| `DATABASE_URL` | *(vide)* — **requis** si backend `postgres` |
+| `DATABASE_SCHEMA` | `agent_state` |
+| `MEMORY_TTL_DAYS` | `365` (vide = conservation infinie) |
 
-Les deux variables sont nommées d'après le **rôle**, pas le moteur, et suffixées
-`_PATH` parce que c'est ce qu'elles contiennent — un chemin passé tel quel à
-`sqlite3.connect()`. La bascule Postgres ajoutera un **`DATABASE_URL`** distinct
-(déjà annoncé par les stubs de `memory/{short_term,long_term}.py`) : une chaîne de
-connexion n'est pas un chemin, et `PERSISTENCE_BACKEND` choisit laquelle est lue.
+Les deux `_DB_PATH` sont nommées d'après le **rôle**, pas le moteur, et suffixées
+ainsi parce que c'est ce qu'elles contiennent — un chemin passé tel quel à
+`sqlite3.connect()`. D'où un **`DATABASE_URL`** distinct : une chaîne de connexion
+n'est pas un chemin, et `PERSISTENCE_BACKEND` choisit laquelle est lue.
+
+> ✅ **Le backend `postgres` est câblé et vérifié** (déploiement étape 3, le
+> 2026-07-25) : `PostgresSaver` + `PostgresStore`, **une seule base**, les deux
+> horizons séparés par **schéma** (`agent_state`), recherche sémantique en
+> **pgvector** dans cette même base. Deux différences avec SQLite qui ne sont pas
+> cosmétiques :
+>
+> - **Un pool de connexions partagé** (`memory/postgres_conn.py`), pas une
+>   connexion : le serveur HTTP répond depuis un pool de threads, et le *sweeper*
+>   TTL tourne sur le sien.
+> - **Une rétention RGPD réelle** : `MEMORY_TTL_DAYS` arme un balayage de fond qui
+>   supprime les souvenirs périmés. ⚠️ Le compteur repart au **dernier accès**, pas
+>   à la création — c'est une rétention d'**inactivité**. Non disponible en
+>   `sqlite`/`memory`, où le réglage est simplement ignoré.
+>
+> ⚠️ **L'image officielle `postgres` ne suffit pas** : il faut `pgvector/pgvector`,
+> sinon le store long terme échoue à son `setup()`.
 
 Les chemins sont **relatifs au répertoire de lancement** : lance toujours depuis la
 **racine du repo** (`make run`, ou `chainlit run packages/client/...`). Les

@@ -92,7 +92,12 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
   recherche). Passer à un store persistant (Chroma / pgvector / Azure AI Search)
   = changement **d'un seul fichier** (`ingest.py`), l'agent ne bouge pas.
 - **Persistance mémoire** (checkpointer + store) : switch `memory` / `sqlite` /
-  `postgres` via `PERSISTENCE_BACKEND` (`.env`) — pas de code.
+  `postgres` via `PERSISTENCE_BACKEND` (`.env`) — pas de code. Les trois sont
+  câblés et vérifiés. En `postgres` : **une seule base**, les deux horizons
+  séparés par schéma (`DATABASE_SCHEMA`), pgvector dedans, **pool partagé**
+  (`memory/postgres_conn.py`) et *sweeper* de rétention RGPD (`MEMORY_TTL_DAYS`,
+  compté depuis le **dernier accès**). ⚠️ `psycopg[binary]` obligatoire (sans
+  libpq, échec **à l'import**) et image `pgvector/pgvector`, pas `postgres`.
 - **Guardrails** : kill switch `GUARDRAILS_ENABLED` ; off = graphe identique à avant.
 - Les providers **auto-découvrent** leurs `*_API_KEY` depuis `.env`.
 

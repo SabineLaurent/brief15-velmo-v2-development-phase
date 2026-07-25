@@ -10,21 +10,21 @@ keyed by `user_id`. Different question, different tool:
 The store organizes data by hierarchical *namespaces* (tuples), so one
 customer's memories are physically separated from another's.
 
-For now we use an in-memory store: perfect for learning, but state is lost when
-the process exits. Swapping to a durable backend (SQLite / Postgres) later is a
-one-line change *here* — the agent code never changes. Same agnostic idea as
-the LLM and checkpointer factories.
+The backend is a config choice (`PERSISTENCE_BACKEND`), same agnostic idea as
+the LLM and checkpointer factories — and in all three cases the semantic search
+over memories is preserved, only the engine underneath changes.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from langgraph.store.base import BaseStore
+from langgraph.store.base import BaseStore, TTLConfig
 from langgraph.store.memory import InMemoryStore
 
 from support_agent.config import Settings, get_settings
 from support_agent.llm.embeddings import get_embeddings
+from support_agent.memory.postgres_conn import get_postgres_pool, require_database_url
 from support_agent.memory.sqlite_conn import open_sqlite_connection
 
 
@@ -39,6 +39,29 @@ class AgentContext:
     user_id: str
 
 
+def _ttl_config(settings: Settings) -> TTLConfig | None:
+    """Translate the retention setting into LangGraph's TTL config.
+
+    Two details that bite if taken for granted:
+
+    - **LangGraph counts TTLs in MINUTES**, not seconds. We configure retention
+      in days because that is how a retention policy is actually written down,
+      and convert here, once.
+    - The clock restarts on **last access**, not on creation (`refresh_on_read`
+      defaults to true). So this is an *inactivity* retention: a customer we
+      never hear from again is forgotten after the delay; an active one keeps
+      their memories. That is the behaviour we want for support — but it is not
+      what "delete after N days" sounds like, hence this note.
+    """
+    if settings.memory_ttl_days is None:
+        return None
+    return TTLConfig(
+        default_ttl=settings.memory_ttl_days * 24 * 60,
+        sweep_interval_minutes=settings.memory_ttl_sweep_interval_minutes,
+        refresh_on_read=True,
+    )
+
+
 def get_store(settings: Settings | None = None) -> BaseStore:
     """Return the configured long-term memory store.
 
@@ -47,8 +70,9 @@ def get_store(settings: Settings | None = None) -> BaseStore:
     exact keywords. The storage backend is a config choice (`PERSISTENCE_BACKEND`),
     exactly like the checkpointer:
 
-        "memory"  ->  InMemoryStore: lost when the process exits
-        "sqlite"  ->  SqliteStore:   durable on disk, survives a restart
+        "memory"   ->  InMemoryStore:  lost when the process exits
+        "sqlite"   ->  SqliteStore:    durable on disk, survives a restart
+        "postgres" ->  PostgresStore:  durable on a server, with a GDPR sweeper
 
     Args:
         settings: Optional settings override (handy for tests).
@@ -76,14 +100,28 @@ def get_store(settings: Settings | None = None) -> BaseStore:
         return store
 
     if backend == "postgres":
-        # Production drop-in: `pip install langgraph-checkpoint-postgres`, then
-        #   from langgraph.store.postgres import PostgresStore
-        #   store = PostgresStore.from_conn_string(settings.database_url) / pool
-        #   store.setup()
-        raise NotImplementedError(
-            "Postgres store not wired yet. Add a DATABASE_URL setting and build a "
-            "PostgresStore here (see docstring)."
+        from langgraph.store.postgres import PostgresStore
+
+        # Same `index` config as the other two backends — the semantic search is
+        # identical, only the engine underneath changes (pgvector instead of
+        # sqlite-vec instead of numpy in RAM). Pool shared with the checkpointer:
+        # working memory and agent memory are one database, per §3 of
+        # docs/architecture-cible-2026-07-25.md.
+        store = PostgresStore(
+            get_postgres_pool(
+                require_database_url(settings.database_url),
+                settings.database_schema,
+            ),
+            index=index,
+            ttl=_ttl_config(settings),
         )
+        store.setup()  # creates the store tables + the pgvector index
+        if settings.memory_ttl_days is not None:
+            # Without this, the TTL is only metadata: rows carry an expiry date
+            # that nothing ever acts on. The sweeper is the thread that makes
+            # "the agent forgets" actually happen.
+            store.start_ttl_sweeper()
+        return store
 
     raise ValueError(
         f"Unknown PERSISTENCE_BACKEND={settings.persistence_backend!r}. "

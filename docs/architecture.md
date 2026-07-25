@@ -76,8 +76,11 @@ LangGraph distingue nettement deux mémoires — c'est un concept clé à compre
   optionnelle) partagé entre threads, rangé par `namespace`.
 
 Implémentations interchangeables : en mémoire vive pour apprendre
-(`InMemorySaver`, `InMemoryStore`), puis backend persistant (SQLite/Postgres)
-pour la prod — **sans changer le code de l'agent**.
+(`InMemorySaver`, `InMemoryStore`), SQLite pour un poste de dev, **Postgres +
+pgvector** pour la prod — **sans changer le code de l'agent**. Les trois sont
+câblés ; la bascule est la seule variable `PERSISTENCE_BACKEND`, et elle a été
+vérifiée en conteneur (le graphe n'a pas bougé d'une ligne). Détail des réglages
+et des pièges : [`../database/README.md`](../database/README.md).
 
 ## 4. La base de connaissance FAQ (RAG) — Phase 4
 

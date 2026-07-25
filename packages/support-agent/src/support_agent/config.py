@@ -92,11 +92,35 @@ class Settings(BaseSettings):
     # split is a development-time affordance, not an architectural boundary.
     #
     # Named for the ROLE, not the engine, and suffixed `_PATH` because that is what
-    # they hold: a filesystem path handed straight to sqlite3.connect(). The
-    # Postgres switch will add a separate DATABASE_URL (a connection string is a
-    # different kind of value); `persistence_backend` picks which one is read.
+    # they hold: a filesystem path handed straight to sqlite3.connect(). Postgres
+    # gets its own `database_url` below (a connection string is a different kind
+    # of value); `persistence_backend` picks which one is read.
     working_memory_db_path: str = "./database/working_memory/checkpoints.db"
     agent_memory_db_path: str = "./database/agent_memory/memories.db"
+
+    # Read only when `persistence_backend == "postgres"`. Deliberately has NO
+    # default: a wrong-but-plausible fallback like "localhost:5432" would let the
+    # app start and fail later, deep inside a request. Missing means missing, and
+    # the memory factories say so at boot.
+    #
+    # ONE url for both horizons, on purpose: unlike SQLite (two files, so each is
+    # readable and deletable on its own), Postgres holds working memory and agent
+    # memory in the SAME database — separated by SCHEMA, not by server. Semantic
+    # search over memories runs in that same database through pgvector. See
+    # docs/architecture-cible-2026-07-25.md §3.
+    database_url: str | None = None
+    # The Postgres schema our state lives in (created on connect). Keeping it out
+    # of `public` means a `\dt` shows OUR tables, and a future `knowledge` schema
+    # for the FAQ index can sit next to it without collision.
+    database_schema: str = "agent_state"
+
+    # --- Long-term memory retention (GDPR) ---
+    # Agent memory holds personal data, so it must expire. The Postgres store runs
+    # a background *sweeper* that deletes rows past their TTL — the concrete
+    # answer to "right to be forgotten" for what the agent remembers on its own.
+    # `None` = keep forever (the SQLite/in-memory behaviour, unchanged).
+    memory_ttl_days: float | None = 365.0
+    memory_ttl_sweep_interval_minutes: int = 60
 
     # --- Guardrails (Phase 12, security) ---
     # `guardrails_enabled` is a kill switch: off = the graph is wired exactly as

@@ -10,8 +10,9 @@ the LLM factory:
     "memory"  ->  InMemorySaver: fast, zero-setup, but lost when the process exits
     "sqlite"  ->  SqliteSaver:   durable on disk, survives a restart
 
-Switching backend is a `.env` change, not a code change. A production Postgres
-backend is the same shape (see the `postgres` branch below).
+    "postgres" ->  PostgresSaver: durable on a server, the deployment target
+
+Switching backend is a `.env` change, not a code change.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
 from support_agent.config import Settings, get_settings
+from support_agent.memory.postgres_conn import get_postgres_pool, require_database_url
 from support_agent.memory.sqlite_conn import open_sqlite_connection
 
 
@@ -47,15 +49,19 @@ def get_checkpointer(settings: Settings | None = None) -> BaseCheckpointSaver:
         return saver
 
     if backend == "postgres":
-        # Production drop-in: `pip install langgraph-checkpoint-postgres`, then
-        #   from langgraph.checkpoint.postgres import PostgresSaver
-        #   saver = PostgresSaver.from_conn_string(settings.database_url) / pool
-        #   saver.setup()
-        # Left out here because it needs a running server we cannot verify live.
-        raise NotImplementedError(
-            "Postgres checkpointer not wired yet. Add a DATABASE_URL setting and "
-            "build a PostgresSaver here (see docstring)."
+        from langgraph.checkpoint.postgres import PostgresSaver
+
+        # Same shape as the SQLite branch, and that is the whole point: the
+        # graph never learns which one it got. `from_conn_string` is a context
+        # manager (it closes the connection on exit), so — exactly as in SQLite —
+        # we own the connection instead, here a pool shared with the store.
+        pool = get_postgres_pool(
+            require_database_url(settings.database_url),
+            settings.database_schema,
         )
+        saver = PostgresSaver(pool)
+        saver.setup()  # creates the checkpoint tables on first use
+        return saver
 
     raise ValueError(
         f"Unknown PERSISTENCE_BACKEND={settings.persistence_backend!r}. "

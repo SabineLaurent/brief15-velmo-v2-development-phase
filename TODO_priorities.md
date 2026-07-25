@@ -152,7 +152,7 @@ pas défendable — donc B1.4 y gagne en attendant.
 |---|---|---|
 | 1 | Service HTTP : `POST /chat` (SSE), `/health`, `/ready`, clé de service + tests de contrat de la couture | ✅ |
 | 2 | Image Docker de la tranche `support-agent` (état sur volume) | ✅ |
-| 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ⬜ |
+| 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ✅ |
 | 4 | Conteneur `client` : Chainlit devient client **HTTP** | ⬜ |
 | 5 | Azure : ACR + Container Apps + Flexible Server, **identité prouvée** | ⬜ |
 

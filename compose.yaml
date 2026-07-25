@@ -5,10 +5,38 @@
 #   make docker-logs    # suit les logs
 #   make docker-down    # arrête (garde le volume)
 #
-# Une seule brique pour l'instant : `agent-api`. Postgres arrive à l'étape 3, le
-# conteneur `client` à l'étape 4. On n'ouvre qu'une étape à la fois.
+# Deux briques : `agent-api` et sa base `postgres`. Le conteneur `client` arrive
+# à l'étape 4. On n'ouvre qu'une étape à la fois.
 
 services:
+  # La base unique de l'agent (étape 3). UN Postgres porte les DEUX horizons de
+  # mémoire — court terme (thread_id) et long terme (user_id) — séparés par
+  # SCHÉMA, pas par serveur, et la recherche sémantique tourne dedans via
+  # pgvector. Le pourquoi : docs/architecture-cible-2026-07-25.md §3.
+  postgres:
+    # L'image officielle `postgres` n'a PAS pgvector. Celle-ci, c'est la même
+    # plus l'extension — sans quoi le store long terme échoue au `setup()`.
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: agent
+      POSTGRES_DB: agent
+    healthcheck:
+      # `pg_isready` répond OK dès que le serveur accepte des connexions. C'est
+      # ce que `depends_on: service_healthy` attend ci-dessous : sans ça, l'agent
+      # démarre en parallèle, gagne la course, et plante au premier `setup()`.
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    # Pas de `ports:` — la base n'est PAS exposée à l'hôte. `agent-api` l'atteint
+    # par le réseau interne de Compose, sous son nom de service (`postgres`).
+    # Décommente pour l'inspecter depuis l'hôte avec psql :
+    #   ports: ["5432:5432"]
+
   agent-api:
     build:
       context: .
@@ -27,22 +55,38 @@ services:
       # ce qui n'a aucun sens ici. Ce bloc `environment` a la priorité la plus
       # haute : il rétablit les chemins absolus de l'image.
       KNOWLEDGE_DIR: /app/data/kb-velmo
-      PERSISTENCE_BACKEND: sqlite
+      # Étape 3 : l'état ne vit plus dans un fichier du conteneur mais dans le
+      # service `postgres`. `postgres` ci-dessous est le NOM DU SERVICE, résolu
+      # par le DNS interne de Compose — pas localhost : deux conteneurs, deux
+      # piles réseau. Sur Azure, seule cette URL change (+ ?sslmode=require).
+      PERSISTENCE_BACKEND: postgres
+      DATABASE_URL: postgres://agent:agent@postgres:5432/agent
+      DATABASE_SCHEMA: agent_state
+      # Non lus tant que le backend est `postgres`, mais laissés corrects : le
+      # .env de l'hôte les porte en relatif (`./database/…`), ce qui n'a aucun
+      # sens ici. Repasser à `sqlite` pour comparer doit rester sans piège —
+      # il faut alors remonter le volume `agent-state` sur /app/database.
       WORKING_MEMORY_DB_PATH: /app/database/working_memory/checkpoints.db
       AGENT_MEMORY_DB_PATH: /app/database/agent_memory/memories.db
+
+    depends_on:
+      postgres:
+        # `service_started` ne suffirait pas : le conteneur démarre bien avant
+        # que Postgres accepte des connexions. On attend le healthcheck.
+        condition: service_healthy
 
     ports:
       # hôte:conteneur — l'agent écoute sur 8000 dans le conteneur.
       - "8000:8000"
 
-    volumes:
-      # L'état durable vit dans un volume NOMMÉ, pas dans le conteneur : c'est ce
-      # qui fait survivre conversations et souvenirs à un `docker compose down`.
-      # C'est aussi la démonstration de l'étape 2 — un système de fichiers de
-      # conteneur est éphémère, un volume ne l'est pas.
-      - agent-state:/app/database
-
     restart: unless-stopped
 
 volumes:
+  # L'état durable vit dans un volume NOMMÉ, pas dans le conteneur : c'est ce qui
+  # fait survivre conversations et souvenirs à un `docker compose down`. Un
+  # système de fichiers de conteneur est éphémère, un volume ne l'est pas.
+  # Depuis l'étape 3, c'est Postgres qui porte l'état — d'où le volume attaché à
+  # LUI. `agent-state` (les fichiers SQLite de l'étape 2) reste déclaré : le
+  # supprimer effacerait l'historique d'avant la bascule.
+  postgres-data:
   agent-state:

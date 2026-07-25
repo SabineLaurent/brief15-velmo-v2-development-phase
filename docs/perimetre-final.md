@@ -71,8 +71,10 @@ plutôt que de les découvrir en production.
    Le défaut est en RAM, SQLite optionnel :
    - `InMemorySupportBackend` → écrire l'adaptateur vers le **vrai SI** (commandes,
      tickets). Le port `SupportBackend` est prêt, l'adaptateur reste à faire.
-   - Checkpointer/Store SQLite = mono-nœud → un service multi-instances a besoin de
-     **Postgres** (`PostgresSaver` / `PostgresStore`).
+   - ✅ **Fait** (déploiement étape 3, 2026-07-25) : checkpointer/Store SQLite =
+     mono-nœud → `PERSISTENCE_BACKEND=postgres` donne `PostgresSaver` /
+     `PostgresStore` sur une base partageable entre instances, avec pool et
+     rétention RGPD. Reste à éprouver **à N répliques** (aucune preuve à 1).
    - FAQ en `InMemoryVectorStore` (4 fichiers réingérés au boot) → un **vector
      store** persistant + un pipeline de ré-ingestion (la FAQ évolue).
 

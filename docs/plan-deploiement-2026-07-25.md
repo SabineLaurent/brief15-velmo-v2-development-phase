@@ -4,8 +4,8 @@
 conteneur — vérifié d'abord en local en conditions quasi réelles, déployé *in fine*
 sur **Azure**.
 **Date :** 2026-07-25
-**Statut :** plan retenu. **Étapes 1 et 2 faites** (service HTTP + image Docker,
-vérifiées en live) ; étapes 3 à 5 à venir — l'avancement se suit dans
+**Statut :** plan retenu. **Étapes 1 à 3 faites** (service HTTP + image Docker +
+Postgres/pgvector, vérifiées en live) ; étapes 4 et 5 à venir — l'avancement se suit dans
 [`../TODO_priorities.md`](../TODO_priorities.md).
 Ce document décrit la cible et le chemin, pas l'état du code (pour ça :
 [`architecture.md`](architecture.md)).
@@ -36,7 +36,7 @@ teste **cinq choses qu'aucun test unitaire n'atteint** :
 | **La config par environnement** | Plus de `.env`, plus de `load_dotenv()` pour sauver la mise. C'est le vrai examen de l'agnosticisme : si l'agent démarre avec des variables injectées, « changer de provider = une variable » est **prouvé**. |
 | **Les chemins** | `./data/kb-velmo` est relatif au **cwd** : il casse ou il tient, on le sait en 10 secondes. |
 | **La frontière réseau** | L'invariant n°3 cesse d'être une règle de documentation : le client **ne peut plus** importer `stream_reply`, il n'est pas dans le même process. |
-| **Postgres + pgvector réellement exercé** | Aujourd'hui annoncé dans `config.py` mais **jamais testé** — c'est l'inconnue n°1 du plan. |
+| **Postgres + pgvector réellement exercé** | Était l'inconnue n°1 du plan (annoncé dans `config.py`, jamais testé). **Levée à l'étape 3** — voir son bilan. |
 | **Le démarrage à froid** | Ordre de boot, healthcheck, l'agent qui attend que la base soit prête. Le bug classique du premier déploiement. |
 
 ### Ce que le local ne prouve PAS (à savoir d'avance)
@@ -59,7 +59,7 @@ du travail réel (🔴) :
 | Constat | Impact en conteneur |
 |---|---|
 | **Aucun endpoint HTTP** — l'agent est un **CLI** + un import Python | 🔴 le vrai travail |
-| `persistence_backend = "memory"` par défaut, sinon SQLite en fichier | 🔴 un conteneur qui redémarre perd tout (système de fichiers éphémère) |
+| `persistence_backend = "memory"` par défaut, sinon SQLite en fichier | 🔴 un conteneur qui redémarre perd tout (système de fichiers éphémère). **Refermé à l'étape 3** : l'état vit dans Postgres |
 | `user_id` non signé (trou §5.1 de l'archi cible) | 🔴 sur Internet, c'est une faille, plus une note de doc |
 | Chemins relatifs au **cwd** (`./data/kb-velmo`, `./database/…`) | 🟠 tient si on maîtrise le `WORKDIR`, mais fragile → chemins absolus par variable d'env |
 | `load_dotenv()` + `env_file=".env"` | 🟢 **non-problème** : Pydantic Settings lit l'environnement en priorité. Le `.env` ne doit simplement jamais entrer dans l'image |
@@ -191,9 +191,55 @@ conteneur**. C'est ce chiffre — pas celui de l'hôte — qui doit décider du
   Compose = `agent-api` + `postgres`.
 - **But pédagogique :** vérifier que « basculer de persistance = une variable d'env »
   est vrai **en fait**, pas seulement dans la doc. C'est l'invariant n°1 mis à l'épreuve.
-- ⚠️ **Étape la plus incertaine** : ce backend est annoncé dans `config.py` mais
-  jamais exercé — seul `langgraph-checkpoint-sqlite` est installé aujourd'hui.
 - **Vérification :** redémarrer les conteneurs ; conversation et souvenirs intacts.
+
+**Fait le 2026-07-25.** `memory/postgres_conn.py` (pool partagé) + les deux branches
+`postgres` câblées + service `postgres` dans `compose.yaml` + `tests/test_persistence.py`.
+Annoncée comme « l'étape la plus incertaine », elle a démarré **du premier coup** :
+schéma `agent_state` créé, 8 tables, extension `vector` installée, sweeper TTL lancé.
+
+**Vérifié en live, dans cet ordre** (c'est l'ordre qui fait la preuve) :
+
+1. Une vraie réponse FAQ à travers HTTP, backend `postgres`.
+2. `docker compose down` → **zéro conteneur** (`docker compose ps -a` vide), puis `up`.
+3. **Court terme** (`thread_id` identique) : « redis-moi ma question précédente » →
+   restituée **mot pour mot**.
+4. **Long terme** (`user_id` identique, `thread_id` **neuf**) : « quelle est ma couleur
+   préférée ? » → « le vert ».
+5. **Contre-épreuve d'isolation** — la vérification qui manque le plus souvent :
+   *un autre* `user_id`, même question → « je ne connais pas encore votre couleur ».
+   Sans elle, on aurait pu confondre « la mémoire marche » avec « la mémoire fuit ».
+6. Le TTL n'est pas décoratif : `expires_at = 2027-07-25`, `ttl_minutes = 525600`.
+
+**L'inconnue levée :** la bascule a bien coûté **zéro ligne de code métier**. Le
+graphe, les nœuds et la couture n'ont pas bougé — seules la config et `memory/`
+ont changé. L'invariant n°1 est vérifié *en fait*, plus seulement en doc.
+
+**Trois pièges rencontrés :**
+
+1. **`psycopg` seul ne se connecte à rien.** C'est un *wrapper* : sans `libpq`, il
+   lève « no pq wrapper available » **à l'import**. Il faut l'extra `psycopg[binary]`,
+   qui embarque un libpq précompilé dans la roue — sinon il faudrait installer des
+   paquets système dans l'image.
+2. **L'image officielle `postgres` n'a pas pgvector.** Le checkpointer démarrerait ;
+   c'est le store long terme qui échouerait à son `setup()`. D'où `pgvector/pgvector:pg17`.
+3. **LangGraph compte les TTL en MINUTES.** On configure une rétention en *jours*
+   (c'est ainsi qu'une politique s'écrit), donc la conversion est faite à un seul
+   endroit — et **testée** : se tromper d'un facteur 1440 supprime les souvenirs
+   clients le lendemain, ou conserve des données personnelles pendant des siècles.
+
+**Deux choses apprises qui ne se voyaient pas sur le papier :**
+
+- **Le `search_path` est par SESSION**, donc il se pose sur *chaque* connexion du
+  pool (le hook `configure`), pas une fois au démarrage. Une connexion recréée après
+  une coupure retrouve ainsi le bon schéma.
+- **Un pool, pas une connexion** : le serveur répond depuis un pool de threads
+  (`asyncio.to_thread` dans `api.py`) et le sweeper TTL a le sien. Une connexion
+  unique aurait sérialisé tout le monde derrière un verrou — invisible à un seul
+  appelant, et c'est bien ça le problème.
+
+**Mesure pour l'étape 5 :** le warm-up reste à **4,4 s** — Postgres ne coûte rien au
+démarrage. Le chiffre qui décidera du `minReplicas` est donc inchangé.
 
 ### Étape 4 — Le conteneur `client` : Chainlit devient client HTTP
 
