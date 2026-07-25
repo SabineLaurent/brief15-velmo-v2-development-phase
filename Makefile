@@ -6,7 +6,7 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run eval latency test lint format check clean
+.PHONY: help setup install run serve eval latency test lint format check clean
 
 help: ## Affiche cette aide
 	@echo "Agnostic Support AI Agent — commandes disponibles :"
@@ -23,6 +23,9 @@ install: ## Installe/synchronise les dépendances (uv sync)
 
 run: ## Lance l'agent de support
 	$(UV) run python -m support_agent.agent
+
+serve: ## Expose l'agent en HTTP (API SSE sur :8000, cf. docs/plan-deploiement-2026-07-25.md)
+	$(UV) run --extra server uvicorn support_agent.server:app --reload --port 8000
 
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run

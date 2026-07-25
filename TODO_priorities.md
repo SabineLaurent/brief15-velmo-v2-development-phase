@@ -15,8 +15,9 @@
 |---|---|---|---|
 | 1 | Audit A2 — escalade cassée via la couture | bloquait **B1.6** (le cas escalade dans l'UI) | ✅ |
 | 2 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ✅ |
-| 3 | B1.4 — session, `thread_id` & identité | reprise de la roadmap scope B | ⬜ |
-| 4 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
+| 3 | **Déploiement conteneurisé** (Docker → Azure), 5 étapes | l'agent doit devenir un **service appelable** — objectif de livraison de la formation | 🚧 |
+| 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe | ⬜ |
+| 5 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -135,7 +136,34 @@ jamais un accès direct au graphe.
 
 ---
 
-## Chantier 4 — Reliquat d'audit : I2, Q1, Q2 ⬜
+## Chantier 3 — Déploiement conteneurisé (Docker → Azure) 🚧
+
+**Le plan complet, avec le but de chaque étape et le glossaire des acronymes :**
+[`docs/plan-deploiement-2026-07-25.md`](docs/plan-deploiement-2026-07-25.md).
+À lire avant d'écrire du code d'exposition ou d'infra.
+
+**Pourquoi ce chantier passe devant B1.4 :** l'agent n'est appelable par personne
+(un CLI + un import Python). C'est le bloquant n°1 de
+[`docs/perimetre-final.md`](docs/perimetre-final.md) §B.1, et c'est aussi ce qui
+crée la **frontière réseau** sans laquelle le trou 🔴 du `user_id` non signé n'est
+pas défendable — donc B1.4 y gagne en attendant.
+
+| Étape | Livrable | État |
+|---|---|---|
+| 1 | Service HTTP : `POST /chat` (SSE), `/health`, `/ready`, clé de service + tests de contrat de la couture | ✅ |
+| 2 | Image Docker de la tranche `support-agent` (état sur volume) | ⬜ |
+| 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ⬜ |
+| 4 | Conteneur `client` : Chainlit devient client **HTTP** | ⬜ |
+| 5 | Azure : ACR + Container Apps + Flexible Server, **identité prouvée** | ⬜ |
+
+**Décidé et à ne pas rouvrir sans raison neuve :** le rail de déploiement LangGraph
+(`langgraph.json` / LangSmith Deployment) est **écarté** — son contrat public est le
+graphe, il double notre persistance, et il exige une clé LangSmith même en local
+(détail et sources : le plan, §5). Retenu : **FastAPI mince autour de `stream_reply`**.
+
+---
+
+## Chantier 5 — Reliquat d'audit : I2, Q1, Q2 ⬜
 
 Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md). Les trois
 seuls findings encore ouverts (A1, A2, I1 et Q3 sont réglés) :
@@ -157,14 +185,17 @@ un instantané daté, pas une liste de tâches.
 
 ---
 
-## Chantier 3 — B1.4 : session, `thread_id` & identité ⬜
+## Chantier 4 — B1.4 : session, `thread_id` & identité ⬜
 
-Reprise normale de [`docs/roadmap-frontend.md`](docs/roadmap-frontend.md).
-À faire **après** 1 et 2, qui touchent la même couture.
+Reprise de [`docs/roadmap-frontend.md`](docs/roadmap-frontend.md).
+**Reporté après le chantier 3** (2026-07-25) : le `user_id` prouvé n'a de sens qu'une
+fois la frontière réseau posée — tant que Chainlit importe la couture en in-process,
+il n'y a rien à usurper. L'étape 4 du déploiement (Chainlit → client HTTP) recouvre
+d'ailleurs une partie du travail de session.
 
 ---
 
-## Chantier 4 — Mémoire longue & changement de modèle d'embeddings ⬜
+## Chantier 6 — Mémoire longue & changement de modèle d'embeddings ⬜
 
 Le store long terme indexe ses souvenirs avec les mêmes embeddings, **persistés en
 SQLite** depuis la Phase 10. Changer `EMBEDDINGS_MODEL` rendrait la recherche

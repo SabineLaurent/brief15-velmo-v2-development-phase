@@ -118,6 +118,19 @@ class Settings(BaseSettings):
     # --- Knowledge base (Phase 4) ---
     knowledge_dir: str = "./data/kb-velmo"
 
+    # --- HTTP exposure (deployment step 1) ---
+    # The SERVICE-level key: proves the CALLER is allowed to use this agent at all.
+    # It is NOT per-customer identity (that is `user_id`, and proving it is step 5).
+    # Its first job is boring but vital: an open endpoint wired to a paid LLM key
+    # gets its credit drained overnight.
+    #
+    # Fail-closed by design: `server.py` REFUSES TO START when no key is set,
+    # unless `api_allow_unauthenticated` is explicitly true. Making the insecure
+    # mode opt-in is what stops the classic accident — deploying with the variable
+    # forgotten and never noticing the door is open.
+    api_key: str | None = None
+    api_allow_unauthenticated: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

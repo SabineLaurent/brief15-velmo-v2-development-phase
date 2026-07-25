@@ -39,13 +39,34 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
   **sync** (donc le backend `sqlite` reste valide, pas d'`astream`/`AsyncSqliteSaver`
   imposé). Rôles : [`docs/streaming.md`](../../docs/streaming.md).
 
+## La porte HTTP (`server.py`) — elle TRANSPORTE, elle ne pense pas
+
+- `POST /chat` (SSE) + `/health` (liveness) + `/ready` (readiness). Lancer :
+  `make serve`. Plan d'ensemble : [`docs/plan-deploiement-2026-07-25.md`](../../docs/plan-deploiement-2026-07-25.md).
+- **Aucune logique d'agent ici.** Pas de graphe, pas de prompt, aucune décision sur
+  la réponse. En ajouter créerait un 2e cerveau que seul le chemin HTTP atteint,
+  et le CLI divergerait en silence. Toute logique remonte dans la couture.
+- **Événements SSE typés** (`{"type": "chunk"|"error"|"done"}`) : B1.5 ajoutera des
+  types (étapes, sources FAQ) sans casser les clients existants.
+- Une **erreur voyage DANS le flux**, pas en code HTTP : le status part avec le 1er
+  octet, donc un 200 déjà émis ne peut plus devenir un 500.
+- **Deux identités à ne jamais confondre** : `API_KEY` autorise l'**appelant**
+  (as-tu le droit d'utiliser cet agent ?) ; `user_id` désigne le **client** (de qui
+  parle-t-on ?). Le second n'est pas encore prouvé — trou 🔴 isolé dans la seule
+  fonction `_resolve_user_id`, refermé à l'étape 5 (token vérifié).
+- **Démarrage fail-closed** : sans `API_KEY` et sans `API_ALLOW_UNAUTHENTICATED=true`
+  explicite, le process **refuse de démarrer**. Ne pas « assouplir » ça : c'est ce
+  qui empêche de déployer une porte ouverte par oubli de variable.
+- `fastapi`/`uvicorn` sont un **extra** (`--extra server`) : le CLI et Chainlit
+  n'ont pas à traîner un serveur web.
+
 ## Carte du package (le COMMENT détaillé → [`docs/architecture.md`](../../docs/architecture.md))
 
 `config.py` (Settings .env) · `llm/` factory + embeddings (agnostique) ·
 `memory/` court terme (checkpointer / `thread_id`) + long terme (store / `user_id`) ·
 `knowledge/` RAG FAQ · `graph/` nœuds + arêtes + `state` · `guardrails/`
 (kill switch) · `actions/` (port métier) · `eval/` · `agent.py` (CLI) ·
-`api.py` (la couture).
+`api.py` (la couture) · `server.py` (la porte HTTP).
 
 ## Faits opérationnels à garder en tête
 

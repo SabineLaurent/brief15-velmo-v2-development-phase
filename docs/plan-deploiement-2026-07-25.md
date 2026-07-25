@@ -4,8 +4,10 @@
 conteneur — vérifié d'abord en local en conditions quasi réelles, déployé *in fine*
 sur **Azure**.
 **Date :** 2026-07-25
-**Statut :** plan retenu, **non encore exécuté**. Ce document décrit la cible et le
-chemin ; il ne décrit pas l'état du code (pour ça : [`architecture.md`](architecture.md)).
+**Statut :** plan retenu. **Étape 1 faite** (service HTTP, vérifié en live) ; étapes
+2 à 5 à venir — l'avancement se suit dans [`../TODO_priorities.md`](../TODO_priorities.md).
+Ce document décrit la cible et le chemin, pas l'état du code (pour ça :
+[`architecture.md`](architecture.md)).
 **Portée :** exposition HTTP, images Docker, orchestration locale, hébergement Azure.
 Ne traite pas les features métier de l'agent (voir [`../ROADMAP.md`](../ROADMAP.md)).
 **Se lit avec :** [`architecture-cible-2026-07-25.md`](architecture-cible-2026-07-25.md)

@@ -264,9 +264,18 @@ la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents
 - Principe : *defense-in-depth* — garder le regex en passe rapide, brancher le
   détecteur lourd derrière le **même port** seulement quand il laisse passer.
 
-## Phase 13 — Exposition & déploiement ⬜
-**Concept :** servir l'agent (API/LangGraph Server), configuration par environnement.
+## Phase 13 — Exposition & déploiement 🚧
+**Concept :** servir l'agent en HTTP, configuration par environnement, conteneurs.
 **Livrable :** l'agent est appelable depuis l'extérieur, prêt à être branché à un projet.
+**Découpe en 5 étapes, avec le but de chacune :**
+[`docs/plan-deploiement-2026-07-25.md`](docs/plan-deploiement-2026-07-25.md).
+Cible finale : **Azure** (Container Apps + PostgreSQL Flexible Server).
+**Étape 1 faite :** `support_agent/server.py` — `POST /chat` en **SSE**, `/health`,
+`/ready`, clé de service **fail-closed**, `make serve`. Le serveur *transporte* ce que
+`stream_reply` *produit* : aucune logique d'agent dans la couche HTTP.
+⚠️ Le rail de déploiement LangGraph (`langgraph.json` / LangSmith Deployment) est
+**écarté** — son contrat public est le graphe, ce qui rouvrirait le contournement du
+garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
 
 ---
 
@@ -283,8 +292,14 @@ la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
 - [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
 - [x] Phase 12 — sécurité & guardrails (A entrée + B sortie/anti-fuite + C outils & mémoire)
-- [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12)* ← **prochaine étape**
-- [ ] Phase 13 — exposition & déploiement
+- [ ] Phase 13 — exposition & déploiement 🚧 ← **en cours** (étape 1/5 faite)
+- [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12, puis après la 13)*
 
 > Note : Phases 11 et 12 **réordonnées** — la sécurité (guardrails) passe avant le
 > cycle de vie du support, car elle est critique dès qu'un vrai client parle.
+>
+> Note (2026-07-25) : la **Phase 13 passe aussi devant la 11**. L'agent n'est
+> appelable par personne, ce qui bloque à la fois la livraison de la formation, le
+> vrai front (B2) et l'identité prouvée (le `user_id` signé n'a pas de frontière
+> réseau à défendre tant qu'il n'y a pas d'API). Le cycle de vie du support
+> (Phase 11) est une **complétude métier** : il attend sans rien bloquer.

@@ -10,4 +10,16 @@ members = ["packages/*"]
 dev = [
     "pytest>=8.0",
     "ruff>=0.6",
+    # Tests de l'exposition HTTP : le `TestClient` de FastAPI a besoin d'un client
+    # HTTP. Starlette réclame désormais `httpx2` (avec `httpx`, il émet une
+    # StarletteDeprecationWarning) — on prend donc le rail à jour directement.
+    # Distinction volontaire : l'extra `server` de support-agent = ce que la PROD
+    # installe ; ce groupe dev = ce que MA machine a en plus pour tester.
+    "httpx2>=2.9",
+    "support-agent[server]",
 ]
+
+# Le groupe dev réclame l'extra `server` du membre local : sans cette source, uv
+# irait le chercher sur PyPI.
+[tool.uv.sources]
+support-agent = { workspace = true }

@@ -24,6 +24,16 @@ dependencies = [
     "sqlalchemy>=2.0",
 ]
 
+# The HTTP exposure (deployment step 1) is OPTIONAL on purpose: the CLI agent and
+# the Chainlit shell import `stream_reply` in-process and have no use for a web
+# server. Keeping it an extra means the container image installs it (`--extra
+# server`) while `make run` stays lean. See docs/plan-deploiement-2026-07-25.md.
+[project.optional-dependencies]
+server = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
