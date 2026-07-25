@@ -1,4 +1,4 @@
-# frontend — coquille de démo Chainlit (scope B, niveau 1)
+# client-chainlit — coquille de démo Chainlit (scope B, niveau 1)
 
 But : **voir l'agent parler** dans un navigateur, pour un GIF de 20 s au README.
 UI **assumée non-prod** (cf. `docs/roadmap-frontend.md`).
@@ -7,12 +7,18 @@ Ce membre ne connaît **rien** de LangGraph : il parle à l'agent uniquement par
 couture `stream_reply` (paquet `support_agent`). C'est ce qui le rend **jetable** —
 on pourra remplacer Chainlit par un vrai front sans toucher au cerveau.
 
+> 📛 **Pourquoi « client-chainlit » et pas « client » ?** Chainlit est **une**
+> implémentation de client, pas *le* client. Le nom le dit, pour qu'ajouter un
+> second client (React, mobile, `curl`) ne demande pas de renommer celui-ci.
+> Distribution avec tiret, module avec underscore (`src/client_chainlit/`) :
+> convention expliquée dans [`docs/anatomie-package-workspace.md`](../../docs/anatomie-package-workspace.md).
+
 ## Lancer
 
 Depuis la **racine du repo** (pas depuis ce dossier) :
 
 ```bash
-uv run chainlit run packages/frontend/src/frontend/app.py -w
+uv run chainlit run packages/client/src/client_chainlit/app.py -w
 ```
 
 Puis ouvrir `http://localhost:8000`. `Ctrl-C` pour arrêter.
@@ -29,9 +35,10 @@ Puis ouvrir `http://localhost:8000`. `Ctrl-C` pour arrêter.
 ### Pourquoi **depuis la racine** ?
 
 Le cwd = la racine, car l'agent résout ses données en **chemins relatifs** :
-`./data/faq` (la FAQ) et `./database/` (l'état runtime — conversations et
-souvenirs, cf. [`database/README.md`](../../database/README.md)). Lancer
-d'ailleurs casserait ces chemins.
+`./data/kb-velmo` (la base de connaissance, cf. `KNOWLEDGE_DIR`) et `./database/`
+(l'état runtime — conversations et souvenirs, cf.
+[`database/README.md`](../../database/README.md)). Lancer d'ailleurs casserait
+ces chemins.
 
 > Détails : port par défaut `8000` (surcharge `--port 8765`) ; au 1er lancement
 > Chainlit génère `chainlit.md` + `.chainlit/` à la racine (`.gitignore` jusqu'à

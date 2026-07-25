@@ -21,6 +21,7 @@ dependencies = [
     # langchain-google-genai, langchain-openai, langchain-azure-ai...) seront
     # ajoutées au fil des phases, selon le provider choisi. Ex :
     #   uv add langchain-mistralai
+    "sqlalchemy>=2.0",
 ]
 
 [build-system]

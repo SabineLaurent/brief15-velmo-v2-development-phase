@@ -12,7 +12,7 @@ Chainlit lifecycle used here:
 
 Run it:
 
-    chainlit run packages/frontend/src/frontend/app.py -w
+    chainlit run packages/client/src/client_chainlit/app.py -w
 
 Phase scope (deliberately minimal — one thing at a time):
 - B1.2: wire it end to end and show the full reply once it is ready.

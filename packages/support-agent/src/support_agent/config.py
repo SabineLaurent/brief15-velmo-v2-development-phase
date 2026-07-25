@@ -116,7 +116,7 @@ class Settings(BaseSettings):
     langsmith_project: str = "agnostic-support-agent"
 
     # --- Knowledge base (Phase 4) ---
-    knowledge_dir: str = "./data/faq"
+    knowledge_dir: str = "./data/kb-velmo"
 
 
 @lru_cache

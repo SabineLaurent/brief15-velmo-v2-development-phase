@@ -1,5 +1,8 @@
 [project]
-name = "frontend"
+# Distribution name with a hyphen, import name with an underscore (see
+# docs/anatomie-package-workspace.md). "chainlit" is in the name on purpose:
+# this member is ONE client implementation, replaceable without touching the brain.
+name = "client-chainlit"
 version = "0.1.0"
 description = "Chainlit demo shell (scope B, niveau 1) — voir l'agent parler"
 readme = "README.md"
@@ -22,4 +25,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/frontend"]
+packages = ["src/client_chainlit"]

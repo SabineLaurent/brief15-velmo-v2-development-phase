@@ -1,15 +1,19 @@
-# CLAUDE.md — `packages/frontend` (coquille de démo Chainlit, scope B)
+# CLAUDE.md — `packages/client` / `client-chainlit` (coquille de démo Chainlit, scope B)
 
 > Complément **local** au `CLAUDE.md` racine (qui, lui, est toujours chargé et
 > porte les invariants transverses : agnosticisme LLM, fr/en, `uv`/Python 3.12,
 > structure workspace). Ce fichier n'est lu **qu'en travaillant dans ce package**
-> et ne fait que **préciser** les règles propres au front. Il ne remplace rien.
+> et ne fait que **préciser** les règles propres au client. Il ne remplace rien.
 
 ## Le rôle de ce package en une phrase
 
 Une **UI de chat jetable** (Chainlit) dont le seul but est de *voir l'agent
 parler* (niveau 1, cf. [`docs/roadmap-frontend.md`](../../docs/roadmap-frontend.md)).
 **Assumée non-prod.** Le vrai front déployé, c'est le niveau 2 (phase B2).
+
+📛 **Nom** : distribution `client-chainlit`, module `src/client_chainlit/` —
+Chainlit est **une** implémentation de client, pas *le* client. Ajouter un second
+client ne doit pas obliger à renommer celui-ci.
 
 ## Invariant n°1 : le front ne connaît JAMAIS lang\* (NON NÉGOCIABLE)
 
@@ -43,10 +47,10 @@ parler* (niveau 1, cf. [`docs/roadmap-frontend.md`](../../docs/roadmap-frontend.
 ## Lancer / cwd
 
 - **Toujours depuis la racine du repo**, pas depuis ce dossier :
-  `uv run chainlit run packages/frontend/src/frontend/app.py -w`.
-- Raison : l'agent résout ses données en **chemins relatifs au cwd** (`./data/faq`,
-  `./database/…` — cf. [`database/README.md`](../../database/README.md)). Lancer
-  d'ailleurs casse ces chemins.
+  `uv run chainlit run packages/client/src/client_chainlit/app.py -w`.
+- Raison : l'agent résout ses données en **chemins relatifs au cwd**
+  (`./data/kb-velmo` via `KNOWLEDGE_DIR`, `./database/…` — cf.
+  [`database/README.md`](../../database/README.md)). Lancer d'ailleurs casse ces chemins.
 - Chainlit génère `chainlit.md` + `.chainlit/` à la racine au 1er lancement :
   **gitignore** jusqu'à la phase B1.6 (écran d'accueil soigné + thème).
 - Détail de la commande : [`README.md`](README.md).
