@@ -83,7 +83,14 @@ front ne connaît plus le paquet `support_agent` **du tout**. Il connaît une **
   puis `make ui` (Chainlit, sur `:8001`). Le client seul affiche une UI qui répond
   « service injoignable » — c'est le comportement correct, pas un bug.
 - En conteneur : `make docker-up` lance les trois briques, UI sur
-  **http://localhost:8001**.
+  **http://localhost:8101**, agent sur `:8100`.
+- ⚠️ **Deux jeux de ports disjoints — `80xx` local, `81xx` conteneur — et ce n'est
+  pas cosmétique.** Sur macOS, deux serveurs se lient au même port **sans erreur**
+  (le plus spécifique gagne, en silence) : on croit tester sa pile locale et on
+  interroge le conteneur. Vécu le 2026-07-25, un test entier invalidé. Ne pas
+  réunifier ces ports « pour simplifier ». Corollaire de méthode : une sonde
+  `curl` sur un port prouve que **quelque chose** répond, jamais **qui** — pour
+  identifier l'interlocuteur, regarder ses logs, pas son port.
 - **Toujours depuis la racine du repo**, pas depuis ce dossier. Ce package n'a plus
   besoin du cwd pour lui-même (il ne lit plus ni `./data/` ni `./database/` : c'est
   l'agent qui le fait, dans son process), mais Chainlit résout le chemin de

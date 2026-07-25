@@ -84,6 +84,9 @@ make run      # lance l'agent en CLI (uv run python -m support_agent.agent)
 make serve    # expose l'agent en HTTP/SSE sur :8000
 make ui       # lance l'UI Chainlit sur :8001 (client HTTP → a besoin de `make serve`)
 make docker-up  # la pile complète en conteneurs : postgres + agent-api + client
+              #   ⚠️ ports DISJOINTS du dev local : agent :8100, UI :8101 — sur macOS
+              #   deux serveurs se lient au même port sans erreur, donc sans ça on
+              #   croit tester sa pile locale et on interroge le conteneur.
 make test     # tests (pytest)
 make lint     # ruff check
 make check    # lint + tests

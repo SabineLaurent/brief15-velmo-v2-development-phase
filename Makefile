@@ -28,7 +28,7 @@ run: ## Lance l'agent de support
 serve: ## Expose l'agent en HTTP (API SSE sur :8000, cf. docs/plan-deploiement-2026-07-25.md)
 	$(UV) run --extra server uvicorn support_agent.server:app --reload --port 8000
 
-ui: ## Lance l'UI Chainlit sur :8001 (client HTTP — `make serve` doit tourner à côté)
+ui: ## Lance l'UI Chainlit sur :8001 (dev local ; la version conteneur est sur :8101)
 	@echo "→ l'UI appelle $${AGENT_API_URL:-http://localhost:8000} ; lance 'make serve' dans un autre terminal si ce n'est pas fait."
 	$(UV) run chainlit run packages/client/src/client_chainlit/app.py -w --port 8001
 
@@ -55,7 +55,8 @@ docker-build: ## Construit les images (agent + client ; contexte = racine du rep
 
 docker-up: ## Démarre la pile conteneurisée en arrière-plan (construit si besoin)
 	docker compose up --build -d
-	@echo "→ UI sur http://localhost:8001  ·  agent sur http://localhost:8000  (make docker-logs pour suivre le démarrage)"
+	@echo "→ UI sur http://localhost:8101  ·  agent sur http://localhost:8100  (ports 81xx = conteneurs ; 80xx = dev local)"
+	@echo "  (make docker-logs pour suivre le démarrage)"
 
 docker-logs: ## Suit les logs de la pile (Ctrl-C pour sortir, les conteneurs continuent)
 	docker compose logs -f

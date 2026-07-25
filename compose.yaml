@@ -8,8 +8,19 @@
 # Trois briques : `client` → `agent-api` → `postgres`. Chacune ne connaît que la
 # suivante, et seulement par son NOM DE SERVICE (DNS interne de Compose).
 #
-#   navigateur ──:8001──► client ──http://agent-api:8000──► agent-api ──► postgres
+#   navigateur ──:8101──► client ──http://agent-api:8000──► agent-api ──► postgres
 #                          (UI)         (la couture, en HTTP)    (cerveau)  (état)
+#
+# ⚠️ Les ports publiés sont volontairement DIFFÉRENTS de ceux du dev local
+# (`make serve` :8000 · `make ui` :8001). Pourquoi : sur macOS, deux serveurs
+# peuvent se lier au même port sans erreur (le plus spécifique gagne), donc une
+# collision ne se voit PAS — on croit tester sa pile locale et on interroge le
+# conteneur. Vécu le 2026-07-25. Ici, l'URL dit qui répond :
+#   dev local  → agent :8000  · UI :8001
+#   conteneurs → agent :8100  · UI :8101
+# Rien ne change À L'INTÉRIEUR : les deux services écoutent toujours sur 8000, et
+# le client appelle toujours `http://agent-api:8000`. Seule bouge la fenêtre côté
+# hôte — c'est exactement ce que veut dire la notation `hôte:conteneur`.
 
 services:
   # La base unique de l'agent (étape 3). UN Postgres porte les DEUX horizons de
@@ -79,8 +90,9 @@ services:
         condition: service_healthy
 
     ports:
-      # hôte:conteneur — l'agent écoute sur 8000 dans le conteneur.
-      - "8000:8000"
+      # hôte:conteneur — l'agent écoute sur 8000 DANS le conteneur, publié sur
+      # 8100 côté hôte pour ne pas entrer en collision avec `make serve` (:8000).
+      - "8100:8000"
 
     restart: unless-stopped
 
@@ -118,9 +130,10 @@ services:
         condition: service_healthy
 
     ports:
-      # 8001 côté hôte : 8000 est déjà pris par `agent-api`. Dans le conteneur,
-      # Chainlit écoute bien sur 8000 — l'UI s'ouvre sur http://localhost:8001.
-      - "8001:8000"
+      # Dans le conteneur, Chainlit écoute sur 8000 comme l'agent — ils ne se
+      # gênent pas, ce sont deux piles réseau distinctes. Côté hôte, il faut bien
+      # deux numéros : l'UI conteneurisée s'ouvre sur http://localhost:8101.
+      - "8101:8000"
 
     restart: unless-stopped
 

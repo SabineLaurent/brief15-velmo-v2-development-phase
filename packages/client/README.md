@@ -35,7 +35,7 @@ Depuis l'étape 4, il faut **deux process** : le client ne contient plus l'agent
 make docker-up      # postgres + agent-api + client, dans l'ordre
 ```
 
-Puis ouvrir **`http://localhost:8001`** (l'agent occupe le `8000`).
+Puis ouvrir **`http://localhost:8101`** (l'agent conteneurisé est sur `8100`).
 
 ### Sur la machine, en deux terminaux
 
@@ -53,6 +53,20 @@ uv run chainlit run packages/client/src/client_chainlit/app.py -w --port 8001
 `Ctrl-C` pour arrêter. Si l'agent ne tourne pas, l'UI répond « service
 momentanément injoignable » : c'est le comportement attendu d'un client dont le
 serveur est absent, pas un bug.
+
+### 🔢 Deux jeux de ports, volontairement disjoints
+
+| | Agent | UI |
+|---|---|---|
+| **Dev local** (`make serve` / `make ui`) | `8000` | `8001` |
+| **Conteneurs** (`make docker-up`) | `8100` | `8101` |
+
+Pas un détail de confort : sur macOS, deux serveurs peuvent se lier au **même**
+port sans la moindre erreur (le plus spécifique gagne, en silence). On croit alors
+tester sa pile locale et on interroge en fait le conteneur — c'est arrivé le
+2026-07-25, et ça a invalidé un test entier. Avec des ports disjoints, **l'URL dit
+qui répond**. Rien ne change à l'intérieur des conteneurs : ils écoutent toujours
+sur `8000`, seule la publication côté hôte diffère.
 
 **Les deux variables que ce client lit** (cf. `.env.example` §9) :
 
