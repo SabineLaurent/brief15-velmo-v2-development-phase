@@ -28,6 +28,7 @@ from support_agent.guardrails.output_guard import (
 from support_agent.guardrails.pii import (
     DEFAULT_POLICY,
     CompositeDetector,
+    DomainAllowlistDetector,
     PIIDetector,
     PIIMatch,
     PIIResult,
@@ -48,6 +49,7 @@ from support_agent.guardrails.tool_guard import (
 __all__ = [
     "DEFAULT_POLICY",
     "CompositeDetector",
+    "DomainAllowlistDetector",
     "GuardDecision",
     "InjectionDetector",
     "InputGuard",

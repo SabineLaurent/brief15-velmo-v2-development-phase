@@ -118,7 +118,8 @@ def build_support_graph() -> CompiledStateGraph:
     if settings.guardrails_enabled:
         input_guard = build_input_guard(settings.guardrails_max_input_chars)
         output_guard = build_output_guard(
-            [ROUTER_SYSTEM_PROMPT, ANSWER_SYSTEM_PROMPT, SUPPORT_SYSTEM_PROMPT]
+            [ROUTER_SYSTEM_PROMPT, ANSWER_SYSTEM_PROMPT, SUPPORT_SYSTEM_PROMPT],
+            owned_email_domains=settings.guardrails_owned_email_domains.split(","),
         )
         builder.add_node("guard_input", make_guard_input(input_guard))
         builder.add_node("guard_output", make_guard_output(output_guard))

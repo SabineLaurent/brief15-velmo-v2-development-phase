@@ -134,6 +134,12 @@ class Settings(BaseSettings):
     guardrails_max_tool_field_chars: int = 2000
     guardrails_action_rate_limit: int = 5
     guardrails_action_rate_window_s: float = 3600.0
+    # Our OWN contact addresses are public information — they are the expected
+    # answer of two FAQ entries (`contact-pro.md`, `retractation-rgpd.md`). The
+    # OUTPUT guard must therefore not redact them, while it keeps redacting a
+    # CUSTOMER's address. Comma-separated domains; empty = redact every email on
+    # the way out (the pre-fix behaviour). Input redaction is never relaxed.
+    guardrails_owned_email_domains: str = "velmo.example"
 
     # --- Observability, LangSmith (Phase 2) ---
     langsmith_tracing: bool = False

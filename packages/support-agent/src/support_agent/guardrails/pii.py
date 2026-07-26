@@ -13,6 +13,7 @@ A smarter detector goes behind the same port when needed.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -89,6 +90,51 @@ class CompositeDetector:
         for detector in self._detectors:
             matches.extend(detector.scan(text))
         return matches
+
+
+class DomainAllowlistDetector:
+    """Decorator: drop `email` matches that belong to one of OUR OWN domains.
+
+    A correct rule applied without knowing its own context is still wrong: the
+    shop's contact addresses ARE the answer of two FAQ entries, so redacting them
+    on the way out breaks the reply it was meant to protect. This decorator is
+    what teaches the guard which addresses are its own.
+
+    Deliberately used on the OUTPUT side only: on the input side we still redact
+    every address, because there the goal is not to store or forward one.
+    """
+
+    def __init__(
+        self,
+        detector: PIIDetector,
+        allowed_domains: Iterable[str],
+        *,
+        entity: str = "email",
+    ) -> None:
+        self._detector = detector
+        self._entity = entity
+        # Accept "velmo.example", " @Velmo.Example " or "" indifferently: this
+        # comes from config, and a stray space must not silently disable the rule.
+        self._allowed = {
+            d.strip().lower().lstrip("@") for d in allowed_domains if d.strip()
+        }
+
+    def scan(self, text: str) -> list[PIIMatch]:
+        matches = self._detector.scan(text)
+        if not self._allowed:
+            return matches
+        return [m for m in matches if not self._is_ours(m)]
+
+    def _is_ours(self, match: PIIMatch) -> bool:
+        if match.entity != self._entity:
+            return False
+        domain = match.value.rpartition("@")[2].lower()
+        # Sub-domains count as ours (`support.velmo.example`), a look-alike does
+        # not (`velmo.example.attacker.com` fails both tests).
+        return any(
+            domain == allowed or domain.endswith(f".{allowed}")
+            for allowed in self._allowed
+        )
 
 
 class RegexPIIDetector:

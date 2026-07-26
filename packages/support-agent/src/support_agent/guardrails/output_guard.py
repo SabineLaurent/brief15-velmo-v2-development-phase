@@ -15,10 +15,12 @@ not a deterministic one — kept at the prompt level / future hardening.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from support_agent.guardrails.pii import (
     CompositeDetector,
+    DomainAllowlistDetector,
     PIIDetector,
     RegexPIIDetector,
     apply_pii_policy,
@@ -97,9 +99,21 @@ def build_output_guard(
     protected_prompts: list[str],
     pii_detector: PIIDetector | None = None,
     secret_detector: SecretDetector | None = None,
+    owned_email_domains: Iterable[str] = (),
 ) -> OutputGuard:
-    """Assemble the default output guard (PII + secret detectors behind ports)."""
+    """Assemble the default output guard (PII + secret detectors behind ports).
+
+    `owned_email_domains` are OUR public contact domains: their addresses are
+    published by the knowledge base and must survive the outgoing redaction (a
+    customer's address still does not). Asymmetric on purpose — the input guard
+    gets no such allowlist.
+    """
     detector = CompositeDetector(
-        [pii_detector or RegexPIIDetector(), secret_detector or RegexSecretDetector()]
+        [
+            DomainAllowlistDetector(
+                pii_detector or RegexPIIDetector(), owned_email_domains
+            ),
+            secret_detector or RegexSecretDetector(),
+        ]
     )
     return OutputGuard(detector=detector, protected_prompts=protected_prompts)

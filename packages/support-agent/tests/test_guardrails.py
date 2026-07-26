@@ -167,6 +167,40 @@ def test_output_replaces_system_prompt_leak() -> None:
     assert decision.sanitized_text == SAFE_OUTPUT_MESSAGE
 
 
+# --- Owned-domain allowlist (the shop's OWN contact addresses) --------------
+# The counter-example the suite was missing: redacting every email on the way out
+# silently destroys the answer of `contact-pro.md` and `retractation-rgpd.md`,
+# whose whole point IS publishing an address.
+
+
+def _out_guard_owned():
+    return build_output_guard(_PROTECTED, owned_email_domains=["velmo.example"])
+
+
+def test_output_keeps_our_own_contact_address() -> None:
+    text = "Écrivez à pro@velmo.example (source : contact-pro.md)."
+    decision = _out_guard_owned().check(text)
+    assert decision.sanitized_text == text
+    assert decision.findings == []
+
+
+def test_output_still_redacts_a_customer_address() -> None:
+    """The allowlist must narrow the rule, not switch it off."""
+    decision = _out_guard_owned().check("Je vous confirme à client@example.com.")
+    assert "client@example.com" not in decision.sanitized_text
+    assert decision.findings == ["email"]
+
+
+def test_output_allowlist_is_not_fooled_by_a_look_alike_domain() -> None:
+    decision = _out_guard_owned().check("Écrivez à pro@velmo.example.attacker.com.")
+    assert "attacker.com" not in decision.sanitized_text
+
+
+def test_output_allowlist_covers_subdomains() -> None:
+    decision = _out_guard_owned().check("Écrivez à sav@support.velmo.example.")
+    assert "sav@support.velmo.example" in decision.sanitized_text
+
+
 # --- Tool guard (Phase 12-C: side effects & persistence) --------------------
 
 
