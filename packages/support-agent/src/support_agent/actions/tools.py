@@ -15,12 +15,24 @@ Two design rules that come with actions:
 
 from __future__ import annotations
 
+import logging
+
 from langchain.tools import ToolRuntime, tool
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import BaseTool
+from langgraph.types import Command
 
 from support_agent.actions.backend import OrderStatus, SupportBackend, Ticket
 from support_agent.guardrails import ToolGuard
 from support_agent.memory import AgentContext
+
+logger = logging.getLogger(__name__)
+
+# Prefix of the ticket opened when the AGENT decides a human is needed. Kept
+# distinct from the router's fast-path escalation so the two are tellable apart
+# in the backlog: one is "the bot tried and could not", the other is "this never
+# should have waited".
+HANDOFF_SUBJECT_PREFIX = "Handoff (agent-requested): "
 
 
 def _format_order(order: OrderStatus) -> str:
@@ -132,4 +144,86 @@ def build_action_tools(
             return "This customer has no previous support tickets."
         return "Previous tickets for this customer:\n" + _format_tickets(tickets)
 
-    return [get_order_status, create_ticket, list_customer_tickets]
+    @tool
+    def request_human_handoff(
+        reason: str, summary: str, runtime: ToolRuntime[AgentContext]
+    ) -> Command:
+        """Hand this conversation over to a human advisor, and stop replying.
+
+        Call this ONLY once you have actually tried: searched the FAQ, looked the
+        order up, checked past tickets. The point of this agent is to spare humans
+        the requests they add no value to, so a customer simply asking for "a
+        human" is NOT enough on its own — try to solve it first, and hand over if
+        you cannot, or if they insist after you offered help.
+
+        DO hand over when a human genuinely adds value: the FAQ has no answer and
+        no action of yours can resolve it, the customer is in a formal dispute, a
+        decision requires authority you do not have, or they are clearly upset.
+
+        `reason`: a few words on WHY a human is needed (e.g. "no FAQ answer for
+        customs fees", "customer disputes a refund").
+        `summary`: what the customer wants AND what you already tried, so the
+        advisor does not have to reconstruct the case from scratch.
+        """
+        # user_id comes from the trusted runtime context, never from the model.
+        user_id = runtime.context.user_id
+
+        if tool_guard is not None:
+            for text, name in ((reason, "reason"), (summary, "summary")):
+                error = tool_guard.validate_field(text, field_name=name)
+                if error:
+                    return Command(
+                        update={
+                            "messages": [
+                                ToolMessage(error, tool_call_id=runtime.tool_call_id)
+                            ]
+                        }
+                    )
+            if not tool_guard.allow_action(user_id):
+                return Command(
+                    update={
+                        "messages": [
+                            ToolMessage(
+                                "Rate limit reached for this customer: no handoff "
+                                "opened. Tell them to try again later.",
+                                tool_call_id=runtime.tool_call_id,
+                            )
+                        ]
+                    }
+                )
+            # Never persist raw PII in a case the advisor will read.
+            reason = tool_guard.sanitize(reason)
+            summary = tool_guard.sanitize(summary)
+
+        ticket = backend.create_ticket(
+            user_id=user_id, subject=f"{HANDOFF_SUBJECT_PREFIX}{reason}", body=summary
+        )
+        logger.info(
+            "Handoff requested by the agent: user=%s ticket=%s reason=%s",
+            user_id,
+            ticket.ticket_id,
+            reason,
+        )
+        # `handled_by_human` mutes the bot from the NEXT turn on (the entry edge
+        # reads it). The current turn still finishes normally, so the model can
+        # tell the customer what just happened — with the case number.
+        return Command(
+            update={
+                "handled_by_human": True,
+                "messages": [
+                    ToolMessage(
+                        f"Case {ticket.ticket_id} handed over to a human advisor. "
+                        "Tell the customer, give them this case number, and say "
+                        "they can keep writing here.",
+                        tool_call_id=runtime.tool_call_id,
+                    )
+                ],
+            }
+        )
+
+    return [
+        get_order_status,
+        create_ticket,
+        list_customer_tickets,
+        request_human_handoff,
+    ]

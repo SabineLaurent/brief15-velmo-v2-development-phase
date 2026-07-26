@@ -21,6 +21,7 @@ from support_agent.actions.backend import InMemorySupportBackend
 from support_agent.graph.nodes import (
     ESCALATION_TICKET_SUBJECT,
     HUMAN_TAKEOVER_MESSAGE,
+    TAKEOVER_RELEASED_MESSAGE,
     entry_route,
     human_takeover,
     make_escalate,
@@ -121,6 +122,38 @@ def test_a_repeated_escalation_cannot_open_a_second_ticket(backend) -> None:
     graph = _graph(backend)
     _say(graph, "je veux parler à un humain")
     _say(graph, "je veux parler à un humain")
+
+    assert len(backend.list_tickets(USER)) == 1
+
+
+# --- The way back out of a takeover -----------------------------------------
+# A handoff is a judgement, and judgements are wrong sometimes. Since the flag
+# mutes the bot on this thread for good, a mistaken one would confiscate the
+# conversation — which is the opposite of an agent meant to spare human effort.
+
+
+def test_the_customer_can_take_the_bot_back(backend) -> None:
+    graph = _graph(backend)
+    _say(graph, "je veux parler à un humain")
+
+    released = _say(graph, "reprendre")
+    assert released["handled_by_human"] is False
+    assert released["messages"][-1].content == TAKEOVER_RELEASED_MESSAGE
+
+    # ...and the very next message reaches the router again.
+    assert entry_route(released) == "router"
+
+
+def test_the_way_out_is_advertised_in_the_takeover_message() -> None:
+    """An escape hatch nobody is told about is not an escape hatch."""
+    assert "reprendre" in HUMAN_TAKEOVER_MESSAGE
+
+
+def test_releasing_does_not_close_the_case(backend) -> None:
+    """The advisor still owns the ticket; only the bot resumes answering."""
+    graph = _graph(backend)
+    _say(graph, "je veux parler à un humain")
+    _say(graph, "reprendre")
 
     assert len(backend.list_tickets(USER)) == 1
 

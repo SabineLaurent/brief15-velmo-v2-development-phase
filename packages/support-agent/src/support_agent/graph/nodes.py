@@ -16,6 +16,7 @@ and trace in LangSmith, instead of being hidden inside a prebuilt agent.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from typing import Callable
 
@@ -67,10 +68,26 @@ ESCALATION_HANDOFF_MESSAGE = (
 )
 
 # Delivered on every later turn of a thread a human has taken over. No LLM call:
-# the bot is muted, not thinking.
+# the bot is muted, not thinking. It always states the way back — a handoff is a
+# judgement call, and a wrong one must not confiscate the thread for good.
 HUMAN_TAKEOVER_MESSAGE = (
     "Votre demande est entre les mains d'un conseiller humain. Votre message a "
-    "bien été enregistré et lui sera transmis."
+    "bien été enregistré et lui sera transmis. Si vous avez une autre question "
+    "en attendant, répondez « reprendre » et je me remets à votre disposition."
+)
+
+# Confirms the customer took the way back out of the takeover.
+TAKEOVER_RELEASED_MESSAGE = (
+    "C'est noté, je reprends la main. Votre dossier reste ouvert auprès du "
+    "conseiller. Que puis-je faire pour vous ?"
+)
+
+# The way out, matched deterministically: zero LLM call, zero cost, no way for a
+# classifier to be "creative" about whether the customer really asked. Baseline
+# on purpose — swap in an intent classifier later without touching the node.
+_TAKEOVER_RELEASE_PATTERN = re.compile(
+    r"\b(reprendre|reprends|autre question|nouvelle demande|laisse tomber)\b",
+    re.IGNORECASE,
 )
 
 # Subject of the ticket opened by an escalation. Stable on purpose: the backend
@@ -174,12 +191,14 @@ ROUTER_SYSTEM_PROMPT = (
     "opening a support ticket for a defect or follow-up (the agent can create "
     "tickets itself). When in doubt about a factual or product question, choose "
     "'support': it checks the FAQ instead of guessing.\n"
-    "- 'escalate': ONLY when the customer must reach a human right now — they "
-    "explicitly ask for a human agent, or the case needs a live human decision "
-    "(legal, formal dispute, distress). This files the case for a human advisor "
-    "and STOPS the bot from replying in this conversation, so choose it only when "
-    "a human is really required. Opening a ticket the agent handles itself does "
-    "NOT belong here: that is 'support'.\n"
+    "- 'escalate': ONLY when a human must take over IMMEDIATELY, with no attempt "
+    "worth making first — a formal legal dispute, a threat, distress, or an "
+    "explicitly urgent human decision. This files the case and STOPS the bot from "
+    "replying in this conversation.\n"
+    "  A customer merely ASKING for a human is NOT this route: choose 'support' "
+    "so the agent can try to solve it (it can hand over itself, once it has "
+    "tried). The whole point of this agent is to spare humans the requests they "
+    "add no value to, so escalating before trying is a failure, not a courtesy.\n"
     "- 'answer': ONLY purely social messages that carry no informational request — "
     "greetings, thanks, goodbyes, small talk. If the message asks for ANY fact or "
     "action, it is 'support', not 'answer'.\n"
@@ -260,7 +279,7 @@ SUPPORT_SYSTEM_PROMPT = (
     "account, warranty...), ALWAYS call the `search_faq` tool first and answer "
     "ONLY from the retrieved content — never guess. Cite the source file you "
     "used (e.g. 'source : livraison.md'). If the FAQ does not contain the "
-    "answer, say so honestly and suggest contacting a human agent. "
+    "answer, say so honestly. "
     "You also have a long-term memory about the current customer: call "
     "`search_memories` when the user refers to something they told you before "
     "(their name, preferences, past orders), and call `save_memory` when they "
@@ -275,6 +294,13 @@ SUPPORT_SYSTEM_PROMPT = (
     "delivery issue), call `list_customer_tickets` first to check their history: "
     "if a similar past ticket exists, acknowledge that it happened before instead "
     "of treating it as new. "
+    "When the customer asks to speak to a human, do NOT hand over on the spot: "
+    "this agent exists to spare humans the requests they add no value to. Ask "
+    "what they need and try to solve it (FAQ, order lookup, ticket). Hand over "
+    "with `request_human_handoff` once you have genuinely tried and cannot "
+    "resolve it, if they insist after you offered help, or if the case needs a "
+    "decision you cannot make. Pass a `summary` that says what they want AND what "
+    "you already tried, so the advisor does not start from zero. "
     "Answer concisely, in the user's language, and use both the conversation "
     "history and your memories to stay consistent."
 )
@@ -393,10 +419,25 @@ def human_takeover(state: SupportState) -> dict:
     `messages`, hence in the checkpointer, hence readable by whoever picks the
     case up.
 
-    Note this flag is also what makes escalation self-limiting: once set, the
-    router is never reached again on this thread, so no second ticket can be
-    opened by a customer repeating "I want a human".
+    This flag is also what makes a handoff self-limiting: once set, the router is
+    never reached again on this thread, so a customer repeating "I want a human"
+    cannot stack cases.
+
+    But a handoff is a JUDGEMENT, and judgements are wrong sometimes. Muting the
+    bot for good on a mistaken one would confiscate the thread — so the node
+    offers a deterministic way back. Releasing does NOT close the case: the
+    advisor still owns it, the bot merely resumes answering everything else.
     """
+    last_user_message = next(
+        (m.content for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+        "",
+    )
+    if _TAKEOVER_RELEASE_PATTERN.search(str(last_user_message)):
+        logger.info("Customer released the human takeover on this thread.")
+        return {
+            "handled_by_human": False,
+            "messages": [AIMessage(content=TAKEOVER_RELEASED_MESSAGE)],
+        }
     return {"messages": [AIMessage(content=HUMAN_TAKEOVER_MESSAGE)]}
 
 
