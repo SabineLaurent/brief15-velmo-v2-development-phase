@@ -4,8 +4,9 @@
 conteneur — vérifié d'abord en local en conditions quasi réelles, déployé *in fine*
 sur **Azure**.
 **Date :** 2026-07-25
-**Statut :** plan retenu. **Étapes 1 à 3 faites** (service HTTP + image Docker +
-Postgres/pgvector, vérifiées en live) ; étapes 4 et 5 à venir — l'avancement se suit dans
+**Statut :** plan retenu. **Étapes 1 à 4 faites** (service HTTP + image Docker +
+Postgres/pgvector + client Chainlit en HTTP, vérifiées en live) ; **reste l'étape 5**
+(Azure + identité prouvée) — l'avancement se suit dans
 [`../TODO_priorities.md`](../TODO_priorities.md).
 Ce document décrit la cible et le chemin, pas l'état du code (pour ça :
 [`architecture.md`](architecture.md)).

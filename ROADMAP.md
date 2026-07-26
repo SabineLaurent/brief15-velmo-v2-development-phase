@@ -270,9 +270,18 @@ la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents
 **Découpe en 5 étapes, avec le but de chacune :**
 [`docs/plan-deploiement-2026-07-25.md`](docs/plan-deploiement-2026-07-25.md).
 Cible finale : **Azure** (Container Apps + PostgreSQL Flexible Server).
-**Étape 1 faite :** `support_agent/server.py` — `POST /chat` en **SSE**, `/health`,
-`/ready`, clé de service **fail-closed**, `make serve`. Le serveur *transporte* ce que
-`stream_reply` *produit* : aucune logique d'agent dans la couche HTTP.
+**Étapes 1 à 4 faites** (détail et bilans chiffrés : le plan) :
+1. `support_agent/server.py` — `POST /chat` en **SSE**, `/health`, `/ready`, clé de
+   service **fail-closed**, `make serve`. Le serveur *transporte* ce que `stream_reply`
+   *produit* : aucune logique d'agent dans la couche HTTP.
+2. Image Docker de la tranche `support-agent` (multi-stage, non-root, sans `.env`).
+3. **Postgres + pgvector réellement exercé** (`PERSISTENCE_BACKEND=postgres`) : une
+   seule base, deux horizons de mémoire séparés par schéma, pool partagé, sweeper RGPD.
+4. Conteneur `client` : Chainlit devient client **HTTP**. `packages/client` ne dépend
+   **plus** de `support-agent` — vérifié dans l'image construite, pas déduit.
+
+**Reste l'étape 5 (Azure)** : ACR + Container Apps + Flexible Server, et l'**identité
+prouvée** (`user_id` dérivé d'un token vérifié, jamais lu du corps de la requête).
 ⚠️ Le rail de déploiement LangGraph (`langgraph.json` / LangSmith Deployment) est
 **écarté** — son contrat public est le graphe, ce qui rouvrirait le contournement du
 garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
@@ -292,7 +301,8 @@ garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
 - [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
 - [x] Phase 12 — sécurité & guardrails (A entrée + B sortie/anti-fuite + C outils & mémoire)
-- [ ] Phase 13 — exposition & déploiement 🚧 ← **en cours** (étape 1/5 faite)
+- [ ] Phase 13 — exposition & déploiement 🚧 ← **en cours** (étapes 1 à 4/5 faites,
+      reste Azure + identité prouvée)
 - [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12, puis après la 13)*
 
 > Note : Phases 11 et 12 **réordonnées** — la sécurité (guardrails) passe avant le
