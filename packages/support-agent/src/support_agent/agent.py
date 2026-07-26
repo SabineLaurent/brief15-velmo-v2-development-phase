@@ -85,8 +85,12 @@ def main() -> None:
             config=config,
         )
 
-        # Human-in-the-loop: while the graph is paused on an `escalate` interrupt,
-        # play the human operator — read the case, type a reply, resume the graph.
+        # Human-in-the-loop console. Dormant today: `escalate` no longer pauses
+        # the graph (it files a ticket and ends the turn — a pause with no
+        # operator behind it killed the thread, see `make_escalate`). Kept
+        # deliberately: this is the project's ONLY resume implementation, and it
+        # is generic — it will drive the approval gate that `interrupt()` is
+        # moving to. Delete it only if that plan is abandoned.
         while result.get("__interrupt__"):
             payload = result["__interrupt__"][0].value
             print("\n--- ESCALADE : transfert à un conseiller humain ---")

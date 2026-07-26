@@ -91,8 +91,10 @@ def _reply_from_result(result: dict) -> str:
     so the pause MUST be detected before we look at `messages` — otherwise we
     would replay a stale reply as if it were this turn's answer.
     """
-    # The graph is paused on `escalate`, waiting for a human (`interrupt()`). No
-    # AI reply exists yet: the human writes it on resume. Tell the customer.
+    # SAFETY NET, not a live path: no node interrupts today (`escalate` hands off
+    # asynchronously and ends its turn). Kept because a paused graph produces NO
+    # AI reply, so the day an approval gate reintroduces `interrupt()` the seam's
+    # invariant — exactly one non-empty chunk — must not break with it.
     if result.get("__interrupt__"):
         return ESCALATION_PENDING_MESSAGE
 

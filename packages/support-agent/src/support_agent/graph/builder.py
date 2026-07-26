@@ -4,9 +4,16 @@ This is the "capot ouvert" replacement for `create_agent`: a `StateGraph` with
 named nodes and conditional edges we control ourselves.
 
     START ─► guard_input ─┬─(blocked)──────────────────────────────────────► END
-                          └─► router ─┬─(answer)──► answer ────┐
-                                      ├─(support)─► model ⇄ tools ─(ReAct)─┼─► guard_output ─► END
-                                      └─(escalate)► escalate ─(interrupt ⏸)┘
+                          ├─(human owns the case)─► human_takeover ─┐
+                          └─► router ─┬─(answer)──► answer ─────────┤
+                                      ├─(support)─► model ⇄ tools ──┼─► guard_output ─► END
+                                      └─(escalate)► escalate ───────┘
+
+The `escalate` branch does NOT pause the graph: it files a ticket, sets
+`handled_by_human` and ends the turn. Every later message on that thread takes
+the `human_takeover` arrow — the bot is muted, the conversation stays alive.
+Pausing here (an `interrupt()`) is what used to kill the thread for good: see
+`make_escalate` and docs/escalade.md.
 
 `guard_input` (Phase 12-A) validates, screens for prompt-injection and masks PII
 before anything else sees the message; a refused message short-circuits to END.
@@ -29,8 +36,9 @@ from support_agent.graph.nodes import (
     ANSWER_SYSTEM_PROMPT,
     ROUTER_SYSTEM_PROMPT,
     SUPPORT_SYSTEM_PROMPT,
-    escalate,
-    guard_route,
+    entry_route,
+    human_takeover,
+    make_escalate,
     make_answer,
     make_guard_input,
     make_guard_output,
@@ -58,6 +66,12 @@ from support_agent.memory import (
     get_checkpointer,
     get_store,
 )
+
+
+# Destinations of the entry conditional edge. Declared explicitly (a `path_map`)
+# so the drawn graph — the diagram used to EXPLAIN this agent — shows these three
+# arrows and not one to every node.
+_ENTRY_PATHS = {END: END, "human_takeover": "human_takeover", "router": "router"}
 
 
 def build_support_graph() -> CompiledStateGraph:
@@ -108,7 +122,8 @@ def build_support_graph() -> CompiledStateGraph:
     builder.add_node("answer", make_answer(model, fallbacks))
     builder.add_node("model", make_support_model(model, tools, fallbacks))
     builder.add_node("tools", ToolNode(tools))
-    builder.add_node("escalate", escalate)
+    builder.add_node("escalate", make_escalate(backend, tool_guard))
+    builder.add_node("human_takeover", human_takeover)
 
     # Guardrails (Phase 12): the kill switch keeps the graph identical to before
     # when disabled. When enabled, the entry guard (12-A) sits BEFORE the router
@@ -124,11 +139,13 @@ def build_support_graph() -> CompiledStateGraph:
         builder.add_node("guard_input", make_guard_input(input_guard))
         builder.add_node("guard_output", make_guard_output(output_guard))
         builder.add_edge(START, "guard_input")
-        builder.add_conditional_edges("guard_input", guard_route)
+        builder.add_conditional_edges("guard_input", entry_route, _ENTRY_PATHS)
         builder.add_edge("guard_output", END)
         terminal = "guard_output"
     else:
-        builder.add_edge(START, "router")
+        # Same entry decision without the guard node: the human-takeover check
+        # must NOT depend on the guardrails kill switch.
+        builder.add_conditional_edges(START, entry_route, _ENTRY_PATHS)
         terminal = END
 
     # The routing decision: the conditional edge maps each `route` value to a node.
@@ -149,5 +166,6 @@ def build_support_graph() -> CompiledStateGraph:
     # The two leaf branches end the turn (through the exit guard when enabled).
     builder.add_edge("answer", terminal)
     builder.add_edge("escalate", terminal)
+    builder.add_edge("human_takeover", terminal)
 
     return builder.compile(checkpointer=checkpointer, store=store)
