@@ -18,6 +18,7 @@
 | 3 | **Déploiement conteneurisé** (Docker → Azure), 5 étapes | l'agent doit devenir un **service appelable** — objectif de livraison de la formation | 🚧 |
 | 3bis | Revue de code — **C2** (adresses boutique caviardées) · **C3** (500 au lieu de 401) | dégradaient des réponses **aujourd'hui** ; petits, faits avant l'étape 5 | ✅ |
 | 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade ; se décide **avec** l'étape 5 | ⬜ |
+| 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | ⬜ |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 5 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
@@ -156,6 +157,7 @@ pas défendable — donc B1.4 y gagne en attendant.
 | 2 | Image Docker de la tranche `support-agent` (état sur volume) | ✅ |
 | 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ✅ |
 | 4 | Conteneur `client` : Chainlit devient client **HTTP** | ✅ |
+| 4bis | **CI** : la garde (lint + tests) puis l'image **amd64** — voir chantier 3quater | ⬜ |
 | 5 | Azure : ACR + Container Apps + Flexible Server, **identité prouvée** | ⬜ |
 
 **Étape 4 close (2026-07-25) — ce qu'elle a prouvé, chiffré :** `app.py` a changé
@@ -198,6 +200,56 @@ défendent, elles ne coûtent pas la même chose) :
 `thread_id` après une escalade**. Aucun test à un seul tour ne voit ce trou.
 
 Se décide **avec l'étape 5** du déploiement, pas contre elle.
+
+---
+
+## Chantier 3quater — CI (intégration continue), avant la CD Azure ⬜
+
+**Pourquoi maintenant, et pas « parce que ça se fait ».** La CI est ici un
+**prérequis technique** de l'étape 5, pas une bonne pratique optionnelle :
+
+| Le fait | La conséquence |
+|---|---|
+| La machine de dev est **arm64**, ACA exécute du **linux/amd64** | L'image construite par `make docker-build` **ne démarrera pas** sur Azure. Il faut un constructeur amd64 — c'est-à-dire un runner de CI |
+| La CD pousse une image sur ACR | Sans CI, on pousse une image bâtie sur un poste, depuis un arbre de travail dont **rien ne prouve** qu'il correspond à un commit |
+| Le pipeline CI **est** le brouillon de la CD | Écrire la CD sans CI, c'est écrire deux fois le même script de build |
+
+**Ce que ce projet a déjà, et qui rend la CI presque gratuite :**
+- `make check` (ruff + pytest) tourne en **~40 s**, **sans réseau et sans secret** :
+  `test_eval.py` se `skip` tout seul quand aucune clé provider n'est présente
+  (`pytestmark = skipif(not _has_llm_credentials())`), et il n'y a **pas** de `.env`
+  dans un checkout propre. La CI n'a donc **rien à configurer** pour être verte.
+- **Un seul `uv.lock`** partagé : `uv sync --frozen` réinstalle exactement ce qui a
+  été testé en local. C'est le gain workspace, encaissé une seconde fois.
+- Les deux `Dockerfile` se construisent déjà depuis la **racine** — le contexte de
+  build est le même en CI qu'en local.
+
+**Découpe proposée, dans l'ordre (chaque étape a un but distinct) :**
+
+- **CI-1 — la garde (aucun secret).** `push` + `pull_request` : `uv sync --frozen`,
+  `ruff check`, `pytest`. Plus une vérification que le **lock est à jour**
+  (`uv lock --check`) : un `pyproject.toml` modifié sans relock casse la
+  reproductibilité de l'image, en silence. Livrable : un rouge/vert qui veut dire
+  quelque chose.
+- **CI-2 — l'image, en amd64.** Construire les **deux** images (agent + client) sur
+  le runner, `--platform linux/amd64`, **sans pousser**. C'est là que se règle le
+  problème d'architecture, avant qu'il ne se manifeste comme un conteneur qui
+  refuse de démarrer sur Azure. Deux assertions à y faire **exécuter**, parce
+  qu'elles sont aujourd'hui vérifiées à la main :
+  1. l'image du client **ne contient ni `support_agent`, ni `langgraph`, ni
+     `langchain`** (la preuve du découplage de l'étape 4 — cf. plus haut) ;
+  2. l'image de l'agent répond sur `/health` (fumée : elle démarre vraiment).
+- **CI-3 — la chaîne complète (= la CD).** Pousser sur ACR puis déclencher une
+  révision ACA. **Ne se fait qu'à l'étape 5**, avec les secrets Azure.
+
+**Deux pièges à traiter dès CI-1 :**
+- **Python 3.12.** Les paquets déclarent `>=3.11,<3.14` mais le projet cible 3.12 ;
+  épingler la version du runner, sinon la CI teste un interpréteur que personne
+  n'utilise.
+- **Ne pas faire fuiter les tests « live » dans la garde.** L'éval LangSmith
+  (`make eval`), le Postgres réel et les appels LLM ont besoin de secrets et de
+  réseau : ils appartiennent à un **second étage**, déclenché à la main ou sur
+  `main`, jamais au chemin qui doit rester vert et rapide sur chaque commit.
 
 ---
 
