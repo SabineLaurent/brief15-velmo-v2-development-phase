@@ -17,7 +17,7 @@
 | 2 | Audit A1 — guard de sortie contourné en streaming | **sécurité** sur le seul chemin client réel | ✅ |
 | 3 | **Déploiement conteneurisé** (Docker → Azure), 5 étapes | l'agent doit devenir un **service appelable** — objectif de livraison de la formation | 🚧 |
 | 3bis | Revue de code — **C2** (adresses boutique caviardées) · **C3** (500 au lieu de 401) | dégradaient des réponses **aujourd'hui** ; petits, faits avant l'étape 5 | ✅ |
-| 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade ; se décide **avec** l'étape 5 | ⬜ |
+| 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade | ✅ |
 | 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | ⬜ |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 5 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
@@ -182,24 +182,21 @@ Réf. [`docs/revue-code-2026-07-25.md`](docs/revue-code-2026-07-25.md).
 |---|---|---|
 | **C2** 🔴 | Le garde de sortie caviardait `pro@velmo.example` / `privacy@velmo.example`, qui **sont** la réponse de deux fiches FAQ | ✅ allowlist de domaines propriétaires (`GUARDRAILS_OWNED_EMAIL_DOMAINS`), asymétrique : sortie seulement |
 | **C3** 🟠 | Une clé d'API non-ASCII rendait `500` au lieu de `401` | ✅ comparaison en **octets** — la classe entière disparaît |
-| **C1** 🔴 | **Aucun chemin de reprise** après un `interrupt()` via HTTP : une escalade condamne le fil, tous les messages suivants reçoivent la même phrase, sans erreur nulle part | ⬜ **décision de conception à trancher** |
+| **C1** 🔴 | **Aucun chemin de reprise** après un `interrupt()` via HTTP : une escalade condamne le fil, tous les messages suivants reçoivent la même phrase, sans erreur nulle part | ✅ escalade **asynchrone** (ticket + `handled_by_human` + nœud `human_takeover`), sur le modèle des vraies plateformes — [`docs/escalade.md`](docs/escalade.md) |
 
-**C1 — la question à trancher avant d'écrire une ligne** (les deux options se
-défendent, elles ne coûtent pas la même chose) :
+**C1 — tranché le 2026-07-26.** Les deux options proposées par la revue (reprise
+synchrone via `/resume`, ou escalade asynchrone) ont été départagées par un critère
+extérieur : **ce que fait une plateforme de support en production**. Rien n'y est en
+pause — une conversation est une ligne en base avec un statut et un assigné, et
+escalader c'est *réassigner*, pas *suspendre*. Écartées au passage : la reprise
+synchrone (elle suppose un opérateur qui n'existe pas) et la scission de thread
+(inexistante en prod, et elle rend le nouveau fil amnésique).
 
-1. **Rendre la reprise possible** — route `POST /chat/{thread_id}/resume` + exposition
-   du payload d'`interrupt()` (déjà structuré : `reason` / `user_id` /
-   `customer_message`). C'est ce que l'audit A2 demandait, et ça suppose **un
-   opérateur branché** quelque part.
-2. **Ne pas mettre le graphe en pause du tout** — `escalate` ouvre un ticket via le
-   port `actions/` et **termine le tour**. Le fil reste vivant, l'escalade devient
-   asynchrone : le comportement d'un vrai service de support, et ça ne suppose
-   personne au bout du fil.
-
-⚠️ Dans les deux cas, le test qui manque est le même : **deux tours sur le même
-`thread_id` après une escalade**. Aucun test à un seul tour ne voit ce trou.
-
-Se décide **avec l'étape 5** du déploiement, pas contre elle.
+**Reste ouvert, désormais nommé au lieu d'être silencieux :** le **canal de retour**
+de la réponse humaine (le SSE est portée-requête → c'est un problème de transport,
+scope B + Phase 11), la **console d'opérateur**, et la **sortie du takeover** (rien
+ne remet `handled_by_human` à `False` — prudent et voulu tant que personne ne peut
+clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
 
 ---
 

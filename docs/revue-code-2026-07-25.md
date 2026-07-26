@@ -33,7 +33,7 @@ tient réellement (aucune instanciation de provider hors de `llm/factory.py`), l
 
 | # | Sévérité | Le problème en une ligne | État |
 |---|---|---|---|
-| **C1** | 🔴 haute | Une escalade **condamne le fil définitivement** via HTTP : plus aucun message ne sera jamais traité. | ⬜ ouvert (décision de conception, cf. « Suite proposée ») |
+| **C1** | 🔴 haute | Une escalade **condamne le fil définitivement** via HTTP : plus aucun message ne sera jamais traité. | ✅ corrigé (2026-07-26) |
 | **C2** | 🔴 haute | Le garde de sortie **caviarde les adresses de contact de la boutique**, qui sont la réponse attendue de deux fiches FAQ. | ✅ corrigé (2026-07-26) |
 | **C3** | 🟠 moyenne | Une clé d'API **non-ASCII** rend `500` au lieu de `401`. | ✅ corrigé (2026-07-26) |
 
@@ -64,7 +64,7 @@ ne liste que ce qui cloche laisse croire que le reste n'a pas été regardé.
 
 ---
 
-## 🔴 C1 — Une escalade condamne le fil définitivement, via HTTP
+## 🔴 C1 — Une escalade condamne le fil définitivement, via HTTP ✅ CORRIGÉ
 
 **Sévérité :** haute · **Catégorie :** correction fonctionnelle · **Confiance :** 10/10
 **Fichiers :** `packages/support-agent/src/support_agent/api.py:96` ·
@@ -126,6 +126,33 @@ Deux directions, à trancher :
 
 ⚠️ Dans les deux cas, ajouter un test « deux tours sur le même `thread_id` après une
 escalade » : le trou actuel est précisément celui qu'aucun test à un seul tour ne voit.
+
+### ✅ Correctif appliqué (2026-07-26) — **ni l'une ni l'autre** des deux directions
+
+La question « reprise synchrone ou escalade asynchrone ? » a été tranchée par un
+troisième critère : **ce que fait une vraie plateforme de support en production**.
+Réponse : rien n'est en pause. Une conversation est une ligne en base avec un
+**statut** et un **assigné** ; escalader, c'est **réassigner** (bot → file humaine),
+couper le bot, et laisser le client écrire dans le **même** fil.
+
+`escalate` ouvre donc un ticket via le port `actions/`, pose `handled_by_human` dans
+l'état, et **termine le tour**. Les messages suivants prennent une nouvelle arête
+vers `human_takeover`, qui accuse réception **sans appel LLM**. Deux propriétés
+tombent gratuitement : le ticket est idempotent (id dérivé du contenu), et le drapeau
+sert de rate-limit (le `router` n'est plus jamais atteint, donc pas de second ticket).
+
+`interrupt()` n'est pas supprimé du projet : il est **relogé** sur une porte
+d'approbation d'action irréversible — sa place légitime, y compris dans l'industrie.
+La boucle de reprise du CLI est conservée pour l'accueillir.
+
+**Raisonnement complet, options écartées et reste-à-faire nommé :**
+[`escalade.md`](escalade.md).
+
+**Tests (+5, dont celui que cette revue exigeait) :** deux tours sur le même
+`thread_id`, le bot muet, le ticket déposé pour le bon client, l'escalade répétée qui
+n'ouvre pas de second dossier, et la PII masquée avant classement.
+**Contre-épreuve :** le même harnais avec l'ancien nœud rejoue exactement les trois
+tours interrompus mesurés plus haut.
 
 ---
 

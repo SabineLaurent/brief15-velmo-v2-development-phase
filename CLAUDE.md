@@ -109,6 +109,7 @@ make check    # lint + tests
 - « Comment on choisit le provider LLM ? » → `.env` + `packages/support-agent/src/support_agent/llm/`
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Qui gère le streaming de la réponse (agent / API / front) ? » → `docs/streaming.md`
+- « Pourquoi l'escalade ne met pas le graphe en pause ? » → `docs/escalade.md`
 - « Pourquoi ~5 s avant la réponse ? » → `docs/latence.md` (investigation **close** ;
   renvoie vers `latence-patterns-prod.md` et `prompt-caching.md`)
 - « Comment on travaille ensemble (méthode réutilisable) ? » → `docs/methodologie.md`

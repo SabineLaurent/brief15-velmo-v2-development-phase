@@ -75,6 +75,15 @@ et reprend via `Command(resume=<réponse>)`, qui redevient le message client. N�
 gardé idempotent (lecture seule avant l'`interrupt`, car le nœud ré-exécute à la
 reprise). Pause + reprise vérifiées en live (branche escalade → réponse humaine).
 
+> ⚠️ **Révisé le 2026-07-26 (défaut C1).** Derrière une API, cette pause **tuait
+> le fil** : LangGraph reprend la tâche pendante avant tout, donc le `router`
+> n'était plus jamais réévalué et tous les messages suivants recevaient la même
+> phrase, sans erreur nulle part. `escalate` **ne met plus le graphe en pause** :
+> il ouvre un ticket, coupe le bot (`handled_by_human`) et termine le tour —
+> le modèle des vraies plateformes de support. `interrupt()` n'est pas abandonné,
+> il est **relogé** sur une porte d'approbation d'action irréversible.
+> Le pourquoi complet : [`docs/escalade.md`](docs/escalade.md).
+
 ## Phase 8 — Outils & actions ✅
 **Concept :** tool calling, définition d'outils métier agnostiques.
 **Livrable :** l'agent peut agir (ex : statut de commande, création de ticket).
