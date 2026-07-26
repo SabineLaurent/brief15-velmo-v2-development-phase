@@ -46,28 +46,42 @@ def cites_source(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedba
 
 
 def honest_refusal(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedback | None:
-    """Out-of-FAQ: the agent should decline honestly and/or point to a human.
+    """Out-of-FAQ: the agent must say it does not know, not invent an answer.
 
-    Heuristic: we look for a hand-off / inability signal rather than a confident
-    fabricated answer. Kept lenient on purpose — a semantic judge would do better.
+    What we look for is an explicit statement of NOT KNOWING or NOT HAVING the
+    information. The signal list used to include "support" and "contact" — two
+    words a support agent says constantly — so almost any answer passed, including
+    a confidently fabricated one. That was finding Q1 of the 2026-07-19 audit, and
+    it stayed invisible until a prompt change removed the boilerplate the lax
+    signals were accidentally matching.
+
+    Still deterministic, and still a heuristic: a semantic judge would do better.
+    But it now fails a fabricated answer, which is the whole point of the metric.
     """
     if not reference_outputs.get("expect_refusal"):
         return None
     answer = (outputs.get("answer") or "").lower()
     signals = (
-        "conseiller",
-        "humain",
-        "human",
-        "support",
-        "contact",
-        "désolé",
-        "sorry",
+        # "I do not have / the FAQ does not say"
+        "ne précise pas",
+        "ne mentionne pas",
+        "ne contient pas",
+        "n'indique pas",
+        "pas d'information",
+        "aucune information",
+        "does not specify",
+        "no information",
+        # "I cannot confirm / I do not know"
+        "ne peux pas",
+        "ne peut pas",
+        "je ne sais pas",
+        "cannot confirm",
+        "cannot",
+        "unable",
+        # "we do not sell/offer that"
         "ne propose",
         "ne vend",
         "ne trouve",
-        "pas d'information",
-        "unable",
-        "cannot",
     )
     return {"key": "honest_refusal", "score": any(s in answer for s in signals)}
 

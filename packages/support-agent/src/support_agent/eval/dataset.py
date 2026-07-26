@@ -63,9 +63,28 @@ EVAL_CASES: list[dict[str, Any]] = [
         "outputs": {"route": "support", "expect_order_id": "CMD-1001"},
     },
     {
-        "id": "escalate-human-request",
+        # Deflection. Asking for a human is NOT an order: this agent exists to
+        # spare humans the requests they add no value to, so the bot must try
+        # first. It can still hand over itself (`request_human_handoff`) once it
+        # has tried. Expecting `escalate` here — as this case used to — encoded
+        # the opposite of the product's purpose.
+        "id": "deflect-human-request",
         "inputs": {
             "message": "Je veux parler à un conseiller humain, maintenant.",
+            "user_id": "demo-user",
+        },
+        "outputs": {"route": "support"},
+    },
+    {
+        # The counter-case: a human genuinely adds value HERE, and making the
+        # customer sit through an attempt first would help nobody. Without this
+        # case, "never escalate" would score a perfect run.
+        "id": "escalate-formal-dispute",
+        "inputs": {
+            "message": (
+                "Je vous mets en demeure : sans remboursement sous 8 jours, "
+                "mon avocat saisit le tribunal."
+            ),
             "user_id": "demo-user",
         },
         "outputs": {"route": "escalate"},
