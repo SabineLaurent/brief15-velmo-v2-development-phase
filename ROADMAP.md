@@ -99,6 +99,11 @@ de l'escalade Phase 7 (handoff synchrone → `interrupt`). Les 3 cas vérifiés 
 live : statut commande, ouverture de ticket (conversation continue), et demande
 humaine explicite (escalade Phase 7 non régressée).
 
+> ➕ **2026-07-26 :** un 4e outil, `request_human_handoff(reason, summary)`, rend
+> l'escalade **décidable après tentative** — c'est le modèle qui a la FAQ et les
+> outils en main qui transfère, pas le routeur qui n'a que le message. Le dossier
+> part avec son contexte. Voir [`docs/escalade.md`](docs/escalade.md) §3 bis.
+
 ## Phase 9 — Évaluation & qualité ✅
 **Concept :** datasets LangSmith, evaluators, tests de non-régression.
 **Livrable :** un jeu d'évaluation qui note l'agent automatiquement.

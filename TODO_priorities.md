@@ -20,7 +20,7 @@
 | 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade | ✅ |
 | 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | ⬜ |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
-| 5 | Reliquat d'audit — I2 · Q1 · Q2 | seuls findings encore ouverts ; conditionne l'archivage de l'audit | ⬜ |
+| 5 | Reliquat d'audit — I2 · Q2 (**Q1 fait**) | derniers findings ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -260,13 +260,18 @@ seuls findings encore ouverts (A1, A2, I1 et Q3 sont réglés) :
   `langchain-*` correspondants ne sont pas installés (`pyproject.toml:20` n'est
   qu'un commentaire) → `ImportError` brut au runtime. Correctif minimal : envelopper
   l'erreur avec un message actionnable (« installe `langchain-groq` »).
-- **Q1 — `honest_refusal` trop laxiste.** `eval/evaluators.py:61-62` compte
+- ~~**Q1 — `honest_refusal` trop laxiste.**~~ ✅ **fait le 2026-07-26**, forcé par le
+  changement de prompt de l'escalade : en retirant « suggère de contacter un
+  conseiller », le seul signal que l'évaluateur savait lire a disparu — alors que la
+  réponse produite était un refus honnête impeccable. Il détecte maintenant l'**énoncé
+  de non-savoir** (« ne précise pas », « je ne peux pas »…) et non le vocabulaire d'un
+  agent de support ; il refuserait donc une réponse fabriquée. Détail d'origine : `eval/evaluators.py:61-62` compte
   `"support"` et `"contact"` comme signaux de refus honnête : deux mots omniprésents
   chez un agent *de support*. L'évaluateur passe donc presque toujours.
 - **Q2 — les évaluateurs supposent `content: str`.** Certains providers renvoient
   une liste de blocs → `AttributeError`. Fragile pour l'agnosticisme revendiqué.
 
-**Une fois les trois traités :** archiver l'audit dans `docs/archive/` avec son
+**Une fois les deux restants traités :** archiver l'audit dans `docs/archive/` avec son
 bandeau (règle de [`docs/archive/README.md`](docs/archive/README.md)) — il devient
 un instantané daté, pas une liste de tâches.
 

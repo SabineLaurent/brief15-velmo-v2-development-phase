@@ -84,6 +84,71 @@ Trois pièces :
   le bot est muet, pas en train de réfléchir. Répondre reviendrait à parler
   par-dessus la conseillère sur son propre dossier.
 
+---
+
+## 3 bis. QUAND escalader — le critère, et pourquoi il a changé le déclencheur
+
+Le correctif ci-dessus règle *ce qui se passe* à l'escalade. Il ne disait rien de
+*quand elle part* — et le routeur la déclenchait au premier « je veux un humain »,
+**avant toute tentative**. Or :
+
+> **Un agent de support IA existe pour alléger les tâches humaines qui n'ont pas
+> besoin d'un humain** : les demandes basiques, répétées, où personne n'apporte de
+> valeur ajoutée à la résolution.
+
+Escalader sans avoir essayé est donc un **échec du produit**, pas une politesse.
+Et l'inverse est vrai aussi : faire patienter derrière trois tentatives de bot un
+client qui envoie une mise en demeure ne soulage personne non plus. La règle
+opérationnelle est symétrique :
+
+> **Escalader exactement quand un humain apporte de la valeur — ni moins, ni plus.**
+
+⚠️ Ce critère a d'autant plus de poids que le drapeau `handled_by_human` **coupe le
+bot pour de bon** : le correctif de C1 a *augmenté le coût d'un faux positif*. Un
+déclencheur trop prompt n'était plus seulement inélégant, il confisquait le fil.
+
+### Le défaut structurel : le routeur décide sans information
+
+Le routeur ne voit **que le message**. Or savoir si un humain est nécessaire dépend
+de ce que le bot aurait trouvé — la FAQ répond-elle ? l'outil commande donne-t-il le
+statut ? — et cette information n'existe qu'**après** l'exécution de la branche
+support. On demandait à un classificateur de trancher une question pas encore
+décidable.
+
+### La correction : l'escalade devient une ISSUE, pas une classification d'entrée
+
+| Chemin | Qui décide | Quand |
+|---|---|---|
+| `escalate` (route du routeur) | le routeur, sur le message seul | **uniquement** l'urgence réelle : litige formel, menace, détresse |
+| `request_human_handoff` (**outil**) | le modèle de la branche support, **après** avoir cherché | il a tenté et ne peut pas ; le client insiste après une offre d'aide ; la décision demande une autorité |
+
+L'outil renvoie un `Command(update=…)` qui pose `handled_by_human` — mécanisme
+vérifié dans la doc LangGraph avant d'être écrit : `ToolNode` propage la mise à jour,
+à condition d'inclure un `ToolMessage` portant le `tool_call_id`.
+
+**Le bénéfice qu'on sous-estime :** le dossier part avec son **contexte**. Mesuré en
+live, un ticket réellement produit par l'outil :
+
+```
+Sujet : Handoff (agent-requested): contestation d'un prélèvement non
+        autorisé de 340 € nécessitant une validation
+Corps : Le client conteste un prélèvement de 340 € qu'il affirme n'avoir jamais
+        autorisé. J'ai consulté la FAQ : toute demande de remboursement
+        supérieure à 50 € doit être validée par un conseiller…
+```
+
+Dans un vrai service, le coût humain d'un dossier n'est pas de le **prendre**, c'est
+de le **comprendre**. Un handoff sans contexte fait payer deux fois.
+
+### La porte de sortie
+
+`human_takeover` annonce toujours le chemin du retour (« répondez *reprendre* ») et
+le reconnaît **par regex — zéro appel LLM**. Reprendre la main **ne clôt pas le
+dossier** : la conseillère le garde, le bot se contente de répondre au reste. Une
+décision faillible doit être réversible ; sinon la prudence devient une confiscation.
+
+### Le câblage
+
 L'arête d'entrée (`entry_route`) tranche dans cet ordre : *input refusé* → `END`
 (un attaquant n'a pas droit à un accusé de réception) ; *dossier chez un humain* →
 `human_takeover` ; sinon → `router`. Elle est câblée **indépendamment du kill
@@ -128,10 +193,13 @@ nulle part en prod** — le fil reste le même, c'est le *statut* qui change.
   possible ; il ne la remplace pas.
 - **Rattacher les messages d'attente au ticket.** Ils sont aujourd'hui dans le
   checkpointer (donc lisibles), pas dans le corps du dossier.
-- **La sortie du takeover.** Rien ne remet `handled_by_human` à `False` : une fois
-  le dossier confié, le bot ne reprend jamais la main sur ce fil. C'est le
-  comportement **prudent** et c'est voulu tant qu'aucun humain ne peut clore le
-  dossier — la Phase 11 (statuts + clôture) est ce qui débloquera la reprise.
+- **La reprise à l'initiative du bot.** Le client peut reprendre la main
+  (« reprendre ») ; le bot, lui, ne se ré-attribue jamais un dossier tout seul —
+  et ne le fera pas tant que personne ne peut **clore** un dossier (Phase 11).
+- **La qualité du déclencheur ne se mesure pas encore.** Le taux de déflexion
+  (part des conversations résolues sans humain) est LA métrique de cet agent ;
+  le dataset d'éval porte maintenant les deux cas limites (`deflect-human-request`
+  et `escalate-formal-dispute`), mais pas encore le taux lui-même.
 
 ---
 
