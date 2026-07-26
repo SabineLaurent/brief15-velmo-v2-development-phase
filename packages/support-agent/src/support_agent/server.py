@@ -108,6 +108,22 @@ def _resolve_user_id(request: ChatRequest) -> str:
     return request.user_id or DEMO_USER_ID
 
 
+def _header_bytes(value: str | None) -> bytes:
+    """Recover the raw bytes of a header value Starlette decoded as latin-1.
+
+    A missing header becomes `b""`, which simply fails the comparison — no
+    special case, no early return, one single rejection path.
+    """
+    if value is None:
+        return b""
+    try:
+        return value.encode("latin-1")
+    except UnicodeEncodeError:
+        # Not reachable through HTTP (latin-1 round-trips every decoded header),
+        # but a direct in-process call could pass anything: never let it raise.
+        return value.encode("utf-8")
+
+
 async def require_api_key(
     settings: Annotated[Settings, Depends(get_settings)],
     x_api_key: Annotated[str | None, Header()] = None,
@@ -120,6 +136,13 @@ async def require_api_key(
 
     `compare_digest` instead of `==`: a plain comparison returns as soon as two
     bytes differ, so its duration leaks how much of the key was guessed right.
+
+    The comparison is done on BYTES, not on `str`: `compare_digest` raises
+    `TypeError` on a `str` holding non-ASCII characters, and Starlette decodes
+    header values as latin-1 — so a single byte >= 0x80 in `X-API-Key` used to
+    turn a plain 401 into a 500 (an unauthenticated caller could raise a stack
+    trace at will). Comparing what the wire actually carried removes the whole
+    class of failure.
     """
     if settings.api_allow_unauthenticated:
         return
@@ -130,7 +153,9 @@ async def require_api_key(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Server misconfigured: no API key set.",
         )
-    if not x_api_key or not secrets.compare_digest(x_api_key, settings.api_key):
+    if not secrets.compare_digest(
+        _header_bytes(x_api_key), settings.api_key.encode("utf-8")
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid X-API-Key header.",

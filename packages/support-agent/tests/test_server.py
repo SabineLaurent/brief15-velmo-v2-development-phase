@@ -141,6 +141,39 @@ def test_chat_with_wrong_key_is_rejected(client: TestClient) -> None:
     assert response.status_code == 401
 
 
+def test_chat_with_a_non_ascii_key_is_rejected_not_crashed() -> None:
+    """A wrong key must always be a 401, whatever bytes it is made of.
+
+    Starlette decodes headers as latin-1, and `secrets.compare_digest` REFUSES a
+    `str` with non-ASCII characters: a single byte >= 0x80 used to raise inside
+    the dependency and surface as a 500 — an unauthenticated caller could produce
+    a stack trace on demand. The header must be sent as BYTES: httpx rejects the
+    `str` form, which is exactly why this case had never been exercised.
+    """
+    with TestClient(server.app, raise_server_exceptions=False) as raw_client:
+        response = raw_client.post(
+            "/chat",
+            json={"message": "Bonjour"},
+            headers={"X-API-Key": "clé".encode()},
+        )
+    assert response.status_code == 401
+
+
+def test_a_legitimate_non_ascii_key_still_authenticates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fix must not degrade into "reject anything non-ASCII"."""
+    _use_settings(monkeypatch, api_key="clé-du-service", api_allow_unauthenticated=False)
+
+    with TestClient(server.app) as raw_client:
+        response = raw_client.post(
+            "/chat",
+            json={"message": "Bonjour"},
+            headers={"X-API-Key": "clé-du-service".encode()},
+        )
+    assert response.status_code == 200
+
+
 def test_empty_message_is_rejected_before_the_agent(client: TestClient) -> None:
     """Validation belongs at the door: an empty message must not cost an LLM call."""
     response = client.post(
