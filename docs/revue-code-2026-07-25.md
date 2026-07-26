@@ -31,11 +31,11 @@ tient réellement (aucune instanciation de provider hors de `llm/factory.py`), l
 **Trois défauts de correction** sortent de la revue, tous sur des chemins **normaux**
 (pas des cas limites), et aucun n'est couvert par les trous déjà assumés :
 
-| # | Sévérité | Le problème en une ligne |
-|---|---|---|
-| **C1** | 🔴 haute | Une escalade **condamne le fil définitivement** via HTTP : plus aucun message ne sera jamais traité. |
-| **C2** | 🔴 haute | Le garde de sortie **caviarde les adresses de contact de la boutique**, qui sont la réponse attendue de deux fiches FAQ. |
-| **C3** | 🟠 moyenne | Une clé d'API **non-ASCII** rend `500` au lieu de `401`. |
+| # | Sévérité | Le problème en une ligne | État |
+|---|---|---|---|
+| **C1** | 🔴 haute | Une escalade **condamne le fil définitivement** via HTTP : plus aucun message ne sera jamais traité. | ⬜ ouvert (décision de conception, cf. « Suite proposée ») |
+| **C2** | 🔴 haute | Le garde de sortie **caviarde les adresses de contact de la boutique**, qui sont la réponse attendue de deux fiches FAQ. | ✅ corrigé (2026-07-26) |
+| **C3** | 🟠 moyenne | Une clé d'API **non-ASCII** rend `500` au lieu de `401`. | ✅ corrigé (2026-07-26) |
 
 Le point commun de C1 et C2 : dans les deux cas, un mécanisme **correct dans son
 principe** (la pause human-in-the-loop, la rédaction de PII) est appliqué **sans
@@ -129,7 +129,7 @@ escalade » : le trou actuel est précisément celui qu'aucun test à un seul to
 
 ---
 
-## 🔴 C2 — Le garde de sortie caviarde les adresses de la boutique
+## 🔴 C2 — Le garde de sortie caviarde les adresses de la boutique ✅ CORRIGÉ
 
 **Sévérité :** haute · **Catégorie :** correction fonctionnelle (qualité de réponse) · **Confiance :** 10/10
 **Fichiers :** `guardrails/output_guard.py:90` (`apply_pii_policy` sans politique dédiée)
@@ -187,9 +187,36 @@ adresse *de la boutique*, pas une adresse *du client*.
 Et dans les deux cas : un test qui vérifie qu'une réponse citant `contact-pro.md`
 **conserve** `pro@velmo.example`.
 
+### ✅ Correctif appliqué (2026-07-26)
+
+**Première option retenue** (allowlist), pas la seconde : passer `email → allow` en
+sortie aurait rendu au garde *toute* sa permissivité sur l'entité la plus courante,
+alors que le défaut portait sur **deux adresses connues**. On a préféré apprendre au
+garde **quel est son domaine** plutôt que lui retirer la règle.
+
+- **Mécanisme :** `DomainAllowlistDetector` (`guardrails/pii.py`) — un **décorateur**
+  qui reste un `PIIDetector`, donc il se compose dans le `CompositeDetector` existant
+  sans toucher ni à `apply_pii_policy`, ni au nœud, ni au graphe. Il retire les
+  matches `email` dont le domaine est le nôtre ; le reste passe inchangé.
+- **Asymétrie assumée :** branché **uniquement** dans `build_output_guard`. Côté
+  entrée, on continue de tout caviarder — le but y est de ne rien stocker ni
+  transmettre, et aucune adresse entrante n'a besoin de survivre.
+- **Configuration, pas code en dur :** `GUARDRAILS_OWNED_EMAIL_DOMAINS`
+  (`config.py`, défaut `velmo.example`, documenté dans `.env.example`). Vide =
+  comportement d'avant.
+- **Sous-domaines vs. sosies :** `support.velmo.example` est à nous,
+  `velmo.example.attacker.com` ne l'est pas — les deux cas sont testés.
+- **Tests (+4) :** l'adresse de la boutique **survit**, celle du client est
+  **toujours** caviardée par le même garde, le sosie l'est aussi. Le test
+  `test_guardrails.py:150` qui verrouillait le bug reste valide : il utilise un
+  garde **sans** allowlist, donc il asserte désormais le bon invariant (« sans
+  domaine déclaré, tout est caviardé »).
+- **Contre-épreuve :** le même texte, passé dans un garde sans allowlist, redonne
+  `[REDACTED_EMAIL]`. Le correctif est bien ce qui change le résultat.
+
 ---
 
-## 🟠 C3 — Une clé d'API non-ASCII rend 500 au lieu de 401
+## 🟠 C3 — Une clé d'API non-ASCII rend 500 au lieu de 401 ✅ CORRIGÉ
 
 **Sévérité :** moyenne · **Catégorie :** robustesse du chemin d'authentification · **Confiance :** 10/10
 **Fichier :** `server.py:133` (`secrets.compare_digest`)
@@ -229,6 +256,23 @@ est sur le chemin d'auth **en entrée**, ce qui n'avait pas été relevé.
 Écarter le cas avant la comparaison — `if not x_api_key or not x_api_key.isascii() or
 not secrets.compare_digest(...)` — ou comparer des `bytes` (`.encode("latin-1")` des deux
 côtés), ce qui supprime la classe entière de problème.
+
+### ✅ Correctif appliqué (2026-07-26)
+
+**Deuxième option retenue** (comparer des `bytes`), pas le garde `isascii()` : ce
+dernier écarte le symptôme, la comparaison en octets supprime la **classe** — et elle
+est d'ailleurs plus juste, puisque le fil transporte des octets.
+
+- `_header_bytes()` (`server.py`) récupère les octets bruts que Starlette avait
+  décodés en latin-1 ; la clé configurée est encodée en UTF-8. Un en-tête **absent**
+  devient `b""` et échoue simplement la comparaison : **un seul chemin de rejet**,
+  plus de `not x_api_key or …` en amont.
+- **Tests (+2), tous les deux nécessaires :** l'en-tête envoyé en **octets bruts**
+  (`httpx` refuse la forme `str` — la raison pour laquelle le cas n'avait jamais été
+  vu) rend bien `401` ; et une clé **légitime** accentuée s'authentifie toujours,
+  pour que le correctif ne dégénère pas en « refuser tout ce qui n'est pas ASCII ».
+- **Contre-épreuve :** `compare_digest("clé", …)` sur ce que produit Starlette lève
+  toujours le `TypeError` d'origine ; la version en octets renvoie `False`.
 
 ---
 
@@ -326,9 +370,10 @@ Pour que la prochaine revue ne re-signale pas les mêmes choses.
 
 L'ordre suit le coût pour le client, pas la difficulté :
 
-1. **C2** d'abord : c'est le moins cher (une allowlist, un test) et il dégrade
-   **aujourd'hui** deux réponses de la FAQ, à chaque fois qu'elles sont demandées.
-2. **C3** ensuite : trois lignes, et ça ferme une classe entière de `500`.
+1. ~~**C2** d'abord~~ ✅ **fait le 2026-07-26** — allowlist de domaines propriétaires,
+   asymétrique (sortie seulement), + 4 tests dont le contre-exemple manquant.
+2. ~~**C3** ensuite~~ ✅ **fait le 2026-07-26** — comparaison en octets, + 2 tests.
+   Suite complète : **84 tests**, `ruff` clean.
 3. **C1** en discussion : il touche à ce que doit *devenir* l'escalade une fois l'agent
    derrière une API — donc il se décide avec l'étape 5 du déploiement, pas contre elle.
    Trancher d'abord la question de conception (reprise synchrone vs. escalade
