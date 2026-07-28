@@ -174,11 +174,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     2. Build the graph HERE, not on the first request. Building it costs the
        embeddings probe plus the whole FAQ index (~2.9 s measured on the 16-file
-       Velmo FAQ), and it runs in a worker thread so the event loop stays free.
-       Doing it at startup means
-       `/ready` can answer truthfully, and the first customer does not pay for it.
-       ⚠️ This is also what makes scale-to-zero expensive on Azure Container
-       Apps: every cold start re-indexes. See the plan doc, step 5.
+       Velmo FAQ, 4.4 s in a container), and it runs in a worker thread so the
+       event loop stays free. Doing it at startup means `/ready` can answer
+       truthfully, and the first customer does not pay for it.
+
+       The cost is per PROCESS, not per request: `get_agent` is `lru_cache`d, so
+       one start = one re-index, and a question only embeds the question.
+
+       ⚠️ Two consequences on Azure App Service (the deployment target since
+       2026-07-28 — the plan doc, step 5):
+         - uvicorn opens its port only AFTER this function returns, so a stalled
+           dependency here does not surface as a readable error: App Service
+           reports "container didn't respond to HTTP pings on port 8000", which
+           names nothing. Whatever fails here must say why in the log.
+         - the App Service Plan keeps machines allocated, so there is no
+           scale-to-zero and this is a per-deployment cost, not a per-request
+           risk. That is a reprieve, not a fix: invariant #5 ("the app never
+           indexes in production") is still violated, and it bites again past one
+           instance, where each would index the same FAQ for itself.
     """
     settings = get_settings()
 
@@ -197,8 +210,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     started = time.perf_counter()
     await asyncio.to_thread(get_agent)
     app.state.ready = True
-    # This duration is not decoration: it is exactly what a cold start costs, so
-    # it is the number that decides `minReplicas` on Azure Container Apps.
+    # This duration is not decoration: it is exactly what a cold start costs, and
+    # it is the number to compare against App Service's start-up budget
+    # (WEBSITES_CONTAINER_START_TIME_LIMIT, 230 s by default). Log it rather than
+    # assume it: the day an ingestion step gets slower, this line is the warning.
     logger.info("Agent warmed up in %.2f s; ready to serve.", time.perf_counter() - started)
     yield
 
