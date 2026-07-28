@@ -12,10 +12,13 @@ from langchain.chat_models import init_chat_model
 from langchain_core.language_models import BaseChatModel
 
 from support_agent.config import Settings, get_settings
+from support_agent.llm._extras import provider_package_required
 
 # Map our friendly `LLM_PROVIDER` values to the `model_provider` identifiers
 # understood by LangChain's `init_chat_model`. Add a line here to support a new
-# first-class provider — nothing else in the app needs to change.
+# first-class provider — and add its optional-dependency extra to
+# `pyproject.toml` + `llm/_extras.py` in the SAME commit, otherwise this map
+# advertises a provider the install cannot actually build.
 _PROVIDER_ALIASES: dict[str, str] = {
     "mistral": "mistralai",
     "groq": "groq",
@@ -56,12 +59,16 @@ def _build_chat_model(
     # Case 1 — first-class provider: delegate to init_chat_model. Credentials are
     # auto-discovered from standard env vars (MISTRAL_API_KEY, GROQ_API_KEY, ...).
     if provider in _PROVIDER_ALIASES:
-        return init_chat_model(
-            model=model,
-            model_provider=_PROVIDER_ALIASES[provider],
-            temperature=settings.llm_temperature,
-            **robustness,
-        )
+        # The guard wraps the call because THIS is where the integration package
+        # gets imported: a provider whose extra was not installed fails here, and
+        # must say so in terms of the extra, not of a missing module.
+        with provider_package_required(provider):
+            return init_chat_model(
+                model=model,
+                model_provider=_PROVIDER_ALIASES[provider],
+                temperature=settings.llm_temperature,
+                **robustness,
+            )
 
     # Case 2 — any OpenAI-compatible endpoint (self-hosted vLLM/Ollama, a third
     # party, or Foundry exposed as OpenAI). Just point base_url at it.

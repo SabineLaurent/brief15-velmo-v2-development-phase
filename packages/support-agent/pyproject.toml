@@ -4,41 +4,111 @@ version = "0.1.0"
 description = "Agent IA de support client, agnostique au LLM (LangChain + LangGraph + LangSmith)"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
+# ⚠️ Alphabetical order is uv's, not ours: `uv add` re-sorts this list and can
+# detach a comment from the line it describes. When adding a dependency, check
+# that the comment above it still points at the right thing.
+#
+# FLOOR POLICY — every `>=` here is the version we ACTUALLY test (the one in
+# `uv.lock`), not the oldest one that might work. This is an application, not a
+# library: nobody installs it next to an older LangChain, so a floor admitting
+# untested versions buys no compatibility — it only lies about what was verified.
+# The floors used to drift far below reality (`langchain>=0.3` while running
+# 1.3.13 — a different API generation entirely, where `langchain.chat_models` and
+# `langchain.tools.ToolRuntime` do not even exist).
+# Consequence: after `uv lock --upgrade`, raise these to match. `make check`
+# validates the pair (manifest, lock) together — never one alone.
 dependencies = [
     # Cœur LangChain / LangGraph
-    "langchain>=0.3",
-    "langchain-mistralai>=1.1.6",
+    "langchain>=1.3.13",
+    # DECLARED because we IMPORT it, in ~9 modules (factory.py, api.py,
+    # graph/nodes.py, knowledge/ingest.py...). It arrives transitively via
+    # langchain anyway, but `BaseChatModel` — the type that IS our LLM-agnosticism
+    # contract — must not depend on someone else's dependency choices to exist.
+    "langchain-core>=1.5.2",
+    # NOT optional, unlike the other provider integrations below: `llm/embeddings.py`
+    # needs it for the `openai_compatible` embeddings path, which is the current
+    # default for BOTH the FAQ (RAG) and long-term memory.
     "langchain-openai>=1.3.5",
     "langchain-text-splitters>=1.1.2",
-    "langgraph>=1.0",
-    "langgraph-checkpoint-postgres>=2.0",
+    "langgraph>=1.2.9",
+    "langgraph-checkpoint-postgres>=3.1.0",
     "langgraph-checkpoint-sqlite>=3.1.0",
-    "langsmith>=0.1",
-    # Config typée depuis .env
+    "langsmith>=0.10.3",
+    # ⚠️ INVISIBLE dependency — no `import numpy` anywhere in this package, and
+    # removing it still breaks the agent at RUNTIME, on the first search:
+    #   - `langchain_core.vectorstores.utils.cosine_similarity` raises ImportError
+    #     without it -> InMemoryVectorStore.similarity_search (knowledge/ingest.py)
+    #   - `langgraph.store.memory` imports it -> InMemoryStore(index=...) (memory/long_term.py)
+    # Neither upstream package declares it, so WE must. Do not "clean it up".
+    # ⚠️ The one floor deliberately BELOW the newest locked version: numpy 2.5+
+    # requires Python >=3.12, while this package supports 3.11. The lock therefore
+    # holds BOTH (2.4.6 for the 3.11 split, 2.5.1 above) — raising this floor would
+    # make the 3.11 resolution unsatisfiable.
     "numpy>=2.4.6",
+    # Imported directly by `memory/postgres_conn.py` (the shared ConnectionPool).
+    "psycopg-pool>=3.3.1",
     # The `[binary]` extra is NOT optional in practice: plain `psycopg` is only a
     # wrapper and needs a libpq to talk to, which neither a dev machine nor a
     # `python:slim` image has by default ("no pq wrapper available" at import).
     # The extra ships a prebuilt libpq inside the wheel, so nothing system-level
     # has to be installed in the container.
-    "psycopg[binary]>=3.2",
-    "pydantic-settings>=2.0",
-    "python-dotenv>=1.0",
-    # NOTE : les intégrations providers (langchain-mistralai, langchain-groq,
-    # langchain-google-genai, langchain-openai, langchain-azure-ai...) seront
-    # ajoutées au fil des phases, selon le provider choisi. Ex :
-    #   uv add langchain-mistralai
-    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.3.4",
+    # Imported directly by `server.py` (request/response models) and
+    # `graph/nodes.py` (structured output schemas).
+    "pydantic>=2.13.4",
+    # Config typée depuis .env
+    "pydantic-settings>=2.14.2",
+    "python-dotenv>=1.2.2",
+    # The demo shop schema behind the `actions/` port (actions/sql/schema.py).
+    "sqlalchemy>=2.0.51",
 ]
 
+[project.optional-dependencies]
 # The HTTP exposure (deployment step 1) is OPTIONAL on purpose: the CLI agent and
 # the Chainlit shell import `stream_reply` in-process and have no use for a web
 # server. Keeping it an extra means the container image installs it (`--extra
 # server`) while `make run` stays lean. See docs/plan-deploiement-2026-07-25.md.
-[project.optional-dependencies]
 server = [
-    "fastapi>=0.115",
-    "uvicorn>=0.30",
+    "fastapi>=0.139.2",
+    "uvicorn>=0.51.0",
+]
+
+# ⭐ ONE EXTRA PER PROVIDER — LLM-agnosticism expressed in the packaging.
+#
+# Why: `init_chat_model` resolves a provider by IMPORTING its integration package
+# at call time, so a provider listed in `_PROVIDER_ALIASES` (llm/factory.py) but
+# absent from this file is a config value that crashes on use. Before this split,
+# `langchain-mistralai` was a hard dependency EVERY deployment paid for even
+# though nothing imports it, while `groq` / `google_genai` / `azure_ai` were
+# advertised in `.env.example` and installed nowhere — an ImportError waiting for
+# whoever flipped LLM_PROVIDER. Both halves of that asymmetry are the same bug:
+# the dependency set and the alias map disagreed.
+#
+# Rule: adding a line to `_PROVIDER_ALIASES` means adding its extra HERE, in the
+# same commit. `llm/factory.py` turns a missing one into a message naming the
+# extra to install, so the failure is a config error, never a stack trace.
+#
+# Install what you actually run:  uv sync --extra groq
+# Note `openai` has no extra: `langchain-openai` is a base dependency (embeddings).
+mistral = [
+    "langchain-mistralai>=1.1.6",
+]
+groq = [
+    "langchain-groq>=1.1.3",
+]
+google = [
+    # Needs langchain-core>=1.5.1 — the reason the core floor above is not lower.
+    "langchain-google-genai>=4.3.2",
+]
+# ⚠️ NOT the latest (1.2.8 exists, 2026-07-28): every version above 1.2.3 depends on
+# `azure-ai-contentunderstanding>=1.2.0b2`, a PRE-RELEASE. uv refuses pre-releases
+# by default, and `--prerelease=allow` is a WORKSPACE-WIDE switch — it would loosen
+# resolution for all 199 packages to satisfy a provider nobody currently uses.
+# 1.2.3 is the newest version installable under normal rules. Re-check when
+# azure-ai-contentunderstanding 1.2.0 goes stable; until then this pin is a
+# deliberate floor, not neglect.
+azure = [
+    "langchain-azure-ai>=1.2.3",
 ]
 
 [build-system]

@@ -20,6 +20,17 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
 - Nœuds, tools et couture prennent leur modèle par `get_chat_model()` — **jamais**
   de `ChatOpenAI(...)`/`ChatMistralAI(...)` en dur ailleurs.
 - Changer de provider = une variable `.env`, pas du code.
+- ⭐ **Un provider = un extra** (`[project.optional-dependencies]`) : `mistral`,
+  `groq`, `google`, `azure`. Un install ne paie pas les SDK qu'il n'utilise pas
+  (`uv sync --extra groq`). Exception : `langchain-openai` est une dépendance **de
+  base**, car `llm/embeddings.py` en dépend pour le chemin `openai_compatible`,
+  défaut actuel de la FAQ **et** de la mémoire long terme.
+- ⚠️ **Règle de non-dérive** : ajouter une entrée à un `_PROVIDER_ALIASES`
+  (`llm/factory.py` ou `llm/embeddings.py`) oblige à déclarer son extra dans
+  `pyproject.toml` **et** dans `llm/_extras.py`, dans le MÊME commit. Sinon on
+  annonce dans `.env` un provider que l'install ne peut pas construire.
+  `tests/test_llm_extras.py` rend cet invariant **exécutable** : la dérive casse
+  un test, pas un déploiement.
 
 ## La couture (`api.py`) — la seule chose qu'un front voit
 

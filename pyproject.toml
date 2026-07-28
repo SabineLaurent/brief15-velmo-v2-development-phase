@@ -7,15 +7,18 @@ members = ["packages/*"]
 
 # Outillage de dev partagé par tout le workspace (PEP 735).
 [dependency-groups]
+# Floors = the versions actually used (see the FLOOR POLICY note in
+# packages/support-agent/pyproject.toml). `pytest>=8.0` was the worst offender:
+# CI ran 9.1.1, so the floor allowed a MAJOR version nothing ever tested.
 dev = [
-    "pytest>=8.0",
-    "ruff>=0.6",
+    "pytest>=9.1.1",
+    "ruff>=0.15.21",
     # Tests de l'exposition HTTP : le `TestClient` de FastAPI a besoin d'un client
     # HTTP. Starlette réclame désormais `httpx2` (avec `httpx`, il émet une
     # StarletteDeprecationWarning) — on prend donc le rail à jour directement.
     # Distinction volontaire : l'extra `server` de support-agent = ce que la PROD
     # installe ; ce groupe dev = ce que MA machine a en plus pour tester.
-    "httpx2>=2.9",
+    "httpx2>=2.9.1",
     "support-agent[server]",
 ]
 
