@@ -18,7 +18,7 @@
 | 3 | **Déploiement conteneurisé** (Docker → Azure), 5 étapes | l'agent doit devenir un **service appelable** — objectif de livraison de la formation | 🚧 |
 | 3bis | Revue de code — **C2** (adresses boutique caviardées) · **C3** (500 au lieu de 401) | dégradaient des réponses **aujourd'hui** ; petits, faits avant l'étape 5 | ✅ |
 | 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade | ✅ |
-| 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | ⬜ |
+| 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | 🚧 **la garde ✅** (`.github/workflows/ci.yml`) · **l'image ⬜** (à l'étape 5, avec l'ACR) |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 5 | Reliquat d'audit — I2 · Q2 (**Q1 fait**) | derniers findings ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |

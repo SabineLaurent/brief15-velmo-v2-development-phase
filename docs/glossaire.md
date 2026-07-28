@@ -44,6 +44,29 @@ bon LLM depuis `.env` → c'est le cœur concret de l'agnosticisme.
 Le **plan B automatique** : si le fournisseur principal est en panne, on bascule
 sur un secondaire sans planter le tour. *(Littéral. « se rabattre sur ».)*
 
+## flaky (test *capricieux*)
+
+*(Litt. « qui s'écaille », de* flake*, l'écaille — comme un vernis qui se
+craquèle.)* Un test **flaky** passe ou échoue **de façon imprévisible sur un code
+identique** : rien n'a changé entre deux exécutions, seul le résultat change.
+
+Le vrai coût n'est pas le temps perdu à chercher un bug inexistant, c'est
+l'apprentissage qu'il installe : « ah, c'est encore lui, relance ». Le jour où le
+rouge signale une vraie régression, le réflexe acquis est de relancer. **Un test
+flaky ne casse pas la CI, il casse la confiance dans la CI.**
+
+Causes classiques : **non-déterminisme** (LLM, `random`, horloge), **dépendance
+réseau**, **concurrence** entre tests, **état partagé** (d'où le « passe seul,
+échoue en groupe »).
+
+Ici, c'est structurel et assumé : `test_eval.py` interroge un **vrai LLM**. Même à
+`LLM_TEMPERATURE=0`, un modèle n'est pas strictement déterministe, et l'assertion
+porte sur un jugement (« l'agent refuse-t-il honnêtement ? »), pas sur un calcul.
+Ce ne sont donc pas des tests unitaires mais des **évaluations** : leur place est
+dans LangSmith via `make eval`, où on lit des **taux**, pas dans une gate binaire.
+La CI (`.github/workflows/ci.yml`) les skippe faute de credentials sur le runner —
+c'est voulu, pas un oubli.
+
 ## hop
 
 *(Litt. « saut / bond ».)* Un **aller-retour complet vers le LLM** : ton code

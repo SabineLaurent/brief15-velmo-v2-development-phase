@@ -1,0 +1,101 @@
+# CI — la garde du dépôt : ce qui doit rester vrai à chaque push.
+#
+# Chantier 3quater de TODO_priorities.md, moitié « LA GARDE ». La moitié « l'image »
+# (build amd64 + push sur l'ACR) viendra dans un workflow SÉPARÉ à l'étape 5 du
+# déploiement : elle a besoin d'un ACR qui n'existe pas encore, et de secrets Azure.
+# Écrire aujourd'hui du YAML contre une cible inexistante ne prouverait rien.
+# Détail : docs/plan-deploiement-2026-07-25.md, étape 5.
+#
+# 📌 Règle à tenir quand ce second workflow arrivera : la GARDE tourne partout
+# (toute branche), la PUBLICATION ne tourne que sur `main`. Vérifier est gratuit
+# et doit être omniprésent ; pousser une image sur le registre de prod est un
+# effet de bord, et il n'a rien à faire depuis une branche de feature.
+#
+# ⭐ Ce que cette CI garde : la mécanique DÉTERMINISTE — factory LLM, guardrails,
+# couture, serveur HTTP, persistance. C'est-à-dire tout ce qui doit se comporter
+# pareil à chaque exécution.
+#
+# ⚠️ Ce qu'elle ne garde PAS, volontairement : la QUALITÉ des réponses du modèle.
+# Les 7 cas de test_eval.py se skippent d'eux-mêmes faute de credentials sur le
+# runner (`_has_llm_credentials`), et c'est le bon comportement : ce sont des
+# évaluations non déterministes — un même cas peut passer puis échouer sans qu'une
+# ligne bouge (« flaky », cf. docs/glossaire.md). Leur place est dans LangSmith via
+# `make eval`, où on lit des TAUX, pas dans une gate binaire. Y brancher une clé LLM
+# en secret GitHub importerait cette instabilité dans la garde — et le premier
+# réflexe appris serait « c'est encore lui, relance », ce qui tue la CI.
+
+name: CI
+
+# Le modèle de branches du projet : `feature` → `dev` → `main`.
+#   feature  la branche de travail en cours
+#   dev      l'intégration : on y fusionne la feature dès qu'elle est prête
+#   main     la mise en production
+#
+# La garde doit donc mordre AUX DEUX ENDROITS, et pour deux raisons distinctes.
+on:
+  # 1) Sur TOUTES les branches, feature comprise. C'est le retour le plus utile :
+  #    il arrive pendant que tu écris, pas au moment de fusionner. Une CI qui ne
+  #    parle qu'au merge découvre les problèmes quand ils coûtent le plus cher.
+  push:
+    branches: ["**"]
+
+  # 2) Sur les PR visant `dev` et `main` — et ce n'est PAS un doublon du point 1.
+  #    Un push teste TA branche telle quelle. Une PR teste le RÉSULTAT DE LA
+  #    FUSION (GitHub construit un merge commit head+base). Si `dev` a avancé
+  #    pendant que tu travaillais, la fusion peut casser alors que les deux
+  #    branches sont vertes séparément — un conflit sémantique, invisible à git.
+  #    C'est exactement le risque du point de passage feature → dev.
+  pull_request:
+    branches: [dev, main]
+
+# Un seul run utile par branche : un nouveau push annule celui encore en cours.
+# Sans ça, trois commits rapprochés font tourner trois fois la même vérification,
+# et c'est le dernier qui compte de toute façon.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Moindre privilège : ce workflow LIT le dépôt et n'écrit rien. Sans ce bloc, le
+# token fourni au job peut être bien plus permissif selon les réglages du compte.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: lint + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # Note : les actions sont épinglées par TAG (lisible, se met à jour tout
+      # seul dans une version majeure). L'option durcie est d'épingler par SHA
+      # complet — un tag reste mutable, donc repointable par son auteur. À faire
+      # le jour où ce dépôt manipule des secrets de production.
+      - uses: actions/checkout@v7
+
+      - name: Installer uv
+        uses: astral-sh/setup-uv@v9
+        with:
+          # La version CIBLE du projet (CLAUDE.md), pas « celle du runner ». Le
+          # runner en embarque plusieurs ; laisser le hasard choisir reviendrait à
+          # tester une version que personne ne fait tourner.
+          python-version: "3.12"
+          # Cache de uv, invalidé par le lockfile : les dépendances ne se
+          # retéléchargent que quand elles changent vraiment.
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      # `--locked` ÉCHOUE si uv.lock n'est plus cohérent avec les pyproject.toml.
+      # C'est un contrôle à part entière, pas une précaution : en local, `uv run`
+      # re-résout en silence, donc un `uv add` non commité passe inaperçu — et
+      # casserait le build de l'image, où `uv sync --frozen` n'a pas ce luxe.
+      # Rien d'autre n'est ajouté ici : la CI installe EXACTEMENT ce que
+      # `make install` installe sur ta machine.
+      - name: Installer les dépendances (verrouillées)
+        run: uv sync --locked
+
+      # Porte d'entrée unique (CLAUDE.md) : la CI lance exactement la commande que
+      # tu lances en local. Si les deux divergent, le vert de la CI ne veut plus
+      # rien dire pour toi — et ton vert local ne veut plus rien dire pour elle.
+      - name: make check (ruff + pytest)
+        run: make check
