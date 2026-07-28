@@ -39,6 +39,7 @@ from support_agent.graph.state import Route, SupportState
 from support_agent.guardrails import InputGuard, OutputGuard, ToolGuard
 from support_agent.llm import FALLBACK_EXCEPTIONS
 from support_agent.memory import AgentContext
+from support_agent.memory.compaction import format_summary
 from support_agent.memory.episodic import (
     format_episodes,
     recall_episodes,
@@ -266,7 +267,11 @@ def make_answer(
     chain = _with_fallbacks(model, list(fallbacks))
 
     def answer(state: SupportState) -> dict:
-        messages = [SystemMessage(ANSWER_SYSTEM_PROMPT), *state["messages"]]
+        # R4: on a compacted conversation the early turns are gone from
+        # `messages`; the summary carries them. Appended AFTER the stable prompt,
+        # like the episodic block, to keep the cache prefix intact.
+        system_prompt = ANSWER_SYSTEM_PROMPT + format_summary(state.get("summary") or "")
+        messages = [SystemMessage(system_prompt), *state["messages"]]
         try:
             reply = chain.invoke(messages)
             return {"messages": [reply]}
@@ -290,6 +295,12 @@ SUPPORT_SYSTEM_PROMPT = (
     "`search_memories` when the user refers to something they told you before "
     "(their name, preferences, past orders), and call `save_memory` when they "
     "share a durable fact worth remembering across sessions. "
+    "When the customer asks you to FORGET something about them ('forget my order "
+    "number', 'delete what you know about my address'), call `forget_memory` with "
+    "their own words. It is their right and it is irreversible: never call it "
+    "unasked, and report exactly what was deleted — if it reports that nothing "
+    "matched, say you hold no such information instead of confirming a deletion "
+    "that did not happen. "
     "You can also take actions on the customer's behalf: call `get_order_status` "
     "to look up a specific order (ask for the order id if missing), and "
     "`create_ticket` to open a human follow-up when the FAQ cannot resolve the "
@@ -348,6 +359,9 @@ def make_support_model(
 
     def support_model(state: SupportState) -> dict:
         system_prompt = SUPPORT_SYSTEM_PROMPT
+        # R4: the compacted early turns. First of the two appended blocks so the
+        # order of the suffix stays stable across turns.
+        system_prompt += format_summary(state.get("summary") or "")
         if episodic is not None:
             # Appended AFTER the stable prompt, never before: this block changes
             # on every turn, and a variable PREFIX invalidates the provider's

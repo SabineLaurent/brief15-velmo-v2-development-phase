@@ -11,27 +11,43 @@ never read another's data. The `user_id` comes from the runtime context (see
 
 from __future__ import annotations
 
+import logging
 import uuid
 
 from langchain.tools import ToolRuntime, tool
 from langchain_core.tools import BaseTool
 
 from support_agent.guardrails import ToolGuard
-from support_agent.memory.long_term import AgentContext
+from support_agent.memory.long_term import AgentContext, memories_namespace
+from support_agent.memory.privacy import forget_user_memories
+
+logger = logging.getLogger(__name__)
+
+# Shared with `privacy.py` so the tools and the audit/erasure surface can never
+# read different namespaces (see `memories_namespace`).
+_namespace = memories_namespace
 
 
-def _namespace(user_id: str) -> tuple[str, str]:
-    """The per-user memory namespace. Isolation happens right here."""
-    return ("memories", user_id)
+def build_memory_tools(
+    tool_guard: ToolGuard | None = None, *, forget_min_score: float = 0.35
+) -> list[BaseTool]:
+    """Build the long-term memory tools: save, search, and FORGET.
 
-
-def build_memory_tools(tool_guard: ToolGuard | None = None) -> list[BaseTool]:
-    """Build the `save_memory` / `search_memories` long-term memory tools.
+    The third one is what makes the right to be forgotten (R5) reachable from the
+    conversation itself — "oublie mon numéro de commande" is a customer request,
+    not a back-office ticket, so the agent must be able to honour it in the turn.
+    The operator-side surface (audit dump, full art. 17 erasure) lives in
+    `memory/privacy.py`.
 
     Args:
         tool_guard: Optional Phase 12-C hardening applied to `save_memory` before
             it PERSISTS (field validation + PII masking, so raw PII is never
             written to the durable store). `None` disables it.
+        forget_min_score: the similarity a stored fact must reach before
+            `forget_memory` may delete it. The default mirrors `forget_min_score`
+            in `config.py`; the graph passes the configured value. It is a knob
+            because cosine similarity is not comparable across embedding models —
+            the measurement behind the default is recorded in `config.py`.
     """
 
     @tool
@@ -73,4 +89,44 @@ def build_memory_tools(tool_guard: ToolGuard | None = None) -> list[BaseTool]:
             return "No stored memory for this user yet."
         return "\n".join(f"- {item.value['text']}" for item in results)
 
-    return [save_memory, search_memories]
+    @tool
+    def forget_memory(what: str, runtime: ToolRuntime[AgentContext]) -> str:
+        """Permanently delete stored facts about the current user, on their request.
+
+        Use this ONLY when the user asks you to forget something they told you
+        ("forget my order number", "delete what you know about my address").
+        Describe what to forget in `what`, using their own words. Never call this
+        on your own initiative, and never to tidy up memory.
+
+        Deletion is irreversible. Report back exactly what was deleted, and say
+        so plainly when nothing matched — do not claim to have forgotten
+        something you did not find.
+        """
+        store = runtime.store
+        user_id = runtime.context.user_id
+
+        try:
+            deleted = forget_user_memories(
+                store, user_id, what, min_score=forget_min_score
+            )
+        except RuntimeError as error:
+            # `forget_user_memories` raises when a row survived its deletion. The
+            # customer must NOT be told their data is gone in that case.
+            logger.exception("Unverified deletion for user=%s", user_id)
+            return (
+                "I could not confirm the deletion, so I will not claim it worked. "
+                f"Please tell the customer it has been escalated. ({error})"
+            )
+
+        if not deleted:
+            return (
+                "Nothing close enough to that was stored, so nothing was deleted. "
+                "Tell the customer you hold no such information rather than "
+                "confirming a deletion."
+            )
+        # Echo the deleted text back so the model can be specific with the
+        # customer — this is the conversational half of R5's "verifiable".
+        lines = "\n".join(f"- {record.text}" for record in deleted)
+        return f"Deleted {len(deleted)} memory(ies), verified gone:\n{lines}"
+
+    return [save_memory, search_memories, forget_memory]

@@ -29,3 +29,9 @@ class SupportState(MessagesState):
     # REASSIGNED. The customer keeps writing into the same thread; the bot simply
     # stays quiet instead of blocking the graph (see docs/escalade.md).
     handled_by_human: bool
+    # Set by the `compact` node (R4): a running summary of the turns that no
+    # longer fit verbatim. It lives in the STATE rather than inside `messages`
+    # because it is not something anyone said — attributing it to the customer or
+    # to the agent would corrupt the transcript that `consolidate.py` and the
+    # audit surface both read. Empty on every conversation short enough to fit.
+    summary: str

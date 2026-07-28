@@ -3,11 +3,11 @@
 This is the "capot ouvert" replacement for `create_agent`: a `StateGraph` with
 named nodes and conditional edges we control ourselves.
 
-    START ─► guard_input ─┬─(blocked)─────────────────────────────────────────────► END
-                          ├─(human owns the case)─► human_takeover ─┐
-                          └─► router ─┬─(answer)──► answer ─────────┤
-                                      ├─(support)─► model ⇄ tools ──┼─► guard_output ─► close_turn ─► END
-                                      └─(escalate)► escalate ───────┘
+    START ─► guard_input ─┬─(blocked)──────────────────────────────────────────────► END
+                          ├─(human owns the case)──► human_takeover ─┐
+                          └─► compact ─► router ─┬─(answer)──► answer ┤
+                                                 ├─(support)─► model ⇄ tools ─┼─► guard_output ─► close_turn ─► END
+                                                 └─(escalate)► escalate ──────┘
 
 The `escalate` branch does NOT pause the graph: it files a ticket, sets
 `handled_by_human` and ends the turn. Every later message on that thread takes
@@ -20,6 +20,13 @@ before anything else sees the message; a refused message short-circuits to END.
 `guard_output` (Phase 12-B) screens every outgoing reply — redacts leaked
 PII/secrets, replaces a reply that echoes the system prompt — just before it
 leaves. Both are gated by the `GUARDRAILS_ENABLED` kill switch.
+
+`compact` (R4) is the context-window valve: past `COMPACT_AFTER_MESSAGES` it folds
+the oldest turns into `state["summary"]` and REMOVES them from the history, so
+neither the prompt nor the stored checkpoint grows without bound. It sits on the
+entry path — before the LLM nodes read the history — and costs one LLM call only
+on the turn that crosses the threshold. `COMPACT_AFTER_MESSAGES=0` removes the
+node, and the graph is then wired exactly as before.
 
 `close_turn` (Phase 14) is the write side of EPISODIC memory: it flags the thread
 as maybe-worth-learning-from, with one store upsert and no model call. The
@@ -74,12 +81,21 @@ from support_agent.memory import (
     get_checkpointer,
     get_store,
 )
+from support_agent.memory.compaction import make_compact
 
 
-# Destinations of the entry conditional edge. Declared explicitly (a `path_map`)
-# so the drawn graph — the diagram used to EXPLAIN this agent — shows these three
-# arrows and not one to every node.
-_ENTRY_PATHS = {END: END, "human_takeover": "human_takeover", "router": "router"}
+def _entry_paths(first_hop: str) -> dict:
+    """Destinations of the entry conditional edge, as an explicit `path_map`.
+
+    Declared explicitly so the drawn graph — the diagram used to EXPLAIN this
+    agent — shows these three arrows and not one to every node.
+
+    The map is what lets the R4 `compact` node slot in front of the router without
+    touching `entry_route`: a `path_map` maps the RETURNED value to a NODE name, so
+    `entry_route` keeps returning "router" while the arrow lands on "compact".
+    One less thing that has to know about the kill switch.
+    """
+    return {END: END, "human_takeover": "human_takeover", "router": first_hop}
 
 
 def build_support_graph(*, learn_from_turns: bool = True) -> CompiledStateGraph:
@@ -132,7 +148,7 @@ def build_support_graph(*, learn_from_turns: bool = True) -> CompiledStateGraph:
     )
     tools = [
         build_faq_tool(vector_store),
-        *build_memory_tools(tool_guard),
+        *build_memory_tools(tool_guard, forget_min_score=settings.forget_min_score),
         *build_action_tools(backend, tool_guard),
     ]
 
@@ -151,6 +167,26 @@ def build_support_graph(*, learn_from_turns: bool = True) -> CompiledStateGraph:
 
     # `context_schema` lets nodes and tools read the runtime `user_id`.
     builder = StateGraph(SupportState, context_schema=AgentContext)
+
+    # R4: the context-window valve. It sits on the entry path so the shrinking
+    # happens BEFORE the LLM nodes of THIS turn read the history — compacting
+    # afterwards would still send the oversized prompt once. It runs on the STRONG
+    # model: a summary that drops an order number costs the customer a repeat, and
+    # this call happens roughly once every 20 messages, so it is not a latency
+    # lever worth trading fidelity for. `0` removes the node entirely.
+    compaction_on = settings.compact_after_messages > 0
+    first_hop = "compact" if compaction_on else "router"
+    if compaction_on:
+        builder.add_node(
+            "compact",
+            make_compact(
+                model,
+                fallbacks,
+                threshold=settings.compact_after_messages,
+                keep_last=settings.compact_keep_last_messages,
+            ),
+        )
+        builder.add_edge("compact", "router")
 
     # Router-only cascade: the fast model classifies the intent; small talk and the
     # support ReAct loop stay on the strong model (see docs/latence.md).
@@ -186,13 +222,13 @@ def build_support_graph(*, learn_from_turns: bool = True) -> CompiledStateGraph:
         builder.add_node("guard_input", make_guard_input(input_guard))
         builder.add_node("guard_output", make_guard_output(output_guard))
         builder.add_edge(START, "guard_input")
-        builder.add_conditional_edges("guard_input", entry_route, _ENTRY_PATHS)
+        builder.add_conditional_edges("guard_input", entry_route, _entry_paths(first_hop))
         builder.add_edge("guard_output", last)
         terminal = "guard_output"
     else:
         # Same entry decision without the guard node: the human-takeover check
         # must NOT depend on the guardrails kill switch.
-        builder.add_conditional_edges(START, entry_route, _ENTRY_PATHS)
+        builder.add_conditional_edges(START, entry_route, _entry_paths(first_hop))
         terminal = last
 
     # The routing decision: the conditional edge maps each `route` value to a node.

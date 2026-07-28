@@ -122,6 +122,36 @@ class Settings(BaseSettings):
     memory_ttl_days: float | None = 365.0
     memory_ttl_sweep_interval_minutes: int = 60
 
+    # --- Context-window compaction (R4) ---
+    # Past `compact_after_messages`, the oldest turns are folded into a running
+    # summary and REMOVED from the history (see memory/compaction.py). 0 disables
+    # the feature entirely: the graph is then wired exactly as before, with no
+    # `compact` node at all.
+    #
+    # The default is 30 because that is the number the spec names: R1 requires 30
+    # messages held verbatim, R4 governs what happens BEYOND them. Raising it
+    # buys fidelity and pays in tokens on every long turn; lowering it does the
+    # reverse. `keep_last` is the verbatim tail kept alongside the summary — it
+    # must stay comfortably larger than one ReAct step (assistant + tool results +
+    # reply), otherwise the tail is all tool traffic and no conversation.
+    compact_after_messages: int = 30
+    compact_keep_last_messages: int = 10
+
+    # --- Right to be forgotten (R5) ---
+    # The similarity a stored fact must reach before a natural-language request
+    # ("oublie mon numéro de commande") is allowed to DELETE it. A knob and not a
+    # constant for the same reason as `episodic_min_score`: cosine similarity is
+    # not comparable across embedding models, so a hard-coded value silently stops
+    # matching the day the provider changes.
+    #
+    # MEASURED on `text-embedding-3-small` against three stored facts: the fact the
+    # request meant scored 0.40-0.59 depending on phrasing, every unintended fact
+    # scored 0.09-0.24. 0.35 sits in that gap with room on both sides. A first
+    # attempt at 0.6 looked "safe" and was the worst possible value — above every
+    # real match, so the feature deleted nothing at all while reporting "nothing
+    # matched". If you raise this, verify a real deletion still happens.
+    forget_min_score: float = 0.35
+
     # --- Episodic memory (Phase 14) ---
     # Cases that WORKED, reused as few-shot examples. Kill switch like the
     # guardrails one: off = the support prompt is byte-for-byte the pre-Phase-14

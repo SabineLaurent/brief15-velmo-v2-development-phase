@@ -35,6 +35,9 @@ ui: ## Lance l'UI Chainlit sur :8001 (dev local ; la version conteneur est sur :
 consolidate: ## Distille les fils terminés en épisodes (à blanc ; ARGS=--write pour écrire)
 	$(UV) run python -m support_agent.memory.consolidate $(ARGS)
 
+memory: ## Inspecte / efface la mémoire d'un client (R5-R6) — ARGS='--user-id X [--forget "..."|--erase] [--write]'
+	$(UV) run python -m support_agent.memory.audit $(ARGS)
+
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run
 

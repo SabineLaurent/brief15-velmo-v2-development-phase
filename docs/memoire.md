@@ -338,12 +338,101 @@ leviers natifs :
 - Trimmer **seulement à l'appel** (`trim_messages` dans le nœud, sans réécrire le
   state) → l'historique complet reste stocké, le LLM ne voit qu'une fenêtre.
 
-**État projet.** Le nœud support (`graph/nodes.py`) envoie *tout* l'historique à
-chaque tour et le checkpointer stocke *tout* : choix le plus simple, OK pour des
-fils courts. Trim / résumé sont des ajouts **locaux** (avant l'`invoke`, ou un
-nœud `summarize` conditionné à la longueur), sans toucher au reste ni à
-l'agnosticisme (le résumé passe par `get_chat_model()`). → point radar **coût &
-latence**.
+**État projet : le levier retenu est le résumé qui REMPLACE** (nœud `compact`,
+`memory/compaction.py`). Jusqu'à `COMPACT_AFTER_MESSAGES` messages (défaut **30**)
+l'historique part *entier* au LLM — c'est ce qui tient l'exigence des 30 tours.
+Au-delà, le bloc le plus ancien est condensé dans `state["summary"]` et **retiré**
+du state via `RemoveMessage(REMOVE_ALL_MESSAGES)`, la queue récente
+(`COMPACT_KEEP_LAST_MESSAGES`, défaut 10) restant verbatim.
+
+Trois choix à connaître avant d'y toucher :
+
+- **On supprime vraiment, on ne trimme pas seulement à l'appel.** Trimmer à
+  l'`invoke` garderait un checkpoint qui grossit sans fin : le tour resterait bon
+  marché pendant que le stockage — donc les données personnelles à effacer —
+  continuerait de s'accumuler. Une copie de moins à oublier.
+- **Le nœud est AVANT le router**, pas après la réponse. Compacter après coup
+  compacterait pour le tour *suivant* en envoyant quand même le prompt surdimensionné
+  maintenant — exactement la panne qu'on veut éviter.
+- **« Sans perdre l'information critique » n'est pas le travail du résumé.** Un
+  fait durable (« client pro », « tutoie-moi », un n° de contrat) vit dans la
+  mémoire **long terme**, indexée par `user_id`, qui survit à la compaction. Le
+  résumé a le droit d'oublier la *formulation* du tour 3 précisément parce que ce
+  qui comptait a été *sauvegardé comme fait*. C'est la division du travail entre
+  les deux mémoires qui tient l'exigence, pas le résumé seul.
+
+Le coût est **un appel LLM sur le tour qui franchit le seuil**, soit environ un
+tour sur vingt avec les valeurs par défaut. En cas d'échec du provider, le nœud
+renvoie `{}` : on garde l'historique **complet** plutôt que de perdre des tours
+qu'on n'a pas su résumer.
+
+## Inspecter et effacer ce que l'agent a retenu
+
+Deux surfaces, une seule logique (`memory/privacy.py`) :
+
+| Qui | Comment | Pour quoi |
+|---|---|---|
+| le **client**, dans la conversation | l'outil `forget_memory` | « oublie mon numéro de commande » |
+| l'**opérateur**, en ligne de commande | `make memory ARGS='--user-id X …'` | audit, effacement RGPD art. 17 |
+
+```bash
+make memory ARGS='--user-id alice'                       # tout ce qui est retenu
+make memory ARGS='--user-id alice --forget "order id"'    # ciblé, À BLANC
+make memory ARGS='--user-id alice --erase --write'        # effacement total
+```
+
+**Le mot dur de l'exigence est « vérifiable ».** Un `delete` qui renvoie `None`
+ne prouve rien : il ne distingue pas « 3 faits supprimés » de « rien ne
+correspondait, je n'ai rien fait ». D'où deux mécanismes :
+
+1. toute fonction **retourne les enregistrements sur lesquels elle a agi** ;
+2. `delete_user_memories` **relit chaque clé** après suppression et **lève** si
+   une ligne survit. Un backend qui a avalé l'écriture, un cache périmé ou une
+   faute de namespace seraient sinon invisibles — et le client s'entendrait dire
+   que ses données ont disparu alors qu'elles sont toujours en base.
+
+⚠️ **Le plancher de similarité est le piège de cette fonctionnalité.** Supprimer
+sur une correspondance faible détruit le **mauvais** fait, irréversiblement.
+`FORGET_MIN_SCORE` (défaut **0,35**) est donc **mesuré**, pas choisi : sur
+`text-embedding-3-small`, le fait visé sort entre 0,40 et 0,59 selon la
+formulation, les faits non visés entre 0,09 et 0,24. Un premier essai à 0,6
+paraissait « prudent » et était la pire valeur possible — au-dessus de *toutes*
+les vraies correspondances, donc la fonctionnalité ne supprimait **jamais rien**
+en annonçant « rien ne correspondait ». Si tu montes ce seuil, revérifie qu'une
+suppression réelle se produit encore.
+
+**Rétention ≠ effacement, et l'un ne remplace pas l'autre.** Le *sweeper* TTL
+(`MEMORY_TTL_DAYS`) répond à « on ne garde pas éternellement » : il expire les
+lignes après un délai compté depuis le **dernier accès**, donc les données d'un
+client *actif* n'expirent jamais. `--erase` répond à « supprimez les miennes,
+maintenant ».
+
+🔴 **Trou connu et assumé : les transcripts ne sont pas effaçables par
+`user_id`.** La mémoire long terme est indexée par `user_id`, mais les
+checkpoints le sont par `thread_id`, et **aucun index user→threads n'existe** dans
+ce projet. `forget_thread(thread_id)` efface une conversation qu'on peut
+*nommer* (`make memory ARGS='--user-id X --thread-id T --write'`) ; effacer
+*tous* les fils d'un client demanderait cet index. À construire si le besoin
+devient réel.
+
+## Conformité au cahier des charges mémoire (R1 → R6)
+
+| | Exigence | Où ça se joue |
+|---|---|---|
+| **R1** | tenir 30 tours | checkpointer (`memory/short_term.py`) + `MessagesState` ; rien n'est coupé sous le seuil |
+| **R2** | persister d'une session à l'autre | store par `user_id` + outils `save_memory` / `search_memories` |
+| **R3** | isolation stricte | `memories_namespace(user_id)`, **une seule** définition ; le `user_id` vient du runtime context, jamais du LLM |
+| **R4** | résumer au-delà de 30 | nœud `compact` (`memory/compaction.py`) + faits durables en long terme |
+| **R5** | droit à l'oubli | outil `forget_memory` (client) + `make memory --forget/--erase` (opérateur), suppression **relue et vérifiée** |
+| **R6** | traçabilité | `make memory --user-id X` liste **tout** (paginé), avec `created_at` / `updated_at` |
+
+Sur R3, une nuance à savoir défendre : c'est le **sémantique** qui est cloisonné.
+L'**épisodique** est partagé entre clients — par conception — et ce qui tient R3
+là est l'**anonymisation à l'écriture**, pas le cloisonnement (voir plus haut).
+
+Sur R6, une décision : **aucun journal d'écritures maison**. Le store horodate
+déjà chaque ligne ; une seconde copie serait une seconde chose à synchroniser —
+et à effacer.
 
 ## À retenir
 - Le **backend** dit *que* c'est arrivé (vérité). Le **sémantique**

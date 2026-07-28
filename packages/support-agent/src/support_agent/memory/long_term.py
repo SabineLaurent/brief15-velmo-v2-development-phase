@@ -44,6 +44,20 @@ class AgentContext:
     user_id: str
 
 
+def memories_namespace(user_id: str) -> tuple[str, str]:
+    """The per-user long-term memory namespace. Isolation (R3) happens here.
+
+    Defined ONCE, next to the store factory, because three modules now need the
+    exact same tuple: the write/read tools (`memory_tools.py`), the inspection and
+    erasure surface (`privacy.py`), and the tests. A second hand-written copy of
+    `("memories", user_id)` would not raise anything if it drifted — it would just
+    read an empty namespace, so "forget my order number" would report success
+    while deleting nothing. A silent no-op is the worst possible failure mode for
+    a GDPR feature, hence one function instead of a convention.
+    """
+    return ("memories", user_id)
+
+
 def _ttl_config(settings: Settings) -> TTLConfig | None:
     """Translate the retention setting into LangGraph's TTL config.
 
