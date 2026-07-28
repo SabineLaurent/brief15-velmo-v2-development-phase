@@ -57,10 +57,17 @@ def honest_refusal(inputs: dict, outputs: dict, reference_outputs: dict) -> Feed
 
     Still deterministic, and still a heuristic: a semantic judge would do better.
     But it now fails a fabricated answer, which is the whole point of the metric.
+
+    The apostrophe normalisation below is not cosmetic. Models emit the
+    TYPOGRAPHIC apostrophe (U+2019) in French roughly as often as the ASCII one,
+    and which one comes out varies between two runs of the same prompt. Without
+    the fold, "la FAQ n’indique pas" scored 0 while "la FAQ n'indique pas" scored
+    1 — the metric was measuring the model's choice of punctuation, and failing
+    correct refusals at random.
     """
     if not reference_outputs.get("expect_refusal"):
         return None
-    answer = (outputs.get("answer") or "").lower()
+    answer = (outputs.get("answer") or "").lower().replace("’", "'")
     signals = (
         # "I do not have / the FAQ does not say"
         "ne précise pas",
