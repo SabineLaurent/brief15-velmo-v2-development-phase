@@ -328,6 +328,12 @@ few-shot. À ne pas confondre avec le sémantique (des *faits* sur UN client) : 
 déflexion), programmer la consolidation (cron App Service), plafonner/dédupliquer
 le vivier. Détail : [`docs/memoire.md`](docs/memoire.md).
 
+⛔ **La mémoire procédurale ne sera PAS construite** (décidé le 2026-07-28). Elle
+reste documentée comme piste « pour aller plus loin », pas comme tâche en attente :
+un system prompt qui s'auto-modifie se trompe sur *toutes* les conversations à la
+fois, là où un épisode se trompe cas par cas. La taxonomie de la mémoire est donc
+**close** : court terme + sémantique + épisodique.
+
 ---
 
 ### Où on en est

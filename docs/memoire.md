@@ -12,7 +12,7 @@
 | **Court terme** | « Qu'est-ce qu'on s'est dit dans CE fil ? » | checkpointer (`InMemorySaver` / `SqliteSaver`) | `thread_id` | ✅ (durable possible) |
 | **Long terme — sémantique** | « Qu'est-ce que je sais de CE client ? » (faits) | `Store` + recherche sémantique | `("memories", user_id)` | ✅ (`save_memory`) |
 | **Long terme — épisodique** | « Un cas *ressemblant* a-t-il déjà été bien traité ? » | `Store` (autre namespace) | `("episodes",)` — **pas de `user_id`** | ✅ Phase 14 |
-| **Long terme — procédural** | « Quelle est LA bonne façon de faire ? » (règles) | instructions / prompt qui évolue | (le system prompt) | ❌ à construire |
+| **Long terme — procédural** | « Quelle est LA bonne façon de faire ? » (règles) | instructions / prompt qui évolue | (le system prompt) | ⛔ **hors périmètre** (décidé le 2026-07-28) |
 
 À part, mais crucial : le **système métier** (tickets, commandes) via le port
 `SupportBackend` est le **registre de référence** des incidents — pas de la
@@ -47,7 +47,8 @@ Même matière première (des expériences passées), traitée différemment :
 
 Et ils s'enchaînent : on **accumule des épisodes**, on repère le motif, on en
 **distille une règle procédurale**. Le procédural est souvent de l'épisodique
-généralisé.
+généralisé — c'est d'ailleurs pour ça qu'on peut s'en passer ici (⛔ hors
+périmètre, voir plus bas) : l'épisodique en porte déjà l'essentiel du bénéfice.
 
 ## L'épisodique en pratique (Phase 14)
 
@@ -167,8 +168,23 @@ jamais en laissant le harnais écrire.
 - **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
   d'épisodes ni ne fusionne deux cas quasi identiques. Le TTL (compté depuis le
   **dernier accès**) fait déjà mourir les épisodes que personne ne repêche.
-- **Le procédural** est la suite naturelle : la même passe de consolidation, sur
-  N épisodes semblables, distille une **règle** vers le system prompt.
+## ⛔ Le procédural ne sera pas construit (décision du 2026-07-28)
+
+Ce n'est **pas un oubli ni une tâche en attente** — c'est un choix, à ne pas
+rouvrir sans déclencheur explicite. Ça reste décrit ici comme **piste « pour aller
+plus loin »**, parce que la taxonomie n'a de sens qu'entière et que le concept
+s'explique bien : la même passe de consolidation, sur N épisodes semblables,
+distillerait une **règle** poussée dans le system prompt.
+
+Ce que ça coûterait, et qui n'est pas payé : un prompt qui **s'auto-modifie** n'est
+plus un artefact versionné qu'on relit en revue — il faudrait le versionner, le
+diffuser, le faire approuver, et pouvoir revenir en arrière quand une mauvaise
+règle dégrade toutes les conversations d'un coup (l'épisodique, lui, se trompe cas
+par cas). L'épisodique apporte l'essentiel du bénéfice sans ce rayon de souffle.
+
+**Déclencheur qui justifierait de rouvrir :** un motif récurrent, mesuré sur le
+vivier d'épisodes, que le rappel par ressemblance rate systématiquement — donc
+après la mesure de déflexion, pas avant.
 
 ## Détecter une récurrence (« ça lui est déjà arrivé »)
 
@@ -228,8 +244,10 @@ latence**.
 - Le **backend** dit *que* c'est arrivé (vérité). Le **sémantique**
   *personnalise*. L'**épisodique** dit *comment bien faire*. Le **procédural**
   *standardise*. Ils se complètent.
-- L'agent a aujourd'hui **court terme + sémantique + épisodique**. Il reste le
-  **procédural** — l'épisodique généralisé, distillé par la même passe.
+- L'agent a **court terme + sémantique + épisodique**, et c'est le périmètre
+  final. Le **procédural** est décrit pour la compréhension, **volontairement pas
+  construit** (voir la section dédiée) : un prompt auto-modifié se trompe sur
+  toutes les conversations à la fois, là où un épisode se trompe cas par cas.
 - La ligne à ne jamais franchir : le sémantique est **cloisonné par client**,
   l'épisodique est **partagé**. Deux namespaces, deux régimes de confidentialité.
   Confondre les deux, c'est transformer un vivier d'exemples en fuite de données.
