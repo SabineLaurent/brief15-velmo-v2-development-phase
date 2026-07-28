@@ -206,8 +206,17 @@ chantier d'évaluation, pas un run de plus.
 - **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
   d'épisodes ni ne fusionne deux cas quasi identiques. Le TTL (compté depuis le
   **dernier accès**) fait déjà mourir les épisodes que personne ne repêche.
-- **Court-circuiter un vivier vide** — ~300 ms d'embeddings payés par tour support
-  même quand il n'y a rien à ramener (voir la mesure ci-dessus).
+- **La latence du rappel (~300 ms/tour support).** ⛔ Le court-circuit « vivier
+  vide → pas d'appel » a été **examiné puis écarté** : il n'aide que tant que le
+  vivier est vide (jour 1, après purge), et surtout il ne mord pas sur le vrai
+  coût — les 300 ms sont payés à *chaque* tour dès qu'il y a un seul épisode, y
+  compris quand rien ne franchit le plancher. ⭐ **La piste sérieuse, non
+  vérifiée à ce jour** : dans un même tour, la question du client est
+  probablement embeddée **deux fois** — une fois par la recherche FAQ
+  (`knowledge/`), une fois par le rappel épisodique. Si c'est bien le même
+  texte, mutualiser l'appel supprime 100 % du surcoût. **C'est la première chose
+  à vérifier** avant toute autre optimisation (embeddings locaux, rappel
+  conditionnel au routeur, rappel au 1er tour seulement).
 - **Prouver le gain**, si on le veut vraiment : cela demande un dataset de cas
   *ratés*, un juge sémantique et du trafic réel — pas un run de plus.
 
