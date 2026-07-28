@@ -131,7 +131,26 @@ rien ne persiste, sauf le cache de `uv`.
 vérifier que ce qui est vrai **pour tout le monde** — et c'est exactement la
 propriété qu'on veut garantir.
 
-### Deux choix du fichier qui méritent d'être compris
+### Trois choix du fichier qui méritent d'être compris
+
+**Comment les actions sont référencées — et pourquoi les deux ne le sont pas pareil.**
+Le **tout premier run de cette CI a échoué** là-dessus : `astral-sh/setup-uv@v9` →
+*« unable to find version v9 »*. La release `v9.0.0` existait pourtant. Ce qui
+manquait, c'est le **tag majeur mobile** `v9` — ces tags courts (`v9`, `v7`) sont des
+étiquettes que le mainteneur repointe à la main, et **rien ne garantit qu'elles
+existent** parce qu'une release porte ce numéro.
+
+La règle retenue : **suivre la doc de chaque action, pas une habitude uniforme.**
+
+| Action | Référence | Pourquoi |
+|---|---|---|
+| `actions/checkout` | tag `v7` | C'est l'exemple de son README. Action *first-party*, tags majeurs mobiles maintenus |
+| `astral-sh/setup-uv` | SHA complet + `# v8.3.2` | Ce que son README fait dans **tous** ses exemples. Un SHA est **immuable** : ni disparition, ni repointage par son auteur |
+
+⚠️ La contrepartie du SHA est réelle : **aucune mise à jour automatique**. D'où le
+commentaire de version, obligatoire — sans lui, personne ne sait plus à quoi ce SHA
+correspond. C'est aussi la version *durcie* recommandée dès qu'un workflow touche des
+secrets de production, ce qui arrivera à l'étape 5.
 
 **`uv sync --locked` n'est pas une précaution, c'est un contrôle.** Il échoue si
 `uv.lock` n'est plus cohérent avec les `pyproject.toml`. En local, `uv run`
