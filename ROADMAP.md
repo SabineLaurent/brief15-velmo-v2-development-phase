@@ -324,9 +324,18 @@ few-shot. À ne pas confondre avec le sémantique (des *faits* sur UN client) : 
   attrapé par un test) ; **anonymisation à l'écriture** (prompt + `ToolGuard`).
 - Kill switch `EPISODIC_MEMORY_ENABLED` : off = prompt identique octet pour octet.
 
-**Reste ouvert :** mesurer le gain (dataset Phase 9, avec/sans, comparer le taux de
-déflexion), programmer la consolidation (cron App Service), plafonner/dédupliquer
-le vivier. Détail : [`docs/memoire.md`](docs/memoire.md).
+**Mesuré le 2026-07-28** (7 cas × 2 répétitions × 2 bras, vivier de 6 épisodes sur
+des sujets hors dataset) : **22/22 assertions dans les deux bras** → aucune
+régression, et **~300 ms** de coût par tour support (aller-retour embeddings,
+isolé au microbenchmark ; le delta bout-en-bout est noyé dans le bruit). Le
+**gain n'est pas prouvé** et ce dataset ne peut pas le prouver : l'agent y était
+déjà à 100 % et 1 cas sur 7 seulement a franchi le plancher de pertinence.
+Détail et protocole : [`docs/memoire.md`](docs/memoire.md).
+
+**Reste ouvert :** programmer la consolidation (cron App Service),
+plafonner/dédupliquer le vivier, court-circuiter le rappel sur vivier vide, et —
+si on veut vraiment chiffrer le gain — un dataset de cas *ratés* + un juge
+sémantique, ce qui est un chantier d'évaluation à part entière.
 
 ⛔ **La mémoire procédurale ne sera PAS construite** (décidé le 2026-07-28). Elle
 reste documentée comme piste « pour aller plus loin », pas comme tâche en attente :

@@ -157,17 +157,63 @@ garantit qu'aucun chemin ne peut écrire, pas un drapeau lu à l'exécution. Le
 de l'épisodique se fait en basculant `EPISODIC_MEMORY_ENABLED` **volontairement**,
 jamais en laissant le harnais écrire.
 
-### Ce qui reste ouvert
+## 📊 La mesure du 2026-07-28 — sans dommage, coût chiffré, gain NON prouvé
 
-- **Mesurer.** L'épisodique doit se prouver : dataset LangSmith de la Phase 9, run
-  avec et sans (`EPISODIC_MEMORY_ENABLED`), on compare le **taux de déflexion**.
-  Tant que ce n'est pas fait, c'est une intuition raisonnée, pas un gain.
-  Le vivier de dev est **vide** (les 11 épisodes issus de runs d'éval ont été
-  purgés le 2026-07-28) : la mesure partira d'une base propre.
+**Protocole.** 7 cas du dataset Phase 9 × 2 répétitions × 2 bras
+(`EPISODIC_MEMORY_ENABLED` false/true), même modèle, graphe d'éval en
+`learn_from_turns=False`. Vivier de **6 épisodes** distillés de 6 conversations
+portant sur des sujets FAQ **absents du dataset** (échange, entretien, frais de
+port, authenticité, délai de remboursement, réassort) — s'entraîner sur le test
+aurait fabriqué le gain.
+
+| | Sans épisodique | Avec épisodique |
+|---|---|---|
+| Assertions d'évaluateurs passées | **22/22** | **22/22** |
+| Cas où un épisode a franchi le plancher | — | **1 sur 7** |
+
+**Ce que ça prouve : l'absence de dommage.** Aucune régression, sur aucun cas.
+C'est un vrai résultat — un dispositif qui touche au system prompt de la branche
+support pouvait très bien dégrader le routage ou la citation de source.
+
+**Ce que ça NE prouve PAS : le gain.** Et ce n'est pas réparable par un run de
+plus, pour trois raisons structurelles :
+1. **Effet plafond** — l'agent était déjà à 100 % *avant* l'expérience. Un
+   dataset de non-régression ne peut mesurer qu'une chute.
+2. **1 cas sur 7 enrichi** — les 6 autres ont tourné avec un prompt **identique
+   octet pour octet** dans les deux bras. Sur ces cas-là, les deux bras sont
+   littéralement le même code : comparer n'a pas de sens.
+3. **Évaluateurs déterministes** — route exacte, présence d'une citation, mots de
+   refus. Ils ne voient pas une réponse *mieux écrite* ou *mieux méthodique*,
+   c'est-à-dire exactement ce qu'un épisode est censé apporter.
+
+**Le coût, lui, est mesurable — et il l'a été à part.** Le delta bout-en-bout
+(+0,68 s de moyenne) est **inutilisable** : des cas à **0 épisode injecté**
+affichaient +1,4 s et +1,8 s, donc le bruit dépasse le signal à n=2. Isolé au
+microbenchmark, le rappel coûte **~300 ms médians par tour support** (l'aller-retour
+embeddings), soit ~6-8 % d'un tour à ~5 s.
+⚠️ **Ces 300 ms sont payés même quand le rappel ne ramène rien** (2 sondes sur 3
+sont revenues vides et ont payé le même prix). Sur un vivier vide — le jour 1 —
+c'est 300 ms par tour support pour rien : un court-circuit « vivier vide → pas
+d'appel » est l'optimisation évidente, non faite à ce jour.
+
+**Pour mesurer un vrai gain il faudrait** un dataset de cas où l'agent échoue ou
+répond de façon inégale (pas 100 % d'entrée), un **juge sémantique** plutôt que des
+heuristiques de forme, et un vivier alimenté par du **trafic réel**. C'est un
+chantier d'évaluation, pas un run de plus.
+
+### Ce qui reste ouvert
 - **Programmer la consolidation** (cron App Service) — aujourd'hui c'est manuel.
 - **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
   d'épisodes ni ne fusionne deux cas quasi identiques. Le TTL (compté depuis le
   **dernier accès**) fait déjà mourir les épisodes que personne ne repêche.
+- **Court-circuiter un vivier vide** — ~300 ms d'embeddings payés par tour support
+  même quand il n'y a rien à ramener (voir la mesure ci-dessus).
+- **Prouver le gain**, si on le veut vraiment : cela demande un dataset de cas
+  *ratés*, un juge sémantique et du trafic réel — pas un run de plus.
+
+⚠️ **État du vivier de dev** : 6 épisodes, ceux de l'expérience du 2026-07-28
+(sujets FAQ hors dataset d'éval). Ce ne sont pas des données de production.
+
 ## ⛔ Le procédural ne sera pas construit (décision du 2026-07-28)
 
 Ce n'est **pas un oubli ni une tâche en attente** — c'est un choix, à ne pas
