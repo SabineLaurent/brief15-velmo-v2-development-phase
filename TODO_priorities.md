@@ -158,7 +158,7 @@ pas défendable — donc B1.4 y gagne en attendant.
 | 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ✅ |
 | 4 | Conteneur `client` : Chainlit devient client **HTTP** | ✅ |
 | 4bis | **CI** : la garde (lint + tests) puis l'image **amd64** — voir chantier 3quater | ⬜ |
-| 5 | Azure : ACR + Container Apps + Flexible Server, **identité prouvée** | ⬜ |
+| 5 | Azure : ACR + **App Service** (2 Web Apps, 1 plan) + Flexible Server/pgvector, **identité prouvée** | ⬜ |
 
 **Étape 4 close (2026-07-25) — ce qu'elle a prouvé, chiffré :** `app.py` a changé
 d'**une ligne d'import**, le corps du handler d'**aucun caractère**. `support-agent`
@@ -207,7 +207,7 @@ clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
 
 | Le fait | La conséquence |
 |---|---|
-| La machine de dev est **arm64**, ACA exécute du **linux/amd64** | L'image construite par `make docker-build` **ne démarrera pas** sur Azure. Il faut un constructeur amd64 — c'est-à-dire un runner de CI |
+| La machine de dev est **arm64**, App Service Linux exécute du **linux/amd64** | L'image construite par `make docker-build` **ne démarrera pas** sur Azure. Il faut un constructeur amd64 — c'est-à-dire un runner de CI |
 | La CD pousse une image sur ACR | Sans CI, on pousse une image bâtie sur un poste, depuis un arbre de travail dont **rien ne prouve** qu'il correspond à un commit |
 | Le pipeline CI **est** le brouillon de la CD | Écrire la CD sans CI, c'est écrire deux fois le même script de build |
 
@@ -236,8 +236,8 @@ clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
   1. l'image du client **ne contient ni `support_agent`, ni `langgraph`, ni
      `langchain`** (la preuve du découplage de l'étape 4 — cf. plus haut) ;
   2. l'image de l'agent répond sur `/health` (fumée : elle démarre vraiment).
-- **CI-3 — la chaîne complète (= la CD).** Pousser sur ACR puis déclencher une
-  révision ACA. **Ne se fait qu'à l'étape 5**, avec les secrets Azure.
+- **CI-3 — la chaîne complète (= la CD).** Pousser sur ACR puis mettre à jour l'image
+  des deux Web Apps. **Ne se fait qu'à l'étape 5**, avec les secrets Azure.
 
 **Deux pièges à traiter dès CI-1 :**
 - **Python 3.12.** Les paquets déclarent `>=3.11,<3.14` mais le projet cible 3.12 ;

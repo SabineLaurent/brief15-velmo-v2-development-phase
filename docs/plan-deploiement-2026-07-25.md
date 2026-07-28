@@ -182,8 +182,10 @@ précédent — l'état vit dans le volume nommé, pas dans le conteneur.
    une autre base donne un venv qui pointe vers un interpréteur absent.
 
 **Mesure pour l'étape 5 :** le warm-up passe de **2,9 s sur l'hôte à 4,4 s en
-conteneur**. C'est ce chiffre — pas celui de l'hôte — qui doit décider du
-`minReplicas` sur ACA.
+conteneur**. C'est ce chiffre — pas celui de l'hôte — qu'il faut comparer à la
+**limite de démarrage** d'App Service (`WEBSITES_CONTAINER_START_TIME_LIMIT`,
+230 s par défaut) : on a deux ordres de grandeur de marge, mais c'est le chiffre du
+conteneur qui compte, parce que c'est lui qu'Azure chronomètre.
 
 ### Étape 3 — L'état durable : Postgres + pgvector
 
@@ -240,7 +242,7 @@ ont changé. L'invariant n°1 est vérifié *en fait*, plus seulement en doc.
   appelant, et c'est bien ça le problème.
 
 **Mesure pour l'étape 5 :** le warm-up reste à **4,4 s** — Postgres ne coûte rien au
-démarrage. Le chiffre qui décidera du `minReplicas` est donc inchangé.
+démarrage. La marge face à la limite de démarrage d'App Service est donc inchangée.
 
 ### Étape 4 — Le conteneur `client` : Chainlit devient client HTTP
 
@@ -353,26 +355,85 @@ non par besoin, mais parce qu'il partageait le process.
 
 ### Étape 5 — Azure
 
-- **But technique :** **ACR** pour les images, **ACA** pour l'exécution (ingress
-  **HTTPS** géré, secrets, scale), **Azure Database for PostgreSQL Flexible Server**
-  avec `pgvector` activé en extension. Plus l'**identité prouvée** : `user_id` dérivé
-  d'un token vérifié côté serveur, **jamais lu du corps de la requête** — c'est le
-  trou 🔴 §5.1 de l'archi cible, à refermer **avant** toute mise en ligne publique.
-- **But pédagogique :** mesurer ce qui se transpose (l'image, à l'identique) et ce qui
-  ne se transpose pas (le Compose, remplacé par le YAML d'ACA).
+> 🔁 **Cible d'exécution révisée (2026-07-28) : App Service, pas Container Apps.**
+> Le §6 retenait ACA et écartait App Service ; c'est **inversé**. Ce qui suit est
+> écrit pour **Azure App Service for Containers**. Le détail de ce que l'inversion
+> change — et de ce qu'elle ne change pas — est au §6.
+
+- **But technique :** **ACR** pour les images, **App Service for Containers** pour
+  l'exécution (ingress **HTTPS** géré, *app settings* + Key Vault, plan dimensionnable),
+  **Azure Database for PostgreSQL Flexible Server** avec `pgvector` activé en
+  extension. Plus l'**identité prouvée** : `user_id` dérivé d'un token vérifié côté
+  serveur, **jamais lu du corps de la requête** — c'est le trou 🔴 §5.1 de l'archi
+  cible, à refermer **avant** toute mise en ligne publique.
+- **Deux Web Apps, pas une.** Une App Service exécute **un** conteneur applicatif
+  (les *sidecars* servent des auxiliaires — collecteur de télémétrie, proxy — pas
+  deux services co-égaux). Nos trois services Compose deviennent donc **deux Web Apps
+  sur le même plan** (`agent-api`, `client`) **plus** le Flexible Server. C'est la
+  transposition la plus fidèle : le Compose ne co-localisait rien, il déclarait juste
+  trois blocs joignables par le réseau.
+- **But pédagogique :** mesurer ce qui se transpose (l'image, **à l'identique**) et ce
+  qui ne se transpose pas (le Compose, remplacé par la configuration de la Web App).
 - **Bonus cohérent :** `config.py` porte déjà `llm_inference_endpoint` /
   `openai_compatible`. Si l'abonnement de formation inclut Azure OpenAI ou AI Foundry,
   le LLM passe chez Azure **sans une ligne de code** — un seul cloud, une seule
   facture. C'est la factory qui paie.
 - **Vérification :** une URL live, appelable au `curl`.
 
-⚠️ **Piège Azure à traiter à cette étape :** ACA peut descendre à **zéro réplique**.
-Chaque réveil ré-indexerait la FAQ — appels embeddings facturés + latence de démarrage
-à froid. Le coût est **mesuré** depuis l'étape 1 : le serveur logue son warm-up au
-démarrage, **2,9 s** sur la FAQ Velmo (16 fichiers, 2 appels embeddings). C'est ce
-chiffre, et non une intuition, qui doit décider du `minReplicas`. C'est là que l'invariant n°5 (« l'application n'indexe jamais en production »)
-cesse d'être de la doctrine et devient une ligne de facture. Deux issues :
-`minReplicas: 1`, ou sortir l'ingestion du boot pour de vrai.
+#### Les quatre pièges d'App Service, et pourquoi le code n'a pas à bouger
+
+**1. `WEBSITES_PORT` — dire quel port écouter.** App Service ne devine pas : il lit
+l'`EXPOSE` de l'image, ou l'*app setting* `WEBSITES_PORT`, et **forwarde** le trafic
+vers ce port. Nos deux images font déjà `EXPOSE 8000` **et** `--host 0.0.0.0` (piège
+déjà payé à l'étape 2), donc rien à modifier : on déclare `WEBSITES_PORT=8000`
+explicitement plutôt que de compter sur la lecture de l'`EXPOSE`, et c'est tout.
+⚠️ À savoir : `WEBSITES_PORT` **n'existe pas dans le conteneur**. Ce n'est pas une
+variable que notre code peut lire — c'est une instruction donnée au routeur d'Azure.
+Y voir un « port configurable » et brancher `uvicorn --port $WEBSITES_PORT` dessus ne
+marcherait pas.
+
+**2. Deux hooks de santé, et ils tombent pile sur nos deux endpoints.** C'est la
+bonne surprise de la bascule : le découpage `/health` ⇄ `/ready` de `server.py`,
+écrit pour les probes d'ACA, se transpose **sans une ligne de code**.
+
+| Hook App Service | Rôle | Ce qu'on y branche |
+|---|---|---|
+| **Warm-up** (`WEBSITE_WARMUP_PATH`, défaut `/robots933456.txt`) | Décide si le conteneur a **fini de démarrer** — et sert aussi à chauffer un slot **avant** un swap | **`/ready`** + `WEBSITE_WARMUP_STATUSES=200` : le graphe est construit et la FAQ indexée |
+| **Health check** (`healthCheckPath`) | Sort en continu une instance **malade** de la rotation | **`/health`** : liveness, ne touche aucune dépendance |
+
+Les brancher à l'envers serait le bug classique : `/ready` en *health check* ferait
+retirer de la rotation un conteneur simplement en train de chauffer.
+
+**3. La limite de démarrage.** `WEBSITES_CONTAINER_START_TIME_LIMIT` vaut **230 s**
+par défaut (max 1800). Notre warm-up mesuré est de **4,4 s en conteneur** : deux
+ordres de grandeur de marge, aucun réglage nécessaire.
+⚠️ Mais c'est **là** que se manifestera une panne de configuration. `uvicorn` n'ouvre
+son port qu'**après** le `lifespan`, qui construit le graphe, sonde les embeddings et
+appelle `setup()` sur Postgres. Provider injoignable ou `DATABASE_URL` fausse ⇒ le
+port ne s'ouvre jamais ⇒ Azure affiche *« Container didn't respond to HTTP pings on
+port: 8000, failing site start »*, un message qui **ne dit rien** de la vraie cause.
+La cause est dans le **log du conteneur**, et le commit `c95376c` (config validée
+avant tout I/O) est précisément ce qui garantit qu'elle y soit nommée en clair.
+
+**4. Les *app settings* se swappent — sauf si on les épingle.** Si on utilise des
+**slots** (le remplaçant des révisions ACA), un swap **échange les app settings** par
+défaut. Une variable qui doit rester attachée à son slot doit être cochée
+*« deployment slot setting »* (*sticky*). Ça concerne directement `PERSISTENCE_BACKEND`
+et `DATABASE_URL` : un slot de test pointé sur `memory` qu'on swappe en production
+emporterait `memory` avec lui, et l'agent perdrait sa mémoire **sans une seule
+erreur**. Exactement le mode de panne que ce projet chasse partout ailleurs.
+
+✅ **Ce que la bascule fait disparaître :** le piège `minReplicas: 0`. ACA pouvait
+descendre à **zéro réplique**, et chaque réveil ré-indexait la FAQ — appels embeddings
+refacturés + 4,4 s pour l'utilisateur tombé sur le réveil. Un App Service Plan alloue
+des machines **en permanence** : pas de *scale-to-zero*, donc pas de ré-indexation
+répétée. Le warm-up redevient un coût **par déploiement**, pas un risque par requête.
+Le prix de cette tranquillité est symétrique et il faut l'assumer : **le plan se paie
+même quand personne ne parle à l'agent**.
+⚠️ L'invariant n°5 (« l'application n'indexe **jamais** en production ») reste
+**violé** — on l'a seulement rendu indolore. Il redeviendra un vrai sujet dès qu'on
+passera à plus d'une instance : chacune indexerait la même FAQ pour son propre compte.
+C'est la Phase 13 / ingestion découplée, inchangée.
 
 #### Dans quel ordre déployer les blocs — **provisionner ≠ brancher**
 
@@ -396,11 +457,12 @@ branches, suivie de l'indexation de la FAQ.
 
 | | Marche 1 | Marche 2 | Ce que ça coûte |
 |---|---|---|---|
-| **A** — base d'abord | `postgres` | `agent-api` en `postgres` | Le premier déploiement Azure mêle **deux** inconnues : « mon image amd64 tourne-t-elle sur ACA ? » et « ma connectivité base est-elle bonne ? ». Un échec = deux suspects. |
+| **A** — base d'abord | `postgres` | `agent-api` en `postgres` | Le premier déploiement Azure mêle **deux** inconnues : « mon image amd64 démarre-t-elle sur App Service ? » et « ma connectivité base est-elle bonne ? ». Un échec = deux suspects. |
 | **B** — agent d'abord ✅ | `agent-api` en `memory` | bascule vers `postgres` | Marche 1 prouve image + ingress + secrets + **sortie réseau vers le provider LLM** + durée de warm-up réelle. Marche 2 ne peut plus échouer que sur la base : pare-feu, `sslmode=require`, droits de création de schéma, pgvector. |
 
 **On retient B**, pour une raison qui tient à l'architecture : la bascule coûte **une
-variable d'environnement** (nouvelle révision ACA), **pas une reconstruction d'image**.
+variable d'environnement** (un *app setting*, donc un redémarrage de la Web App),
+**pas une reconstruction d'image**.
 C'est précisément le bénéfice pour lequel `persistence_backend` existe — l'utiliser
 ici, c'est encaisser ce qui a déjà été payé.
 
@@ -418,9 +480,10 @@ en second dans la chaîne de dépendances.
 ```
 0. ACR + push des deux images (amd64, taguées du même SHA)   ─┐ en parallèle :
 1. Provisionner le Flexible Server + autoriser pgvector       ─┘ la base se crée
-2. agent-api sur ACA, PERSISTENCE_BACKEND=memory   → curl /health, /ready, SSE
-3. agent-api : bascule PERSISTENCE_BACKEND=postgres → l'état survit au redémarrage
-4. client sur ACA, AGENT_API_URL = l'ingress HTTPS  → le parcours complet
+2. Un App Service Plan (Linux) — les deux Web Apps le partagent
+3. Web App agent-api, PERSISTENCE_BACKEND=memory    → curl /health, /ready, SSE
+4. agent-api : bascule PERSISTENCE_BACKEND=postgres → l'état survit au redémarrage
+5. Web App client, AGENT_API_URL = l'URL HTTPS de l'agent → le parcours complet
 ```
 
 **Le client passe en dernier**, toujours : il ne connaît que deux variables
@@ -435,14 +498,39 @@ contre un agent d'un autre commit jette cette garantie sans rien mettre à la pl
 (il n'y a pas de versionnement indépendant des membres). La règle : **monter bloc par
 bloc, publier par jeu** — un commit → les deux images taguées du même SHA.
 
-### Alternatives d'hébergement écartées
+### Cible d'exécution : App Service — décision révisée le 2026-07-28
 
-**App Service for Containers** (plus simple, mais taillé pour un conteneur unique) et
-**AKS** (surdimensionné pour un projet de formation : un cluster à administrer).
+**Ce document retenait ACA et écartait App Service** (« taillé pour un conteneur
+unique »). C'est **inversé** : la cible est **App Service for Containers**, avec
+**PostgreSQL Flexible Server** (pgvector) pour l'état. Contrainte d'environnement, pas
+arbitrage technique rouvert — et l'objection d'origine était de toute façon mal posée :
+App Service n'exécute qu'un conteneur **par Web App**, ce qui n'empêche rien dès qu'on
+crée **deux Web Apps** sur un même plan. Le Compose ne co-localisait rien.
+
+**Ce que l'inversion change vraiment — le bilan honnête :**
+
+| | Effet |
+|---|---|
+| ✅ **Le pire piège du plan disparaît** | Plus de *scale-to-zero*, donc plus de ré-indexation de la FAQ à chaque réveil (voir l'étape 5 ci-dessus) |
+| ✅ **Le code ne bouge pas** | `EXPOSE 8000` + `--host 0.0.0.0` sont déjà ce qu'App Service exige ; `/health` ⇄ `/ready` tombent sur ses deux hooks |
+| ✅ **Le prérequis CI survit intact** | App Service Linux exécute du **linux/amd64** : le besoin d'un constructeur amd64 est le même (`docs/ci.md` §10) |
+| ⚠️ **Coût plancher** | Le plan se paie à l'heure, trafic ou pas — là où ACA pouvait tomber à ~0 |
+| ⚠️ **4 pièges neufs**, tous de configuration | `WEBSITES_PORT`, le bon hook sur le bon endpoint, la limite de démarrage, les app settings *sticky* — détaillés à l'étape 5 ci-dessus |
+| ➖ **Ce qui n'était pas utilisé de toute façon** | Le scale événementiel KEDA d'ACA et son découpage en révisions ne servaient rien ici |
+
+**Ce qui reste inchangé, et c'est l'essentiel :** l'ordre de déploiement (B :
+l'agent en `memory` d'abord), le piège `azure.extensions` / pgvector, la règle
+« monter bloc par bloc, publier par jeu », l'identité prouvée comme condition de mise
+en ligne, et **P1** de la revue de l'escalade (`prepare_threshold: 0` — le PgBouncer
+intégré au Flexible Server est le même, et le besoin de pooling *augmente* avec un plan
+multi-instances).
+
+**Autre alternative toujours écartée :** **AKS** — surdimensionné pour un projet de
+formation (un cluster à administrer).
 
 ---
 
-## 7. Deux décisions révisées, assumées
+## 7. Trois décisions révisées, assumées
 
 1. **Chainlit bascule bien en client HTTP** (étape 4). J'avais écrit l'inverse quand
    la cible était encore un déploiement in-process : faux dès qu'on veut deux
@@ -451,6 +539,13 @@ bloc, publier par jeu** — un commit → les deux images taguées du même SHA.
    derrière le port `actions/`. Le port suffit à marquer la frontière ; en faire un
    service demanderait un adaptateur HTTP dont le déploiement n'a pas besoin. À
    rouvrir seulement si on veut démontrer la frontière marchand *en réseau*.
+3. **La cible d'exécution est App Service, plus Container Apps** (2026-07-28).
+   Contrainte d'environnement, et l'objection écrite ici contre App Service (« taillé
+   pour un conteneur unique ») était mal posée : la limite est d'un conteneur **par
+   Web App**, pas par projet. Bilan complet de l'inversion au §6 ; l'enseignement
+   transposable est que **rien du code n'a bougé** — ni les Dockerfile, ni `server.py`,
+   ni la couture. Un changement d'hébergeur qui ne touche que de la configuration est
+   le signe que les frontières étaient au bon endroit.
 
 ---
 
@@ -478,17 +573,20 @@ Rangés par thème. Les termes durables ont vocation à remonter dans
 |---|---|---|
 | **CLI** | *Command-Line Interface* | Interface en ligne de commande. L'agent n'est **que** ça aujourd'hui (`python -m support_agent.agent`) |
 | **cwd** | *current working directory* | Le dossier depuis lequel un process est lancé. Nos chemins `./data/…` en dépendent — d'où la fragilité en conteneur |
-| **PaaS** | *Platform as a Service* | L'hébergeur exécute ton conteneur et gère la machine (ACA en est un) |
+| **PaaS** | *Platform as a Service* | L'hébergeur exécute ton conteneur et gère la machine (App Service en est un) |
 | **VPS** | *Virtual Private Server* | Une machine virtuelle louée, à administrer soi-même |
 | **SaaS** | *Software as a Service* | Logiciel consommé en ligne, sans l'héberger (LangSmith) |
-| **YAML** | *YAML Ain't Markup Language* | Format de fichier de configuration (Compose, ACA) |
+| **YAML** | *YAML Ain't Markup Language* | Format de fichier de configuration (Compose, workflows GitHub Actions) |
 
 ### Azure
 
 | Acronyme | Développé | Ce que c'est ici |
 |---|---|---|
 | **ACR** | *Azure Container Registry* | L'entrepôt d'images Docker — on y pousse celle testée en local |
-| **ACA** | *Azure Container Apps* | Le service qui exécute les conteneurs : ingress HTTPS, secrets, scale. Notre cible |
+| **App Service** | *Azure App Service for Containers* | Le service qui exécute les conteneurs : HTTPS géré, *app settings*, slots, plan dimensionnable. **Notre cible** — une Web App par conteneur |
+| **Plan** | *App Service Plan* | Les machines louées **en permanence** sur lesquelles tournent les Web Apps. Nos deux Web Apps le partagent |
+| **Flexible Server** | *Azure Database for PostgreSQL Flexible Server* | Notre Postgres managé, `pgvector` compris (à autoriser dans `azure.extensions`) |
+| **ACA** | *Azure Container Apps* | L'ancienne cible, **remplacée** par App Service le 2026-07-28 (§6). Le terme survit dans l'historique git |
 | **AKS** | *Azure Kubernetes Service* | Kubernetes managé. **Écarté** : surdimensionné ici |
 
 ### Données, sécurité, conformité

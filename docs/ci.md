@@ -268,15 +268,22 @@ client-chainlit:dev       → linux/arm64
 ```
 
 Les images sont **déjà** Linux (`python:3.12-slim-bookworm`, c'est Debian) — l'OS
-n'a jamais été le sujet. Le sujet est l'**architecture CPU**. Azure Container Apps
-exécute du **linux/amd64** ; un binaire compilé pour ARM (l'interpréteur CPython,
-le `libpq` de `psycopg[binary]`, l'extension Rust de `pydantic-core`) ne peut pas
-s'exécuter sur un x86-64.
+n'a jamais été le sujet. Le sujet est l'**architecture CPU**. Azure App Service for
+Containers (Linux) exécute du **linux/amd64** ; un binaire compilé pour ARM
+(l'interpréteur CPython, le `libpq` de `psycopg[binary]`, l'extension Rust de
+`pydantic-core`) ne peut pas s'exécuter sur un x86-64.
+
+> 🔁 Ce raisonnement a été écrit quand la cible d'exécution était Azure Container
+> Apps ; elle est devenue **App Service** le 2026-07-28. **Le prérequis ne bouge pas
+> d'un iota** — les deux exécutent de l'amd64. C'est plutôt une confirmation : le
+> besoin d'un constructeur amd64 ne venait pas du service choisi, il vient de l'écart
+> entre un Mac Apple Silicon et le x86-64 des offres Linux managées d'Azure.
 
 ⚠️ **Et un registre ne convertit rien.** L'ACR acceptera sans broncher une image
 arm64 : le push réussit, le tag s'affiche, tout paraît normal. L'échec n'apparaît
-qu'au démarrage sur ACA — `exec format error`. Trois étapes vertes auront dit que
-tout allait bien. **Le format vient d'où la construction s'exécute, jamais d'où
+qu'au démarrage de la Web App — `exec format error`, qu'App Service présentera sous
+la forme d'un conteneur qui ne répond pas sur son port. Trois étapes vertes auront dit
+que tout allait bien. **Le format vient d'où la construction s'exécute, jamais d'où
 l'image atterrit.**
 
 Un runner `ubuntu-latest` étant nativement amd64, il produit le binaire exact qui

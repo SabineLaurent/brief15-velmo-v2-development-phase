@@ -283,7 +283,7 @@ la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents
 **Livrable :** l'agent est appelable depuis l'extérieur, prêt à être branché à un projet.
 **Découpe en 5 étapes, avec le but de chacune :**
 [`docs/plan-deploiement-2026-07-25.md`](docs/plan-deploiement-2026-07-25.md).
-Cible finale : **Azure** (Container Apps + PostgreSQL Flexible Server).
+Cible finale : **Azure** (App Service for Containers + PostgreSQL Flexible Server).
 **Étapes 1 à 4 faites** (détail et bilans chiffrés : le plan) :
 1. `support_agent/server.py` — `POST /chat` en **SSE**, `/health`, `/ready`, clé de
    service **fail-closed**, `make serve`. Le serveur *transporte* ce que `stream_reply`
@@ -294,8 +294,10 @@ Cible finale : **Azure** (Container Apps + PostgreSQL Flexible Server).
 4. Conteneur `client` : Chainlit devient client **HTTP**. `packages/client` ne dépend
    **plus** de `support-agent` — vérifié dans l'image construite, pas déduit.
 
-**Reste l'étape 5 (Azure)** : ACR + Container Apps + Flexible Server, et l'**identité
-prouvée** (`user_id` dérivé d'un token vérifié, jamais lu du corps de la requête).
+**Reste l'étape 5 (Azure)** : ACR + **App Service** (deux Web Apps sur un plan) +
+Flexible Server/pgvector, et l'**identité prouvée** (`user_id` dérivé d'un token
+vérifié, jamais lu du corps de la requête). La cible d'exécution est passée de
+Container Apps à App Service le **2026-07-28** — bilan de l'inversion : le plan, §6.
 ⚠️ Le rail de déploiement LangGraph (`langgraph.json` / LangSmith Deployment) est
 **écarté** — son contrat public est le graphe, ce qui rouvrirait le contournement du
 garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
