@@ -6,7 +6,7 @@
 # Toutes les commandes Python passent par uv (env reproductible).
 UV := uv
 
-.PHONY: help setup install run serve ui eval latency test lint format check clean \
+.PHONY: help setup install run serve ui consolidate eval latency test lint format check clean \
         docker-build docker-up docker-logs docker-down
 
 help: ## Affiche cette aide
@@ -31,6 +31,9 @@ serve: ## Expose l'agent en HTTP (API SSE sur :8000, cf. docs/plan-deploiement-2
 ui: ## Lance l'UI Chainlit sur :8001 (dev local ; la version conteneur est sur :8101)
 	@echo "→ l'UI appelle $${AGENT_API_URL:-http://localhost:8000} ; lance 'make serve' dans un autre terminal si ce n'est pas fait."
 	$(UV) run chainlit run packages/client/src/client_chainlit/app.py -w --port 8001
+
+consolidate: ## Distille les fils terminés en épisodes (à blanc ; ARGS=--write pour écrire)
+	$(UV) run python -m support_agent.memory.consolidate $(ARGS)
 
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run

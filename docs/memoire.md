@@ -11,7 +11,7 @@
 |---|---|---|---|---|
 | **Court terme** | « Qu'est-ce qu'on s'est dit dans CE fil ? » | checkpointer (`InMemorySaver` / `SqliteSaver`) | `thread_id` | ✅ (durable possible) |
 | **Long terme — sémantique** | « Qu'est-ce que je sais de CE client ? » (faits) | `Store` + recherche sémantique | `("memories", user_id)` | ✅ (`save_memory`) |
-| **Long terme — épisodique** | « Un cas *ressemblant* a-t-il déjà été bien traité ? » | `Store` (autre namespace) | `("memories", "episodes")` | ❌ à construire |
+| **Long terme — épisodique** | « Un cas *ressemblant* a-t-il déjà été bien traité ? » | `Store` (autre namespace) | `("episodes",)` — **pas de `user_id`** | ✅ Phase 14 |
 | **Long terme — procédural** | « Quelle est LA bonne façon de faire ? » (règles) | instructions / prompt qui évolue | (le system prompt) | ❌ à construire |
 
 À part, mais crucial : le **système métier** (tickets, commandes) via le port
@@ -49,6 +49,127 @@ Et ils s'enchaînent : on **accumule des épisodes**, on repère le motif, on en
 **distille une règle procédurale**. Le procédural est souvent de l'épisodique
 généralisé.
 
+## L'épisodique en pratique (Phase 14)
+
+Le *quoi* est dit plus haut. Voici le *comment*, et c'est là que se joue la
+différence entre une démo et un agent qui tient en prod.
+
+### Le schéma : quatre champs, écrits **avec le recul**
+
+Repris de LangMem (`observation` / `thoughts` / `action` / `result`). Le champ
+qui justifie toute la fonctionnalité est **`thoughts`** : sans lui, un épisode
+n'est qu'un couple question→réponse, c'est-à-dire un doublon plus cher de la FAQ
+que l'agent interroge déjà. Avec lui, l'agent reçoit un **exemple travaillé** de
+la façon dont un collègue a raisonné jusqu'à la résolution.
+
+### Le cycle, en trois temps — un seul appel LLM, et il est hors ligne
+
+```
+un tour client   ─►  écrit un CANDIDAT    (1 upsert, 0 modèle)      nœud close_turn
+`make consolidate` ─►  écrit un ÉPISODE     (1 appel LLM / fil)       hors ligne
+un tour suivant  ─►  lit les épisodes     (1 appel embeddings)      nœud model
+```
+
+**Pourquoi ce découpage.** Distiller un cas coûte un appel LLM. Le faire pendant
+le tour ajouterait un 3ᵉ hop séquentiel à une réponse déjà à ~5 s
+([`latence.md`](latence.md)) — et distillerait un **fragment**, puisqu'en milieu
+de conversation on ne connaît pas encore l'issue.
+
+**Le debounce est gratuit** : le candidat est **une clé par `thread_id`**,
+réécrite à chaque tour. Un fil = un candidat, toujours à jour. La consolidation
+ne ramasse que les fils **silencieux depuis `EPISODIC_IDLE_MINUTES`** — rien dans
+un chat ne dit « au revoir » de façon fiable, le silence est le seul signal de fin
+de cas exploitable.
+
+> 🔁 **Pourquoi pas le `ReflectionExecutor` de LangMem** (l'équivalent officiel) :
+> c'est une file **en RAM**. Sur App Service, un recyclage ou un scale-out la perd
+> — en silence, la pire façon pour une boucle d'apprentissage d'échouer. Nos
+> candidats sont des lignes du `Store` : elles survivent au redémarrage, se
+> relisent, se testent hors ligne. Et le candidat ne stocke qu'un **pointeur**
+> (`thread_id`) : la conversation est déjà persistée par le checkpointer, la
+> recopier créerait un 2ᵉ exemplaire de données personnelles à faire oublier.
+
+### Les trois garde-fous, et ce qu'ils empêchent
+
+**1. Le filtre de qualité : on n'apprend que des cas RÉSOLUS.**
+`resolved = not handled_by_human`. Une mémoire épisodique qui stocke ses échecs
+**empoisonne le vivier** dans lequel elle pioche ses few-shot — et invisiblement.
+Le signal existait déjà : c'est le drapeau d'escalade, celui-là même sur lequel se
+mesure le taux de déflexion ([`escalade.md`](escalade.md)).
+
+**2. Le plancher de pertinence (`EPISODIC_MIN_SCORE`).**
+Une recherche vectorielle renvoie **toujours** son meilleur match : elle ne sait
+pas dire « rien ici ne colle ». Sans plancher, le **premier épisode jamais écrit**
+atterrit dans **toutes** les conversations — l'agent n'a pas l'air de se souvenir,
+il a l'air de radoter. Un match faible est pire que pas de match : il coûte de la
+place dans le prompt pour désigner la mauvaise piste. *(Ce défaut existait dans la
+première version du code ; c'est un test qui l'a sorti.)*
+
+**3. L'anonymisation à l'écriture — parce que le namespace est PARTAGÉ.**
+`("episodes",)` ne porte **pas** de `user_id`, contrairement au sémantique où
+l'isolation *est* la fonctionnalité. C'est voulu (apprendre du cas d'Alice pour
+servir Bob), donc la fuite est **structurelle** : ce qu'un épisode contient *sera*
+montré à un autre client. Deux défenses, toutes deux **à l'écriture** :
+le prompt d'extraction ordonne de généraliser (ni nom, ni n° de commande), et
+`save_episode` repasse le même `ToolGuard.sanitize` que les outils d'écriture.
+La première est une promesse de modèle, la seconde est une regex — d'où les deux.
+
+### Où ça se branche
+
+| Élément | Fichier |
+|---|---|
+| schéma, lecture/écriture, format du prompt | `memory/episodic.py` |
+| distillation hors ligne | `memory/consolidate.py` (`make consolidate`) |
+| capture du candidat | nœud `close_turn` (`graph/nodes.py`, câblé dans `builder.py`) |
+| injection few-shot | `EpisodicRecall`, dans le nœud `model` |
+| réglages | `EPISODIC_*` dans `.env` |
+
+⚠️ **Le bloc épisodique s'ajoute APRÈS `SUPPORT_SYSTEM_PROMPT`, jamais avant.** Le
+cache de prompt travaille sur un **préfixe stable** : un contenu variable placé en
+tête invaliderait le cache à chaque tour ([`prompt-caching.md`](prompt-caching.md)).
+Et quand aucun épisode ne passe le plancher, le prompt est **identique octet pour
+octet** à celui d'avant la Phase 14 — un store froid ne coûte rien et ne change rien.
+
+> Pourquoi une **injection automatique** et pas un outil, alors que
+> `search_memories` en est un ? Parce que ce ne sont pas les mêmes connaissances.
+> Savoir qu'il faut relire les faits d'un client, le modèle peut le décider (le
+> client y fait référence). Savoir qu'il faudrait un cas ressemblant, **non** : un
+> modèle qui patauge ne sait pas qu'il patauge — c'est précisément le moment où
+> l'exemple vaut le plus. Le rail LangChain 1.x pour ça est le middleware
+> `@dynamic_prompt`, réservé à `create_agent` ; notre `StateGraph` explicite fait
+> l'équivalent dans le nœud.
+
+### ⚠️ Une éval ne doit pas nourrir ce qu'elle mesure
+
+Défaut trouvé **au premier run live**, pas en relecture. `make check` et `make
+eval` pilotent le **vrai** graphe : avec l'apprentissage actif, chaque run
+distillait des épisodes **à partir des conversations qui servent à noter
+l'agent**, et le run suivant était noté contre un vivier que le précédent avait
+fait grossir. Un score qui monte tout seul — la façon la plus flatteuse pour un
+benchmark de mentir. Concrètement : deux `make check` avaient déjà déposé 12
+candidats dans la base de dev.
+
+Correctif : `build_support_graph(learn_from_turns=False)` pour l'éval. Le nœud
+`close_turn` n'est alors **pas câblé du tout** — c'est la topologie compilée qui
+garantit qu'aucun chemin ne peut écrire, pas un drapeau lu à l'exécution. Le
+**rappel reste actif** : on note l'agent tel qu'il est déployé. Mesurer l'apport
+de l'épisodique se fait en basculant `EPISODIC_MEMORY_ENABLED` **volontairement**,
+jamais en laissant le harnais écrire.
+
+### Ce qui reste ouvert
+
+- **Mesurer.** L'épisodique doit se prouver : dataset LangSmith de la Phase 9, run
+  avec et sans (`EPISODIC_MEMORY_ENABLED`), on compare le **taux de déflexion**.
+  Tant que ce n'est pas fait, c'est une intuition raisonnée, pas un gain.
+  ⚠️ Repartir d'un vivier **propre** : la base de dev contient 11 épisodes
+  distillés depuis des conversations d'éval (voir ci-dessus).
+- **Programmer la consolidation** (cron App Service) — aujourd'hui c'est manuel.
+- **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
+  d'épisodes ni ne fusionne deux cas quasi identiques. Le TTL (compté depuis le
+  **dernier accès**) fait déjà mourir les épisodes que personne ne repêche.
+- **Le procédural** est la suite naturelle : la même passe de consolidation, sur
+  N épisodes semblables, distille une **règle** vers le system prompt.
+
 ## Détecter une récurrence (« ça lui est déjà arrivé »)
 
 Deux mécanismes complémentaires — plus un, le plus fiable :
@@ -56,8 +177,10 @@ Deux mécanismes complémentaires — plus un, le plus fiable :
 1. **Sémantique par `user_id`** — au début du nouvel échange, `search_memories`
    fait le rapprochement par **embeddings + similarité vectorielle**, isolé par
    client. Best-effort : il faut que l'agent ait *pensé* à `save_memory` avant.
-2. **Épisodique** — `store.search(("memories","episodes"), ...)` sort le cas
-   passé ressemblant comme exemple de résolution.
+2. **Épisodique** — `store.search(("episodes",), ...)` sort le cas passé
+   ressemblant comme exemple de résolution. ⚠️ Il ne dit **rien** sur CE client :
+   le cas vient peut-être de quelqu'un d'autre. Il répond « comment bien faire »,
+   jamais « est-ce que ça lui est déjà arrivé ».
 3. **⭐ Le plus fiable : le backend métier** — un outil déterministe type
    `list_customer_tickets(user_id)` rend « ça s'est déjà produit » **vérifiable**
    (2 tickets « livraison » en 3 mois), là où la mémoire n'est qu'un pari.
@@ -105,6 +228,8 @@ latence**.
 - Le **backend** dit *que* c'est arrivé (vérité). Le **sémantique**
   *personnalise*. L'**épisodique** dit *comment bien faire*. Le **procédural**
   *standardise*. Ils se complètent.
-- Aujourd'hui l'agent n'a que **court terme** + **sémantique**. Épisodique,
-  procédural et l'outil d'historique tickets sont des extensions naturelles une
-  fois le `Store` durable (fait) en place.
+- L'agent a aujourd'hui **court terme + sémantique + épisodique**. Il reste le
+  **procédural** — l'épisodique généralisé, distillé par la même passe.
+- La ligne à ne jamais franchir : le sémantique est **cloisonné par client**,
+  l'épisodique est **partagé**. Deux namespaces, deux régimes de confidentialité.
+  Confondre les deux, c'est transformer un vivier d'exemples en fuite de données.

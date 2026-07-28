@@ -45,9 +45,29 @@ pytestmark = pytest.mark.skipif(
 
 
 @pytest.fixture(scope="module")
-def target():
-    """Build the graph once for the whole module and expose the eval target."""
-    return make_target(build_support_graph())
+def eval_graph():
+    """The REAL graph, built once, in evaluation mode."""
+    # Same reason as `eval/run.py`: this suite drives the real graph against the
+    # real provider, so with learning on, `make check` itself would keep feeding
+    # episodic memory from its own fixtures. It did, once — that is how the leak
+    # was found (see docs/memoire.md).
+    return build_support_graph(learn_from_turns=False)
+
+
+@pytest.fixture(scope="module")
+def target(eval_graph):
+    """Expose the graph as the evaluation target."""
+    return make_target(eval_graph)
+
+
+def test_the_eval_graph_cannot_feed_episodic_memory(eval_graph) -> None:
+    """A benchmark must not teach the thing it grades.
+
+    Asserted on the compiled TOPOLOGY, not on a flag: the node being absent is
+    the only proof that no code path can write a candidate, whatever the state
+    or the branch taken. Recall stays wired — we grade the agent as deployed.
+    """
+    assert "close_turn" not in eval_graph.get_graph().nodes
 
 
 @pytest.mark.parametrize("case", EVAL_CASES, ids=[c["id"] for c in EVAL_CASES])

@@ -122,6 +122,29 @@ class Settings(BaseSettings):
     memory_ttl_days: float | None = 365.0
     memory_ttl_sweep_interval_minutes: int = 60
 
+    # --- Episodic memory (Phase 14) ---
+    # Cases that WORKED, reused as few-shot examples. Kill switch like the
+    # guardrails one: off = the support prompt is byte-for-byte the pre-Phase-14
+    # prompt and no candidate row is written. On, a support turn pays ONE extra
+    # embedding call for the recall — the write side is deliberately offline
+    # (`python -m support_agent.memory.consolidate`), so no LLM call is ever
+    # added to a customer's turn. See docs/memoire.md.
+    episodic_memory_enabled: bool = True
+    # How many past cases to inject. Two is a deliberate ceiling: episodes are
+    # long, they compete with the FAQ for the model's attention, and the third
+    # best match is rarely still relevant.
+    episodic_recall_limit: int = 2
+    # The relevance floor, and the setting that decides whether recall means
+    # anything: a vector search ALWAYS returns its top matches, so without a
+    # floor the first episode ever written lands in every conversation. Cosine
+    # similarity is not comparable across embedding models, so this is a knob,
+    # not a constant — raise it if the agent starts quoting unrelated cases.
+    episodic_min_score: float = 0.35
+    # How long a thread must stay quiet before it is distilled. Nothing in a chat
+    # says "goodbye" reliably, so silence is the only usable end-of-case signal.
+    # LangMem's own guidance for this debounce is 30-60 minutes.
+    episodic_idle_minutes: float = 30.0
+
     # --- Guardrails (Phase 12, security) ---
     # `guardrails_enabled` is a kill switch: off = the graph is wired exactly as
     # before (START -> router), no overhead. `max_input_chars` caps the incoming

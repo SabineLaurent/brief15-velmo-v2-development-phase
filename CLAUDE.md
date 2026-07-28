@@ -88,6 +88,9 @@ make docker-up  # la pile complète en conteneurs : postgres + agent-api + clien
               #   publie sur 0.0.0.0 et uvicorn écoute sur 127.0.0.1, donc pas
               #   d'Errno 48 : sans ça on croit tester sa pile locale et on
               #   interroge le conteneur, en silence.
+make consolidate  # distille les fils terminés en épisodes (mémoire épisodique,
+              #   Phase 14). À BLANC par défaut ; `ARGS=--write` pour écrire.
+              #   Le SEUL appel LLM de cette mémoire, et il est hors du tour client.
 make test     # tests (pytest)
 make lint     # ruff check
 make check    # lint + tests

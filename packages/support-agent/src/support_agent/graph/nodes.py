@@ -27,10 +27,11 @@ from langchain_core.messages import (
     RemoveMessage,
     SystemMessage,
 )
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END
 from langgraph.runtime import Runtime
+from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
 from support_agent.actions.backend import SupportBackend
@@ -38,6 +39,11 @@ from support_agent.graph.state import Route, SupportState
 from support_agent.guardrails import InputGuard, OutputGuard, ToolGuard
 from support_agent.llm import FALLBACK_EXCEPTIONS
 from support_agent.memory import AgentContext
+from support_agent.memory.episodic import (
+    format_episodes,
+    recall_episodes,
+    record_candidate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -310,6 +316,7 @@ def make_support_model(
     model: BaseChatModel,
     tools: list[BaseTool],
     fallbacks: Sequence[BaseChatModel] = (),
+    episodic: EpisodicRecall | None = None,
 ) -> Callable[[SupportState], dict]:
     """Build the support node: the LLM step of the ReAct loop (LLM + tools).
 
@@ -322,6 +329,15 @@ def make_support_model(
     the small model was even slower on the tool-bound decision call, because the
     cost is the round-trip + long prompt, not the model size. Only the `router`
     keeps the fast model. See `docs/latence.md`.
+
+    Episodic memory (Phase 14) is injected HERE rather than offered as a tool,
+    unlike `search_memories`. The two are not the same kind of knowledge:
+    recalling a customer's facts is a decision the model can make (it knows when
+    the customer refers to something past), but recalling "a case like this one"
+    is not — a model that is floundering does not know it should ask for help,
+    which is precisely when a worked example is worth most. So the lookup is
+    unconditional on this branch, and it costs one embedding call, not an LLM
+    round trip. `None` disables it and restores the exact previous behaviour.
     """
     # Each model (primary + fallbacks) gets the SAME tools bound, then we chain
     # them: if the primary provider is down, the fallback answers with tools too.
@@ -331,7 +347,13 @@ def make_support_model(
     )
 
     def support_model(state: SupportState) -> dict:
-        messages = [SystemMessage(SUPPORT_SYSTEM_PROMPT), *state["messages"]]
+        system_prompt = SUPPORT_SYSTEM_PROMPT
+        if episodic is not None:
+            # Appended AFTER the stable prompt, never before: this block changes
+            # on every turn, and a variable PREFIX invalidates the provider's
+            # prompt cache each time (see docs/prompt-caching.md).
+            system_prompt += episodic.block_for(state["messages"])
+        messages = [SystemMessage(system_prompt), *state["messages"]]
         try:
             reply = model_with_tools.invoke(messages)
             return {"messages": [reply]}
@@ -340,6 +362,42 @@ def make_support_model(
             return {"messages": [AIMessage(content=GRACEFUL_ERROR_MESSAGE)]}
 
     return support_model
+
+
+class EpisodicRecall:
+    """Reads past cases out of the store and renders them for the prompt.
+
+    A small object rather than a bare function so the node stays readable and the
+    store is bound ONCE at build time — the support node has no business knowing
+    where episodes live, only that it can ask for a prompt block.
+    """
+
+    def __init__(self, store: BaseStore, limit: int, min_score: float = 0.0) -> None:
+        self._store = store
+        self._limit = limit
+        self._min_score = min_score
+
+    def block_for(self, messages: Sequence[object]) -> str:
+        """The few-shot block for the current situation, or "" if there is none.
+
+        The query is the customer's LAST message, not the whole thread: we are
+        matching "what is being asked right now" against "what was happening
+        then". Embedding the full history would drown that signal in small talk.
+        """
+        last_human = next(
+            (m for m in reversed(messages) if isinstance(m, HumanMessage)), None
+        )
+        if last_human is None:
+            return ""
+        episodes = recall_episodes(
+            self._store,
+            query=str(last_human.content),
+            limit=self._limit,
+            min_score=self._min_score,
+        )
+        if episodes:
+            logger.info("Episodic recall: injecting %d past case(s).", len(episodes))
+        return format_episodes(episodes)
 
 
 # --- Escalate (human-in-the-loop handoff) ----------------------------------
@@ -471,3 +529,51 @@ def make_guard_output(guard: OutputGuard) -> Callable[[SupportState], dict]:
         return {"messages": [AIMessage(content=decision.sanitized_text, id=last.id)]}
 
     return guard_output
+
+
+# --- Close turn (Phase 14: the write side of episodic memory) ---------------
+
+
+def make_close_turn(store: BaseStore) -> Callable[[SupportState, RunnableConfig], dict]:
+    """Build the last node of every answering path: flag the thread for learning.
+
+    This is the CHEAP half of episodic memory, and the split is the whole design.
+    Distilling a case costs an LLM call, so doing it here would add a third
+    sequential hop to a turn that already takes ~5 s (`docs/latence.md`), and it
+    would distil a fragment: mid-conversation, the outcome is not known yet.
+    What this node writes instead is a marker — one upsert, no embedding, no
+    model — that `memory/consolidate.py` picks up later, once the thread is quiet.
+
+    Two filters, both of which decide what the agent is ALLOWED to learn:
+
+    - Only the `support` branch produces candidates. "Bonjour" is not a case, and
+      an episode distilled from small talk would burn prompt space forever.
+    - `resolved` is False as soon as a human owns the thread. An episodic memory
+      that stores its own failures poisons the pool it draws few-shot examples
+      from — the escalation flag is the outcome signal we already have, and it is
+      the same one the deflection rate is measured on.
+
+    The takeover path is recorded rather than skipped ON PURPOSE: a thread that
+    started as support and ended with a handoff already has a candidate row, and
+    this is what flips it to unresolved so consolidation discards it.
+    """
+
+    def close_turn(state: SupportState, config: RunnableConfig) -> dict:
+        handled_by_human = bool(state.get("handled_by_human"))
+        # `route` persists in the checkpoint, so on a takeover turn it still holds
+        # the PREVIOUS turn's value — hence the handoff check comes first.
+        if not handled_by_human and state.get("route") != "support":
+            return {}
+
+        thread_id = config.get("configurable", {}).get("thread_id")
+        if not thread_id:
+            # No thread id means no conversation to come back to (a bare
+            # `invoke` in a test). Nothing to learn from, nothing to log loudly.
+            return {}
+
+        record_candidate(
+            store, thread_id=str(thread_id), resolved=not handled_by_human
+        )
+        return {}
+
+    return close_turn

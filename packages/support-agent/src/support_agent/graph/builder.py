@@ -3,10 +3,10 @@
 This is the "capot ouvert" replacement for `create_agent`: a `StateGraph` with
 named nodes and conditional edges we control ourselves.
 
-    START ─► guard_input ─┬─(blocked)──────────────────────────────────────► END
+    START ─► guard_input ─┬─(blocked)─────────────────────────────────────────────► END
                           ├─(human owns the case)─► human_takeover ─┐
                           └─► router ─┬─(answer)──► answer ─────────┤
-                                      ├─(support)─► model ⇄ tools ──┼─► guard_output ─► END
+                                      ├─(support)─► model ⇄ tools ──┼─► guard_output ─► close_turn ─► END
                                       └─(escalate)► escalate ───────┘
 
 The `escalate` branch does NOT pause the graph: it files a ticket, sets
@@ -21,9 +21,15 @@ before anything else sees the message; a refused message short-circuits to END.
 PII/secrets, replaces a reply that echoes the system prompt — just before it
 leaves. Both are gated by the `GUARDRAILS_ENABLED` kill switch.
 
-Memory is preserved exactly as before: the checkpointer keeps the conversation
-(short term), the store keeps the customer (long term), and `context_schema`
-carries the `user_id` the memory tools use for per-user isolation.
+`close_turn` (Phase 14) is the write side of EPISODIC memory: it flags the thread
+as maybe-worth-learning-from, with one store upsert and no model call. The
+distillation itself runs offline (`memory/consolidate.py`), which is why this
+node can sit on the critical path without costing the customer anything.
+
+Memory: the checkpointer keeps the conversation (short term), the store keeps
+both the customer (long term, per-`user_id`) and the CASES that worked (episodic,
+shared across customers), and `context_schema` carries the `user_id` the memory
+tools use for per-user isolation.
 """
 
 from __future__ import annotations
@@ -36,8 +42,10 @@ from support_agent.graph.nodes import (
     ANSWER_SYSTEM_PROMPT,
     ROUTER_SYSTEM_PROMPT,
     SUPPORT_SYSTEM_PROMPT,
+    EpisodicRecall,
     entry_route,
     human_takeover,
+    make_close_turn,
     make_escalate,
     make_answer,
     make_guard_input,
@@ -74,8 +82,23 @@ from support_agent.memory import (
 _ENTRY_PATHS = {END: END, "human_takeover": "human_takeover", "router": "router"}
 
 
-def build_support_graph() -> CompiledStateGraph:
-    """Build and compile the explicit support agent graph."""
+def build_support_graph(*, learn_from_turns: bool = True) -> CompiledStateGraph:
+    """Build and compile the explicit support agent graph.
+
+    Args:
+        learn_from_turns: whether this graph may FEED episodic memory (the
+            `close_turn` node). False builds a read-only learner: it still
+            recalls past cases, it just never records new ones.
+
+            The EVAL harness needs exactly that, and the reason is not tidiness.
+            An eval run drives the real graph, so with learning on, every run
+            would teach the agent from the very conversations used to grade it —
+            and the next run would be graded against a pool the previous run
+            grew. The measurement would drift upward on its own, which is the
+            most flattering way for a benchmark to lie. Measuring the value of
+            episodic memory is done by flipping `EPISODIC_MEMORY_ENABLED`
+            deliberately, never by letting the harness write.
+    """
     settings = get_settings()
     # Latency (see docs/latence.md): the ROUTER runs on the FAST model — the one
     # place a small model measurably cut TTFT (short prompt, easy classification).
@@ -113,6 +136,19 @@ def build_support_graph() -> CompiledStateGraph:
         *build_action_tools(backend, tool_guard),
     ]
 
+    # Phase 14: episodic memory. Read side = a few-shot block appended to the
+    # support prompt; write side = a `close_turn` node flagging the thread for
+    # later distillation. Both hang off the SAME kill switch, because half of the
+    # loop is worse than none: recalling without ever writing gives a memory that
+    # never fills, writing without recalling pays for cases nobody reads.
+    episodic = (
+        EpisodicRecall(
+            store, settings.episodic_recall_limit, settings.episodic_min_score
+        )
+        if settings.episodic_memory_enabled
+        else None
+    )
+
     # `context_schema` lets nodes and tools read the runtime `user_id`.
     builder = StateGraph(SupportState, context_schema=AgentContext)
 
@@ -120,10 +156,21 @@ def build_support_graph() -> CompiledStateGraph:
     # support ReAct loop stay on the strong model (see docs/latence.md).
     builder.add_node("router", make_router(fast_model, fallbacks))
     builder.add_node("answer", make_answer(model, fallbacks))
-    builder.add_node("model", make_support_model(model, tools, fallbacks))
+    builder.add_node("model", make_support_model(model, tools, fallbacks, episodic))
     builder.add_node("tools", ToolNode(tools))
     builder.add_node("escalate", make_escalate(backend, tool_guard))
     builder.add_node("human_takeover", human_takeover)
+
+    # The LAST hop of every answering path. `close_turn` writes nothing the
+    # customer sees — it is bookkeeping (one store upsert, no LLM, no embedding) —
+    # so it sits after the exit guard rather than before it: nothing it does can
+    # delay or alter the reply. A blocked input never reaches it, by construction:
+    # that path short-circuits to END from the entry edge.
+    last = END
+    if episodic is not None and learn_from_turns:
+        builder.add_node("close_turn", make_close_turn(store))
+        builder.add_edge("close_turn", END)
+        last = "close_turn"
 
     # Guardrails (Phase 12): the kill switch keeps the graph identical to before
     # when disabled. When enabled, the entry guard (12-A) sits BEFORE the router
@@ -140,13 +187,13 @@ def build_support_graph() -> CompiledStateGraph:
         builder.add_node("guard_output", make_guard_output(output_guard))
         builder.add_edge(START, "guard_input")
         builder.add_conditional_edges("guard_input", entry_route, _ENTRY_PATHS)
-        builder.add_edge("guard_output", END)
+        builder.add_edge("guard_output", last)
         terminal = "guard_output"
     else:
         # Same entry decision without the guard node: the human-takeover check
         # must NOT depend on the guardrails kill switch.
         builder.add_conditional_edges(START, entry_route, _ENTRY_PATHS)
-        terminal = END
+        terminal = last
 
     # The routing decision: the conditional edge maps each `route` value to a node.
     builder.add_conditional_edges(

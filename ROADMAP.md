@@ -304,6 +304,32 @@ garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
 
 ---
 
+## Phase 14 — Mémoire épisodique (apprendre des cas qui ont marché) ✅
+**Concept :** l'agent réutilise **la méthode** d'un cas passé résolu, rejoué en
+few-shot. À ne pas confondre avec le sémantique (des *faits* sur UN client) : un
+épisode est **partagé entre clients** — c'est le but, et c'est le risque.
+**Livrable :** la boucle complète, un seul appel LLM et il est **hors ligne**.
+
+- `memory/episodic.py` — schéma `Episode` en 4 champs (`observation` / `thoughts`
+  / `action` / `result`, repris de LangMem ; `thoughts` est le champ qui distingue
+  un épisode d'un doublon de la FAQ), écriture, rappel, rendu du bloc de prompt.
+- Nœud **`close_turn`** — écrit un *candidat* (1 upsert, **0 modèle**), une clé par
+  `thread_id` : le debounce sort des données, pas d'un timer en RAM.
+- **`make consolidate`** — la distillation, hors ligne, à blanc par défaut. Lit le
+  fil chez le checkpointer (le candidat ne stocke qu'un pointeur).
+- Injection few-shot dans le nœud `model`, **après** le prompt stable (cache).
+- 28 tests offline. **Trois garde-fous** : on n'apprend que des cas **résolus**
+  (`not handled_by_human`) ; **plancher de pertinence** `EPISODIC_MIN_SCORE` (sans
+  lui, le 1er épisode écrit atterrit dans toutes les conversations — défaut réel,
+  attrapé par un test) ; **anonymisation à l'écriture** (prompt + `ToolGuard`).
+- Kill switch `EPISODIC_MEMORY_ENABLED` : off = prompt identique octet pour octet.
+
+**Reste ouvert :** mesurer le gain (dataset Phase 9, avec/sans, comparer le taux de
+déflexion), programmer la consolidation (cron App Service), plafonner/dédupliquer
+le vivier. Détail : [`docs/memoire.md`](docs/memoire.md).
+
+---
+
 ### Où on en est
 - [x] Phase 0 — structure & fondations
 - [x] Phase 1 — couche LLM agnostique (run live Mistral OK)
@@ -317,8 +343,10 @@ garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
 - [x] Phase 9 — évaluation & qualité (dataset + evaluators, 6/6 pytest + run LangSmith EU)
 - [x] Phase 10 — persistance & robustesse (SQLite + retries/timeout + fallback provider + erreurs nœuds)
 - [x] Phase 12 — sécurité & guardrails (A entrée + B sortie/anti-fuite + C outils & mémoire)
-- [ ] Phase 13 — exposition & déploiement 🚧 ← **en cours** (étapes 1 à 4/5 faites,
-      reste Azure + identité prouvée)
+- [ ] Phase 13 — exposition & déploiement 🚧 (étapes 1 à 4/5 faites ; **l'étape 5
+      Azure est EN PAUSE** depuis le 2026-07-28 — droits à obtenir côté centre de
+      formation, blocage externe, pas technique)
+- [x] Phase 14 — mémoire épisodique (candidat 0-LLM + consolidation hors ligne + few-shot plancheré)
 - [ ] Phase 11 — cycle de vie du support (Case + Ticket) *(réordonnée après la 12, puis après la 13)*
 
 > Note : Phases 11 et 12 **réordonnées** — la sécurité (guardrails) passe avant le
@@ -329,3 +357,9 @@ garde de sortie corrigé en `519f254` (raisons détaillées : le plan, §5).
 > vrai front (B2) et l'identité prouvée (le `user_id` signé n'a pas de frontière
 > réseau à défendre tant qu'il n'y a pas d'API). Le cycle de vie du support
 > (Phase 11) est une **complétude métier** : il attend sans rien bloquer.
+>
+> Note (2026-07-28) : l'étape 5 (Azure) est **bloquée par un droit d'accès** côté
+> centre de formation — rien de technique, donc rien à débloquer par le code. La
+> **Phase 14** (mémoire épisodique) a été faite pendant cette attente : elle ne
+> dépend d'Azure que sur un point, la planification de `make consolidate`, qui
+> restera manuelle jusqu'au déblocage.

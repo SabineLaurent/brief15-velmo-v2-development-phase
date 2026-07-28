@@ -94,7 +94,12 @@ def main() -> None:
     push_dataset(client)
 
     # 2. Build the agent once and wrap it as the evaluation target.
-    graph = build_support_graph()
+    #    `learn_from_turns=False`: a benchmark must not teach the thing it grades.
+    #    With it on, each run would distil episodes out of the very conversations
+    #    used to score the agent, and the NEXT run would be graded against a pool
+    #    the previous one grew — a score that improves on its own. Recall stays on
+    #    (we measure the agent as deployed); only the write side is cut.
+    graph = build_support_graph(learn_from_turns=False)
     target = make_target(graph)
 
     # 3. Score the whole dataset. The experiment name carries the provider/model
