@@ -39,7 +39,13 @@ from support_agent.memory.episodic import (
 _VOCAB = ("delivery", "refund", "invoice")
 
 
+# Counts embedding calls, so a test can assert on COST, not only on output. In
+# production each of these is a network round trip to the embeddings provider.
+_EMBED_CALLS = {"n": 0}
+
+
 def _fake_embed(texts: list[str]) -> list[list[float]]:
+    _EMBED_CALLS["n"] += 1
     vectors = []
     for text in texts:
         lowered = text.lower()
@@ -152,6 +158,38 @@ def test_the_only_episode_in_store_is_not_injected_into_every_conversation(
     prompt = _system_prompt_seen(store, "where is my delivery")
 
     assert prompt == SUPPORT_SYSTEM_PROMPT
+
+
+def test_recall_is_computed_once_per_message_not_once_per_model_call(
+    store: InMemoryStore,
+) -> None:
+    """The support node is the LLM step of a ReAct LOOP: it runs again after every
+    tool result, with the customer's message unchanged. Recalling on each pass
+    embedded the identical text again and again — measured as 2 of the 3 embedding
+    round trips in a one-tool turn. Same input, same output, billed per pass."""
+    save_episode(store, _episode("delivery"))
+    recall = EpisodicRecall(store, limit=2, min_score=0.35)
+    message = HumanMessage(content="my delivery never arrived", id="msg-1")
+
+    first = recall.block_for([message])
+    embeds_after_first = _EMBED_CALLS["n"]
+    second = recall.block_for([message, AIMessage(content="checking…")])
+
+    assert second == first  # the block itself is unchanged...
+    assert _EMBED_CALLS["n"] == embeds_after_first  # ...and cost nothing to reuse
+
+
+def test_a_new_message_gets_a_fresh_lookup(store: InMemoryStore) -> None:
+    """The memo must not outlive the message it was built for — the next turn asks
+    a different question, and the pool may have grown since."""
+    save_episode(store, _episode("delivery"))
+    recall = EpisodicRecall(store, limit=2, min_score=0.35)
+
+    recall.block_for([HumanMessage(content="my delivery never arrived", id="msg-1")])
+    before = _EMBED_CALLS["n"]
+    recall.block_for([HumanMessage(content="my delivery never arrived", id="msg-2")])
+
+    assert _EMBED_CALLS["n"] > before
 
 
 def test_recall_is_disabled_by_passing_none(store: InMemoryStore) -> None:

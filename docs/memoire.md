@@ -201,22 +201,46 @@ répond de façon inégale (pas 100 % d'entrée), un **juge sémantique** plutô
 heuristiques de forme, et un vivier alimenté par du **trafic réel**. C'est un
 chantier d'évaluation, pas un run de plus.
 
+### Le comptage des embeddings (2026-07-28) — une hypothèse fausse, un vrai déchet
+
+Hypothèse de départ : « la question est sûrement embeddée deux fois, une fois par
+la FAQ, une fois par l'épisodique — mutualisons ». **Fausse**, et le comptage le
+montre. Un tour support avec un appel d'outil = **3 allers-retours** d'embeddings
+(⚠️ `OpenAIEmbeddings.embed_query` **délègue** à `embed_documents` : une trace
+naïve compte 4 appels là où le réseau n'en voit que 3) :
+
+| # | Qui | Texte embeddé |
+|---|---|---|
+| 1 | rappel épisodique | la question **verbatim** du client |
+| 2 | recherche FAQ | `'délais de livraison en Europe'` — **reformulation du modèle** |
+| 3 | rappel épisodique | **la même question verbatim, à nouveau** |
+
+**Pourquoi la mutualisation ne marche pas :** la FAQ est un **outil**, donc c'est
+le *modèle* qui écrit son `query` ; l'épisodique embedde le *message brut*. Textes
+différents, instances `Embeddings` différentes, moments différents (nœud `tools`
+vs nœud `model`). Il n'y a rien à partager.
+
+**Le vrai déchet était ailleurs, et plus gros :** le rappel tournait à **chaque
+passe de la boucle ReAct**. Le message du client ne change pas pendant un tour →
+même entrée, même sortie, deux appels réseau facturés. Le coût n'était donc pas
+300 ms par tour mais **300 ms × nombre de passes du nœud `model`**.
+
+**Correctif :** mémoïsation dans `EpisodicRecall`, **clé = l'id du dernier message
+humain**. Les id sont uniques par message, donc le memo s'invalide tout seul au
+tour suivant — pas de TTL, pas de champ de state, rien dans le checkpoint. Memo de
+taille 1 (les appels répétés sont consécutifs) : sous charge concurrente deux fils
+peuvent s'évincer, ce qui coûte un recalcul, jamais un bloc erroné — la clé doit
+correspondre. Vérifié : **3 → 2 allers-retours** sur le même tour.
+
 ### Ce qui reste ouvert
 - **Programmer la consolidation** (cron App Service) — aujourd'hui c'est manuel.
 - **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
   d'épisodes ni ne fusionne deux cas quasi identiques. Le TTL (compté depuis le
   **dernier accès**) fait déjà mourir les épisodes que personne ne repêche.
-- **La latence du rappel (~300 ms/tour support).** ⛔ Le court-circuit « vivier
-  vide → pas d'appel » a été **examiné puis écarté** : il n'aide que tant que le
-  vivier est vide (jour 1, après purge), et surtout il ne mord pas sur le vrai
-  coût — les 300 ms sont payés à *chaque* tour dès qu'il y a un seul épisode, y
-  compris quand rien ne franchit le plancher. ⭐ **La piste sérieuse, non
-  vérifiée à ce jour** : dans un même tour, la question du client est
-  probablement embeddée **deux fois** — une fois par la recherche FAQ
-  (`knowledge/`), une fois par le rappel épisodique. Si c'est bien le même
-  texte, mutualiser l'appel supprime 100 % du surcoût. **C'est la première chose
-  à vérifier** avant toute autre optimisation (embeddings locaux, rappel
-  conditionnel au routeur, rappel au 1er tour seulement).
+- **La latence du rappel.** Deux pistes examinées, une seule était réelle — voir
+  la mesure ci-dessous. Restent, si les ~300 ms deviennent un sujet : embeddings
+  **locaux** pour le rappel, ou rappel **conditionnel** (au 1er tour d'un fil,
+  ou selon la décision du routeur).
 - **Prouver le gain**, si on le veut vraiment : cela demande un dataset de cas
   *ratés*, un juge sémantique et du trafic réel — pas un run de plus.
 

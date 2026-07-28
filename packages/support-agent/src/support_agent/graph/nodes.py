@@ -376,6 +376,9 @@ class EpisodicRecall:
         self._store = store
         self._limit = limit
         self._min_score = min_score
+        # Memo of the last rendered block, keyed by the message it was built for.
+        self._memo_key: str | None = None
+        self._memo_block: str = ""
 
     def block_for(self, messages: Sequence[object]) -> str:
         """The few-shot block for the current situation, or "" if there is none.
@@ -383,12 +386,35 @@ class EpisodicRecall:
         The query is the customer's LAST message, not the whole thread: we are
         matching "what is being asked right now" against "what was happening
         then". Embedding the full history would drown that signal in small talk.
+
+        **Computed once per customer message, not once per model call.** This node
+        is the LLM step of a ReAct LOOP, so it runs again after every tool result —
+        and the customer's last message has not changed in between. Without the
+        memo below, a turn with one tool call embedded the exact same text twice
+        (measured: 2 of the 3 embedding round trips in a turn were this one call,
+        repeated), and a turn chaining two tools paid it three times. Same input,
+        same output, billed per pass.
+
+        Keyed by message ID rather than text: IDs are unique per message, so the
+        memo self-invalidates on the next turn without a TTL, and a customer
+        repeating themselves word for word still gets a fresh lookup against a
+        pool that may have grown since.
         """
         last_human = next(
             (m for m in reversed(messages) if isinstance(m, HumanMessage)), None
         )
         if last_human is None:
             return ""
+
+        # Size-1 memo: the repeated calls we are killing are CONSECUTIVE (one
+        # ReAct loop). Under concurrent turns two conversations can evict each
+        # other, which costs a recomputation — never a wrong block, since the key
+        # must match. Degrading to the previous behaviour is an acceptable worst
+        # case; serving another customer's block would not be.
+        key = last_human.id
+        if key is not None and self._memo_key == key:
+            return self._memo_block
+
         episodes = recall_episodes(
             self._store,
             query=str(last_human.content),
@@ -397,7 +423,10 @@ class EpisodicRecall:
         )
         if episodes:
             logger.info("Episodic recall: injecting %d past case(s).", len(episodes))
-        return format_episodes(episodes)
+        block = format_episodes(episodes)
+        if key is not None:
+            self._memo_key, self._memo_block = key, block
+        return block
 
 
 # --- Escalate (human-in-the-loop handoff) ----------------------------------
