@@ -162,8 +162,8 @@ jamais en laissant le harnais écrire.
 - **Mesurer.** L'épisodique doit se prouver : dataset LangSmith de la Phase 9, run
   avec et sans (`EPISODIC_MEMORY_ENABLED`), on compare le **taux de déflexion**.
   Tant que ce n'est pas fait, c'est une intuition raisonnée, pas un gain.
-  ⚠️ Repartir d'un vivier **propre** : la base de dev contient 11 épisodes
-  distillés depuis des conversations d'éval (voir ci-dessus).
+  Le vivier de dev est **vide** (les 11 épisodes issus de runs d'éval ont été
+  purgés le 2026-07-28) : la mesure partira d'une base propre.
 - **Programmer la consolidation** (cron App Service) — aujourd'hui c'est manuel.
 - **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
   d'épisodes ni ne fusionne deux cas quasi identiques. Le TTL (compté depuis le
