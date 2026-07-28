@@ -1,14 +1,22 @@
-"""Tests for the right to be forgotten (R5) and traceability (R6).
+"""Isolation (R3), the right to be forgotten (R5) and traceability (R6).
 
 What is worth asserting here is not "the store can delete a row" — that is
-LangGraph's job. It is the five decisions that are OURS, and that a future edit
-could quietly undo, each of which turns a GDPR feature into a lie if it breaks:
+LangGraph's job. It is the six decisions that are OURS, and that a future edit
+could quietly undo, each of which turns a privacy guarantee into a lie if it
+breaks:
 
     1. an audit dump is COMPLETE (it pages; it does not stop at the store default);
-    2. one customer's erasure never touches another's data;
-    3. a deletion is VERIFIED by reading back, and fails loudly when it is not;
-    4. a WEAK semantic match is never deleted — guessing destroys the wrong fact;
-    5. "nothing matched" is reported as such, never as a successful deletion.
+    2. a semantic RECALL cannot reach another customer's facts, even when theirs
+       is the better match and even when the query asks for them by name;
+    3. one customer's erasure never touches another's data;
+    4. a deletion is VERIFIED by reading back, and fails loudly when it is not;
+    5. a WEAK semantic match is never deleted — guessing destroys the wrong fact;
+    6. "nothing matched" is reported as such, never as a successful deletion.
+
+Point 2 was verified the only way an isolation test can be trusted: by breaking
+`memories_namespace` so it ignores the `user_id`, confirming all three recall
+tests go red, and restoring it. An isolation test that has never been seen to
+fail is a comment with a `def` in front of it.
 
 The embeddings are faked with a deterministic bag-of-words so the semantic search
 really runs (no network, no API key, no flakiness).
@@ -110,6 +118,76 @@ def test_audit_dump_survives_a_malformed_row():
 
     assert record.key == "broken"
     assert "no text field" in record.text
+
+
+# --- R3: isolation on the READ path ----------------------------------------
+#
+# The requirement is "la mémoire d'un utilisateur n'est jamais accessible à un
+# autre", and RECALL is where that is tested for real. Erasure isolation (below)
+# proves the namespace scopes a listing; these two prove it scopes a *semantic
+# search*, which is the operation the agent performs on every support turn.
+#
+# Both are built adversarially: the other customer's fact is written to be the
+# BETTER match for the query, so if namespace scoping ever stopped working, the
+# leaked row would rank FIRST rather than hide at the bottom of the results.
+
+
+def test_a_semantic_search_cannot_reach_another_customers_facts():
+    """A vector search for Marc must not surface Sophie's row — even when hers wins.
+
+    Sophie's fact repeats the query term, so on similarity alone it outranks
+    Marc's. Nothing but the namespace separates them, which is exactly the
+    property under test: remove the scoping and this test fails loudly instead of
+    passing by luck.
+    """
+    store = _store()
+    _remember(store, "marc", "m1", "Prefers French")
+    _remember(store, "sophie", "s1", "order order order reference 99999")
+
+    results = store.search(memories_namespace("marc"), query="order", limit=10)
+
+    assert all(item.namespace == memories_namespace("marc") for item in results)
+    assert not any("99999" in item.value["text"] for item in results)
+
+
+def test_the_recall_tool_is_scoped_by_the_RUNTIME_not_by_its_argument():
+    """The isolation that has to survive an adversarial query.
+
+    `query` is written by the MODEL, so it is attacker-reachable through the
+    customer's message ("what do you know about Sophie's order?"). `user_id` is
+    not: it comes from the runtime context. This test asks for another customer by
+    name and asserts the boundary is structural, not a matter of the model
+    behaving well.
+    """
+    store = _store()
+    _remember(store, "marc", "m1", "Prefers French")
+    _remember(store, "sophie", "s1", "order order order reference 99999")
+    tools = {tool.name: tool for tool in build_memory_tools()}
+
+    recalled = tools["search_memories"].invoke(
+        {"query": "sophie order reference", "runtime": _runtime(store, "marc")}
+    )
+
+    assert "99999" not in recalled
+    assert "Prefers French" in recalled
+
+
+def test_recall_reports_an_empty_memory_rather_than_borrowing_someone_elses():
+    """The failure mode worth naming: a cold namespace must stay cold.
+
+    A brand-new customer is the case where a broken scope would be least visible —
+    there is nothing of theirs to crowd out the leak.
+    """
+    store = _store()
+    _remember(store, "sophie", "s1", "order order order reference 99999")
+    tools = {tool.name: tool for tool in build_memory_tools()}
+
+    recalled = tools["search_memories"].invoke(
+        {"query": "order reference", "runtime": _runtime(store, "newcomer")}
+    )
+
+    assert "99999" not in recalled
+    assert "no stored memory" in recalled.lower()
 
 
 # --- R3 + R5: erasure stays inside one customer -----------------------------
