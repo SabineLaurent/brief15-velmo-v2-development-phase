@@ -107,6 +107,7 @@ make check    # lint + tests
 - « Quels bugs / dettes connus traînent dans le code ? » → `docs/audit-code-2026-07-19.md`
 - « Où en est la sécurité de la surface réseau (étapes 1→4) ? » → `docs/revue-securite-2026-07-25.md`
 - « Quels défauts de **correction** (hors sécurité) restent ouverts ? » → `docs/revue-code-2026-07-25.md`
+- « Qu'a donné la revue du chantier **escalade** ? » → `docs/80a6c9e-revue-code-2026-07-26.md`
 - « Comment on choisit le provider LLM ? » → `.env` + `packages/support-agent/src/support_agent/llm/`
 - « Quels types de mémoire, et où vivent-ils ? » → `docs/memoire.md`
 - « Qui gère le streaming de la réponse (agent / API / front) ? » → `docs/streaming.md`

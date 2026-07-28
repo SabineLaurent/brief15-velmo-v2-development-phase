@@ -374,6 +374,67 @@ chiffre, et non une intuition, qui doit décider du `minReplicas`. C'est là que
 cesse d'être de la doctrine et devient une ligne de facture. Deux issues :
 `minReplicas: 1`, ou sortir l'ingestion du boot pour de vrai.
 
+#### Dans quel ordre déployer les blocs — **provisionner ≠ brancher**
+
+Compose démarre les trois blocs d'un coup ; Azure, non : on crée des ressources une
+par une, et le premier déploiement est celui qui échoue. La question « lequel
+d'abord ? » se tranche donc sur un seul critère : **combien d'inconnues chaque marche
+mélange**.
+
+**Ce que le code impose vraiment.** Postgres n'est pas un prérequis de l'agent, c'est
+un prérequis de **sa configuration**. Le `lifespan` construit le graphe **au démarrage**
+(`server.py:166`), donc les factories mémoire ; avec `PERSISTENCE_BACKEND=postgres`,
+`short_term.py:63` et `long_term.py:118` appellent `setup()` et **se connectent au
+boot** — base injoignable = processus qui refuse de démarrer (pas de dégradation
+silencieuse, c'est voulu). Avec `PERSISTENCE_BACKEND=memory`, aucune base n'est
+touchée : l'agent démarre seul.
+Le seul maillon **inconditionnel** du démarrage n'est donc pas Postgres, c'est le
+**provider LLM** : la sonde d'embeddings de `long_term.py:84` s'exécute dans les trois
+branches, suivie de l'indexation de la FAQ.
+
+**Les deux ordres possibles, et ce qu'ils prouvent :**
+
+| | Marche 1 | Marche 2 | Ce que ça coûte |
+|---|---|---|---|
+| **A** — base d'abord | `postgres` | `agent-api` en `postgres` | Le premier déploiement Azure mêle **deux** inconnues : « mon image amd64 tourne-t-elle sur ACA ? » et « ma connectivité base est-elle bonne ? ». Un échec = deux suspects. |
+| **B** — agent d'abord ✅ | `agent-api` en `memory` | bascule vers `postgres` | Marche 1 prouve image + ingress + secrets + **sortie réseau vers le provider LLM** + durée de warm-up réelle. Marche 2 ne peut plus échouer que sur la base : pare-feu, `sslmode=require`, droits de création de schéma, pgvector. |
+
+**On retient B**, pour une raison qui tient à l'architecture : la bascule coûte **une
+variable d'environnement** (nouvelle révision ACA), **pas une reconstruction d'image**.
+C'est précisément le bénéfice pour lequel `persistence_backend` existe — l'utiliser
+ici, c'est encaisser ce qui a déjà été payé.
+
+**La nuance qui réconcilie les deux ordres.** *Provisionner* une ressource et *en
+dépendre au démarrage* ne sont pas la même chose. Un **Flexible Server** met plusieurs
+minutes à se créer et porte une chausse-trappe connue : **pgvector doit être autorisé
+explicitement** (liste `azure.extensions`) avant que `CREATE EXTENSION vector` passe —
+sinon c'est le `setup()` du store long terme qui l'apprend, au pire moment. Donc :
+**créer la base tôt** (c'est asynchrone, et ça révèle le sujet pgvector tout de suite),
+**ne brancher l'agent dessus qu'ensuite**. Postgres passe en premier dans l'horloge,
+en second dans la chaîne de dépendances.
+
+**La séquence retenue :**
+
+```
+0. ACR + push des deux images (amd64, taguées du même SHA)   ─┐ en parallèle :
+1. Provisionner le Flexible Server + autoriser pgvector       ─┘ la base se crée
+2. agent-api sur ACA, PERSISTENCE_BACKEND=memory   → curl /health, /ready, SSE
+3. agent-api : bascule PERSISTENCE_BACKEND=postgres → l'état survit au redémarrage
+4. client sur ACA, AGENT_API_URL = l'ingress HTTPS  → le parcours complet
+```
+
+**Le client passe en dernier**, toujours : il ne connaît que deux variables
+(`AGENT_API_URL`, `AGENT_API_KEY`), donc il n'a rien à prouver que les marches
+précédentes n'aient déjà prouvé — et le tester avant l'agent reviendrait à
+diagnostiquer une UI pour un problème de cerveau.
+
+⚠️ **Déployer bloc par bloc ≠ publier bloc par bloc.** Le mono-repo n'a **qu'un**
+`uv.lock`, et les deux images se construisent depuis la racine : la garantie offerte
+est « ce jeu de dépendances a été testé **ensemble** ». Redéployer le client seul
+contre un agent d'un autre commit jette cette garantie sans rien mettre à la place
+(il n'y a pas de versionnement indépendant des membres). La règle : **monter bloc par
+bloc, publier par jeu** — un commit → les deux images taguées du même SHA.
+
 ### Alternatives d'hébergement écartées
 
 **App Service for Containers** (plus simple, mais taillé pour un conteneur unique) et
