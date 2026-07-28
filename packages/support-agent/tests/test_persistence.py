@@ -50,11 +50,19 @@ def test_memory_backend_is_the_declared_default() -> None:
     assert isinstance(get_checkpointer(_settings(persistence_backend="memory")), InMemorySaver)
 
 
-def test_unknown_backend_is_rejected_by_name() -> None:
-    """A typo must fail loudly at boot, not fall back to a surprise default."""
+def test_unknown_backend_is_rejected_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A typo must fail loudly at boot, not fall back to a surprise default.
+
+    Asserted on BOTH factories on purpose: one variable drives them, so a name
+    that one accepts and the other refuses would mean a half-configured process.
+    """
+    _forbid_embeddings(monkeypatch)
     settings = _settings(persistence_backend="postgress")  # typo on purpose
+
     with pytest.raises(ValueError, match="postgress"):
         get_checkpointer(settings)
+    with pytest.raises(ValueError, match="postgress"):
+        get_store(settings)
 
 
 def test_backend_name_is_case_insensitive() -> None:
@@ -65,13 +73,22 @@ def test_backend_name_is_case_insensitive() -> None:
 # --- The Postgres branch: failing well ----------------------------------------
 
 
-def test_postgres_without_database_url_fails_before_connecting() -> None:
+def test_postgres_without_database_url_fails_before_connecting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The actionable error is the feature.
 
     A missing connection string discovered inside a customer request is the same
     bug found at the worst moment. Both factories must refuse at boot, and the
     message must name the variable AND show a valid value.
+
+    `_forbid_embeddings` is what makes the test's own name true. Without it, the
+    assertion held for the wrong reason: `get_store` probed the embeddings model
+    FIRST, so the check was only reachable from a machine that already had a
+    provider key — it passed on the developer's laptop at the price of a real
+    network call, and could not be reached at all on the CI runner.
     """
+    _forbid_embeddings(monkeypatch)
     settings = _settings(persistence_backend="postgres", database_url=None)
 
     with pytest.raises(ValueError, match="DATABASE_URL"):
@@ -130,3 +147,19 @@ class _FakeEmbeddings:
 
     def embed_query(self, text: str) -> list[float]:
         return [0.0, 1.0, 0.0]
+
+
+def _forbid_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Turn any embeddings call into an immediate, unmistakable failure.
+
+    This is the tool that upgrades "it raised the right error" into "it raised
+    it WITHOUT doing I/O" — an ordering no assertion on the exception can state
+    on its own. `AssertionError` is deliberately not a `ValueError`: it escapes
+    the surrounding `pytest.raises` instead of being mistaken for the expected
+    failure, so a regression reads as "config validated too late", not as a pass.
+    """
+
+    def _explode(settings: Settings) -> None:
+        raise AssertionError("config must be validated before any embeddings call")
+
+    monkeypatch.setattr("support_agent.memory.long_term.get_embeddings", _explode)

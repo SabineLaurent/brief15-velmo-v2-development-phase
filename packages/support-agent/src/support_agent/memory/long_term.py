@@ -27,6 +27,11 @@ from support_agent.llm.embeddings import get_embeddings
 from support_agent.memory.postgres_conn import get_postgres_pool, require_database_url
 from support_agent.memory.sqlite_conn import open_sqlite_connection
 
+# The backend names this factory knows how to build, in the same order as the
+# docstring below. `get_checkpointer` accepts exactly these three: `PERSISTENCE_BACKEND`
+# is ONE variable driving BOTH factories, so the two lists must never drift apart.
+_SUPPORTED_BACKENDS = ("memory", "sqlite", "postgres")
+
 
 @dataclass
 class AgentContext:
@@ -78,13 +83,36 @@ def get_store(settings: Settings | None = None) -> BaseStore:
         settings: Optional settings override (handy for tests).
     """
     settings = settings or get_settings()
+    backend = settings.persistence_backend.lower()
+
+    # CONFIG FIRST, I/O SECOND. Both checks below run BEFORE the embeddings probe,
+    # and the order is the feature: otherwise a configuration bug (a typo in the
+    # backend name, a missing DATABASE_URL) surfaces as an HTTP error coming from
+    # the embeddings provider, and the check meant to report it can only be reached
+    # by a machine that already holds valid credentials. A config bug must never
+    # cost a network round trip — nor a billed embeddings call — to be named.
+    #
+    # `get_checkpointer` already rejects an unknown name before touching anything;
+    # validating here keeps the two factories symmetrical, which matters because a
+    # SINGLE variable (`PERSISTENCE_BACKEND`) drives both. One accepting what the
+    # other refuses would mean a half-configured process.
+    if backend not in _SUPPORTED_BACKENDS:
+        raise ValueError(
+            f"Unknown PERSISTENCE_BACKEND={settings.persistence_backend!r}. "
+            f"Expected one of: {', '.join(_SUPPORTED_BACKENDS)}."
+        )
+    if backend == "postgres":
+        # Refuse a missing connection string HERE, before the probe below spends a
+        # network call. The branch at the bottom validates again — it is a pure,
+        # idempotent check, and paying it twice is cheaper than a call site that no
+        # longer says which value it trusts.
+        require_database_url(settings.database_url)
+
     embeddings = get_embeddings(settings)
     # Probe once to learn the vector size instead of hard-coding a per-model
     # dimension — keeps the store provider-agnostic like everything else.
     dims = len(embeddings.embed_query("probe"))
     index = {"embed": embeddings, "dims": dims, "fields": ["text"]}
-
-    backend = settings.persistence_backend.lower()
 
     if backend == "memory":
         return InMemoryStore(index=index)
@@ -99,31 +127,28 @@ def get_store(settings: Settings | None = None) -> BaseStore:
         store.setup()
         return store
 
-    if backend == "postgres":
-        from langgraph.store.postgres import PostgresStore
+    # Only "postgres" can reach this point — the name was validated above, so there
+    # is no trailing `raise` to fall through to. Keeping a final unreachable branch
+    # would be dead code pretending to be a safety net.
+    from langgraph.store.postgres import PostgresStore
 
-        # Same `index` config as the other two backends — the semantic search is
-        # identical, only the engine underneath changes (pgvector instead of
-        # sqlite-vec instead of numpy in RAM). Pool shared with the checkpointer:
-        # working memory and agent memory are one database, per §3 of
-        # docs/architecture-cible-2026-07-25.md.
-        store = PostgresStore(
-            get_postgres_pool(
-                require_database_url(settings.database_url),
-                settings.database_schema,
-            ),
-            index=index,
-            ttl=_ttl_config(settings),
-        )
-        store.setup()  # creates the store tables + the pgvector index
-        if settings.memory_ttl_days is not None:
-            # Without this, the TTL is only metadata: rows carry an expiry date
-            # that nothing ever acts on. The sweeper is the thread that makes
-            # "the agent forgets" actually happen.
-            store.start_ttl_sweeper()
-        return store
-
-    raise ValueError(
-        f"Unknown PERSISTENCE_BACKEND={settings.persistence_backend!r}. "
-        f"Expected one of: memory, sqlite, postgres."
+    # Same `index` config as the other two backends — the semantic search is
+    # identical, only the engine underneath changes (pgvector instead of
+    # sqlite-vec instead of numpy in RAM). Pool shared with the checkpointer:
+    # working memory and agent memory are one database, per §3 of
+    # docs/architecture-cible-2026-07-25.md.
+    store = PostgresStore(
+        get_postgres_pool(
+            require_database_url(settings.database_url),
+            settings.database_schema,
+        ),
+        index=index,
+        ttl=_ttl_config(settings),
     )
+    store.setup()  # creates the store tables + the pgvector index
+    if settings.memory_ttl_days is not None:
+        # Without this, the TTL is only metadata: rows carry an expiry date
+        # that nothing ever acts on. The sweeper is the thread that makes
+        # "the agent forgets" actually happen.
+        store.start_ttl_sweeper()
+    return store
