@@ -232,6 +232,32 @@ taille 1 (les appels répétés sont consécutifs) : sous charge concurrente deu
 peuvent s'évincer, ce qui coûte un recalcul, jamais un bloc erroné — la clé doit
 correspondre. Vérifié : **3 → 2 allers-retours** sur le même tour.
 
+### Confirmation bout-en-bout (`make latency`, 5 runs par bras, tracé LangSmith)
+
+Après correctif, sur « Quels sont vos délais de livraison en Europe ? » :
+
+| | Sans épisodique | Avec épisodique |
+|---|---|---|
+| **delivered** (l'attente réelle du client), médiane | **4,29 s** | **4,55 s** |
+| min / max | 4,05 / 4,33 s | 4,24 / 5,01 s |
+| `close_turn` (écriture du candidat) | — | **0,00 s** |
+| Cache de prompt | 80 % (HIT) | 80 % (HIT) |
+
+**+260 ms**, cohérent avec le microbenchmark. La mesure est concluante parce que
+les deux bras ont envoyé un prompt **identique** — mêmes comptes de tokens
+(1152/1258 puis 1152/1618) — vérification faite : **0 épisode injecté**, meilleur
+score **0,326** contre un plancher à **0,35**. Ces 260 ms sont donc du **coût pur,
+sans bénéfice sur ce tour**, ce qui est le cas nominal et non l'exception.
+
+Deux invariants confirmés au passage : `close_turn` est **gratuit** (0,00 s — la
+conception « écrire sans modèle » tient), et le bloc épisodique **ne casse pas le
+cache de prompt** (80 % dans les deux bras), ce qui valide de l'avoir placé après
+le prompt stable.
+
+⚠️ À rapporter au bon dénominateur : ~260 ms sur un tour à ~4,3 s, c'est **~6 %**.
+Mesurable, pas perceptible. Le TTFT reste dominé par les **hops LLM séquentiels**
+(routeur 1,2 s + modèle 1,3 s + outil + modèle 1,5 s) — voir [`latence.md`](latence.md).
+
 ### Ce qui reste ouvert
 - **Programmer la consolidation** (cron App Service) — aujourd'hui c'est manuel.
 - **Plafonner / dédupliquer le vivier** : rien ne limite encore le nombre
