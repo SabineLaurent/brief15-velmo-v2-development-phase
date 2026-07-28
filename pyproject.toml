@@ -5,6 +5,21 @@
 [tool.uv.workspace]
 members = ["packages/*"]
 
+# La collecte pytest est BORNÉE aux membres du workspace, explicitement.
+#
+# Pourquoi ce n'est pas cosmétique : sans `testpaths`, pytest scanne tout l'arbre
+# depuis la racine. Un fichier `test_*.py` déposé n'importe où — matériel de
+# référence, exemple copié d'un autre dépôt, brouillon — est alors COLLECTÉ, et
+# son `conftest.py` est importé avant tout le reste. Un import manquant y devient
+# une erreur de collecte qui rend `make check` rouge sans qu'aucun test du projet
+# ne soit en cause. C'est arrivé le 2026-07-29 avec les tests d'acceptance Velmo
+# posés à la racine (voir docs/brief/tests-reference/README.md).
+#
+# Les tests du projet vivent dans `packages/*/tests/` — cette ligne dit exactement
+# ça, et laisse le reste de l'arbre libre de contenir des `test_*.py` de référence.
+[tool.pytest.ini_options]
+testpaths = ["packages"]
+
 # Outillage de dev partagé par tout le workspace (PEP 735).
 [dependency-groups]
 # Floors = the versions actually used (see the FLOOR POLICY note in

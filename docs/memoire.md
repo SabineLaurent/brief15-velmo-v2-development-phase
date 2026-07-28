@@ -426,6 +426,19 @@ devient réel.
 | **R5** | droit à l'oubli | outil `forget_memory` (client) + `make memory --forget/--erase` (opérateur), suppression **relue et vérifiée** |
 | **R6** | traçabilité | `make memory --user-id X` liste **tout** (paginé), avec `created_at` / `updated_at` |
 
+**Où c'est verrouillé par des tests** — R1 et R2 dans
+`tests/test_memory_requirements.py`, R3/R5/R6 dans `tests/test_memory_privacy.py`,
+R4 dans `tests/test_compaction.py`. Tous **hors ligne** (embeddings factices,
+SQLite en `tmp_path`) : une suite qui réclame un provider et une clé est une suite
+qu'on finit par ne plus lancer.
+
+R1 et R2 ont été ajoutés le 2026-07-29 en comparant notre suite aux critères
+d'acceptance du dépôt de démarrage (`docs/brief/tests-reference/`) : ils étaient
+implémentés et raisonnés, mais aucun test ne les tenait. Attention au piège de
+portage — là-bas R1 et R2 sont **une seule** classe et R1 passe par une recherche
+sémantique ; ici ce sont **deux mécanismes distincts** (checkpointer / store), et
+asserter R1 via une recherche sémantique testerait le mauvais.
+
 Sur R3, une nuance à savoir défendre : c'est le **sémantique** qui est cloisonné.
 L'**épisodique** est partagé entre clients — par conception — et ce qui tient R3
 là est l'**anonymisation à l'écriture**, pas le cloisonnement (voir plus haut).
