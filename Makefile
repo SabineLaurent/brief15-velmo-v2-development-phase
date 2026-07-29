@@ -76,8 +76,8 @@ check: lint test ## Contrôle qualité complet (lint + tests)
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run
 
-latency: ## Mesure le TTFT + la durée par nœud (cf. docs/latence.md)
-	$(UV) run python -m support_agent.latency
+latency: ## Mesure le TTFT + la durée par nœud (ARGS='[question] [--runs N]' ; cf. docs/latence.md)
+	$(UV) run python -m support_agent.latency $(ARGS)
 
 ##@ Mémoire — tâches de maintenance, hors du tour client ; À BLANC par défaut (--write pour écrire)
 
