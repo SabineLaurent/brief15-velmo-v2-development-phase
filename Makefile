@@ -19,7 +19,7 @@ UV := uv
 .PHONY: help \
         setup install \
         run serve ui \
-        test lint format check \
+        test lint format check score \
         eval latency \
         seed consolidate memory \
         docker-build docker-up docker-logs docker-down \
@@ -70,6 +70,15 @@ format: ## Formate le code (ruff)
 	$(UV) run ruff format .
 
 check: lint test ## Contrôle qualité complet (lint + tests)
+
+# Pourquoi cette cible est ici, dans la section HORS LIGNE, et pas dans « Mesure » :
+# par défaut elle ne note que les deux dimensions DÉTERMINISTES (mémoire,
+# garde-fous) — aucun appel LLM, aucune clé, aucun réseau. C'est précisément ce
+# qui la rend utilisable comme porte de CI. `ARGS=--live` ajoute la dimension
+# QUALITÉ et franchit alors la frontière : ça appelle un vrai modèle et ça coûte
+# des tokens. Le seuil et la baseline : TODO_priorities.md §Chantier 7.
+score: ## Note l'agent, écrit le rapport, BLOQUE sous le seuil (ARGS=--live|--degraded|--update-baseline)
+	$(UV) run python -m support_agent.eval.mlops $(ARGS)
 
 ##@ Mesure — appelle un VRAI LLM : coûte des tokens et exige les clés du .env
 

@@ -129,6 +129,14 @@ make consolidate  # distille les fils terminés en épisodes (mémoire épisodiq
 make test     # tests (pytest)
 make lint     # ruff check
 make check    # lint + tests
+make score    # NOTE l'agent, écrit le rapport, BLOQUE sous le seuil (chantier
+              #   MLOps). Hors ligne par défaut : ne note que les dimensions
+              #   DÉTERMINISTES (mémoire, garde-fous) — c'est ce que la CI garde.
+              #   `ARGS=--live` ajoute la qualité (appelle un vrai LLM) ;
+              #   `ARGS=--degraded` note garde-fous coupés ;
+              #   `ARGS=--update-baseline` accepte ce run comme nouveau niveau.
+              #   ⚠️ La note globale n'est PAS la porte : les planchers durs et la
+              #   baseline le sont (TODO_priorities.md §Chantier 7).
 ```
 
 ## Where things live (rappel rapide)

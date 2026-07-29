@@ -214,6 +214,19 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = False
     langsmith_project: str = "agnostic-support-agent"
 
+    # --- Evaluation tariff (chantier 3, MLOps) ---
+    # The brief asks the quality report to show a COST (`write_report`, five
+    # signals). Tokens are always measurable; a price is not — it depends on the
+    # provider, the model and the contract, and it changes without warning.
+    #
+    # So there is NO default tariff, on purpose: hard-coding "the price of
+    # mistral-large" would put a number in a decision document that nobody
+    # verified and that goes stale silently. Unset means the report shows TOKENS
+    # only and says the price is not configured. Set them and it also shows money.
+    # Per MILLION tokens, which is how every provider currently publishes prices.
+    eval_price_per_1m_input_tokens: float | None = None
+    eval_price_per_1m_output_tokens: float | None = None
+
     # --- Knowledge base (Phase 4) ---
     knowledge_dir: str = "./data/kb-velmo"
 

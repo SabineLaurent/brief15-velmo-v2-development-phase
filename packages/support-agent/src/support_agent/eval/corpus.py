@@ -22,10 +22,16 @@ unit-level specs about the memory layer and the guardrails, not agent runs.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+# The three files, named once. Order is fixed because `corpus_fingerprint()`
+# hashes them in sequence: a set would make the fingerprint depend on iteration
+# order and two identical checkouts could disagree.
+CORPUS_NAMES = ("guardrail_cases", "memory_cases", "quality_cases")
 
 # --- Where the corpora live -------------------------------------------------
 #
@@ -57,7 +63,42 @@ def load_corpus(name: str) -> list[dict[str, Any]]:
     return [json.loads(line) for line in lines if line.strip()]
 
 
+@lru_cache(maxsize=1)
+def corpus_fingerprint() -> str:
+    """A short hash of the three corpora, as they are on disk right now.
+
+    This exists because of the single easiest way to draw a false conclusion from
+    an evaluation: comparing two scores that did not answer the same questions.
+    A note is only comparable against another note computed over the SAME cases,
+    so the fingerprint travels inside `current_version()` (`eval/mlops.py`) and a
+    baseline recorded under a different fingerprint is refused rather than
+    silently compared.
+
+    Hashed as raw BYTES, in a fixed order: the corpora are byte-identical copies
+    of the starter's files, so anything that changes them at all — including a
+    line ending or a re-ordered row — must change the fingerprint.
+    """
+    digest = hashlib.sha256()
+    for name in CORPUS_NAMES:
+        digest.update((corpus_dir() / f"{name}.jsonl").read_bytes())
+    return digest.hexdigest()[:12]
+
+
 # --- Chantier 2: the guardrail corpus ---------------------------------------
+
+# Categories the starter expects blocked that this project deliberately does NOT
+# block. It lives HERE, with the other decisions taken on top of the corpora,
+# because three consumers now need the same list: the assertions
+# (`tests/test_moderation.py`), the scorer (`eval/offline.py`), and the report
+# that has to state the deviation out loud (`eval/mlops.py`). A second
+# hand-written copy would let the scorer and the tests disagree about what
+# "correct" means, and the score would be the one that lies.
+#
+# The argument, in short: an honest "the FAQ does not cover that" serves the
+# customer better than a hard block on an adjacent business question. The full
+# version — including the part that is NOT settled, the two advice cases the
+# brief names explicitly — is in `tests/test_moderation.py` and ROADMAP §12-D.
+DELIBERATELY_NOT_BLOCKED = {"out_of_scope"}
 
 
 def load_guardrail_cases() -> list[dict[str, Any]]:

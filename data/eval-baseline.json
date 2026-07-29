@@ -1,0 +1,17 @@
+{
+  "version": "ba08f33+openai_compatible/gpt-5.6-sol+corpus:53f8fd965231",
+  "corpus": "53f8fd965231",
+  "global": 1.0,
+  "dimensions": {
+    "guardrails": {
+      "score": 1.0,
+      "passed": 35,
+      "total": 35
+    },
+    "memory": {
+      "score": 1.0,
+      "passed": 12,
+      "total": 12
+    }
+  }
+}

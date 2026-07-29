@@ -23,6 +23,15 @@
 # `make eval`, où on lit des TAUX, pas dans une gate binaire. Y brancher une clé LLM
 # en secret GitHub importerait cette instabilité dans la garde — et le premier
 # réflexe appris serait « c'est encore lui, relance », ce qui tue la CI.
+#
+# ⭐ `make score` (chantier 3, MLOps) OBÉIT À CETTE MÊME DOCTRINE, il ne l'assouplit
+# pas. Il note l'agent et refuse la livraison sous le seuil — mais par DÉFAUT il ne
+# note que les deux dimensions déterministes (mémoire 12/12, garde-fous 35/35),
+# calculées sans LLM ni réseau. La dimension QUALITÉ reste hors de la garde : elle
+# a besoin de `--live`, donc d'une clé, donc elle appartient au second étage.
+# C'est ce qui permet de satisfaire les deux demandes du brief à la fois —
+# « blocage sous le seuil » ET « sans bloquer pour du bruit » (reco_expert.md:25).
+# Détail des six décisions : TODO_priorities.md §Chantier 7.
 
 name: CI
 
@@ -112,3 +121,15 @@ jobs:
       # rien dire pour toi — et ton vert local ne veut plus rien dire pour elle.
       - name: make check (ruff + pytest)
         run: make check
+
+      # La porte de QUALITÉ, après la porte de MÉCANIQUE — et dans cet ordre, parce
+      # qu'un test cassé doit se lire comme un test cassé, pas comme une note qui
+      # chute. `make check` dit « le code fait ce qu'on a écrit » ; `make score` dit
+      # « et il le fait assez bien pour être livré ».
+      #
+      # Sort en 1 si un plancher dur est franchi (une dimension déterministe qui
+      # n'est pas parfaite) ou si une dimension régresse de plus d'un cas contre
+      # `data/eval-baseline.json`. Le rapport part sous `database/` (gitignoré) :
+      # c'est une sortie de run, pas une source.
+      - name: make score (note + seuil bloquant)
+        run: make score

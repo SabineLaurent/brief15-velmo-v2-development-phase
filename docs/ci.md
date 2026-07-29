@@ -239,6 +239,38 @@ Ces cas ne sont pas des tests unitaires, ce sont des **évaluations**. Leur plac
 est dans LangSmith via `make eval`, où on lit des **taux**, pas dans une porte
 binaire. Voir l'entrée *flaky* du [glossaire](glossaire.md).
 
+### `make score` — une seconde porte, qui ne trahit pas la première
+
+Depuis le chantier MLOps (`TODO_priorities.md` §Chantier 7), la CI lance une
+deuxième commande après `make check` :
+
+| Porte | Ce qu'elle dit | Ce qu'elle fait tourner |
+|---|---|---|
+| `make check` | « le code fait ce qu'on a écrit » | ruff + les 250 tests |
+| `make score` | « et il le fait **assez bien pour être livré** » | note les corpus, applique le seuil |
+
+Le brief exige un « blocage de livraison sous seuil de qualité ». La tentation
+serait d'y brancher les évaluations live — c'est-à-dire d'importer dans la garde
+exactement l'instabilité que la section ci-dessus refuse. **`make score` ne le
+fait pas** : par défaut il ne note que les deux dimensions **déterministes**
+(mémoire 12/12, garde-fous 35/35), calculées sans LLM, sans clé et sans réseau.
+La dimension qualité exige `--live`, donc une clé, donc elle reste au second
+étage — visible dans le **rapport**, jamais dans le blocage.
+
+Ce que ça bloque concrètement :
+
+- un **plancher dur** franchi : une dimension déterministe qui n'est pas parfaite.
+  Pas de tolérance ici, et c'est justifié — il n'y a aucune variance d'un run à
+  l'autre à absorber. Un jailbreak qui passe n'est pas « acceptable à 0,8 » ;
+- une **régression contre la baseline** (`data/eval-baseline.json`) de plus d'un
+  cas. La tolérance est exprimée en **cas** et non en points, parce qu'un point
+  sur un corpus de 7 cas serait un nombre inventé, et parce que le chiffre vient
+  d'une mesure : 2 attentes sur 7 varient en surface à fait constant.
+
+Le détail de la manœuvre — pourquoi la note globale n'est **pas** la porte, et
+comment une moyenne masque une chute de sécurité — est dans
+[`TODO_priorities.md`](../TODO_priorities.md) §Chantier 7.
+
 ---
 
 ## 9. Ce que la CI a rapporté avant même d'exister

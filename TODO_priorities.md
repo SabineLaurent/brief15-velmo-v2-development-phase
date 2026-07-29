@@ -21,7 +21,8 @@
 | 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | 🚧 **la garde ✅** (`.github/workflows/ci.yml`) · **l'image ⬜** (à l'étape 5, avec l'ACR) |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 3ter bis | **Corpus d'acceptance du starter** — les 3 `eval/*.jsonl` portés et exécutés | la matière à noter du chantier 3 (MLOps) ; découpe mémoire/garde-fous/qualité prête | ✅ |
-| 5 | Reliquat d'audit — I2 · Q2 (**Q1 fait**) | derniers findings ouverts ; conditionne l'archivage de l'audit | ⬜ |
+| 7 | **Étage MLOps** — note globale, seuil bloquant, rapport, baseline | le **dernier** des trois chantiers du brief encore ouvert ; l'étape 5 Azure est bloquée par un droit d'accès, celui-ci ne dépend de personne | ✅ |
+| 5 | Reliquat d'audit — **Q2** (I2 et Q1 faits) | dernier finding ouvert ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -272,16 +273,164 @@ elles se règlent ensemble, pas séparément.
 
 ---
 
-## Chantier 5 — Reliquat d'audit : I2, Q1, Q2 ⬜
+## Chantier 7 — L'étage MLOps : noter, bloquer, rapporter ✅
 
-Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md). Les trois
-seuls findings encore ouverts (A1, A2, I1 et Q3 sont réglés) :
+> ⚠️ **Collision de numérotation à ne pas confondre.** Le « chantier 3 » du *brief*
+> ([`docs/brief/chantier3-evaluation-et-mlops.md`](docs/brief/chantier3-evaluation-et-mlops.md))
+> est **Évaluation & MLOps** — c'est celui-ci. Le « Chantier 3 » de *ce fichier* est
+> le **déploiement**. Trois chantiers au brief : mémoire ✅, garde-fous ✅, et
+> celui-ci — le dernier ouvert.
 
-- **I2 — providers annoncés sans paquet d'intégration.** `groq`, `google_genai`,
-  `azure_ai` sont dans `_PROVIDER_ALIASES` et `.env.example`, mais les paquets
-  `langchain-*` correspondants ne sont pas installés (`pyproject.toml:20` n'est
-  qu'un commentaire) → `ImportError` brut au runtime. Correctif minimal : envelopper
-  l'erreur avec un message actionnable (« installe `langchain-groq` »).
+**Le contrat, écrit noir sur blanc** dans
+[`docs/brief/tests-reference/test_mlops.py`](docs/brief/tests-reference/test_mlops.py) —
+cinq symboles qui n'existaient nulle part ici :
+
+| Symbole | Ce qu'il doit faire |
+|---|---|
+| `run_eval(...) → Scores` | **quatre** notes : `global_`, `memory`, `guardrails`, `quality` |
+| `current_version()` | les notes doivent être **versionnées** |
+| `enforce_threshold(scores, 0.8)` | lève `DeliveryBlocked` sous le seuil |
+| `write_report(scores, path)` | **cinq** signaux visibles : note mémoire, taux de blocage, taux de faux positifs, latence, coût |
+| `DeliveryBlocked` | l'exception qui arrête la livraison |
+
+La **matière** existe déjà (chantier 3ter bis) : 35 + 12 + 7 cas exécutés. Ce qui
+manque, c'est l'agrégation, le seuil et le rapport. Autrement dit : on **mesure**,
+mais on ne **note** pas, et rien ne **bloque**.
+
+### La tension du brief, et comment on la tranche
+
+`reco_expert.md:25` demande, dans une seule phrase, « **blocage** dès que la note
+passe sous le seuil » **et** « sans bloquer pour du **bruit** ». Or ce dépôt a déjà
+documenté (2026-07-26) qu'un évaluateur est **instable** — `honest_refusal` — avec
+l'argument de ne pas le rustiner. Brancher un seuil bloquant sur un corpus qui
+contient une métrique instable, c'est programmer un rouge intermittent, et une CI
+dont on dit « c'est encore lui, relance » ne garde plus rien.
+
+**Ce que fait le métier** (et que le brief simplifie) : personne ne bloque sur une
+moyenne unique. Une moyenne **masque** — la sécurité qui tombe de 100 % à 80 %
+disparaît dedans si la qualité progresse. Le blocage réel est **par dimension**,
+avec des régimes distincts, et la non-régression est **relative** à la version
+précédente, pas absolue : passer de 0,95 à 0,82 franchit un seuil de 0,8 les doigts
+dans le nez tout en étant une régression franche.
+
+**Donc on livre le contrat à la lettre, et la vraie logique dessous.**
+
+### Les six décisions actées (2026-07-29)
+
+1. **La note globale est un chiffre de RAPPORT, pas une porte.** Moyenne non
+   pondérée des dimensions *mesurées*. Non pondérée exprès : pondérer une moyenne
+   de reporting, c'est exactement là qu'on cache une régression.
+2. **Les portes sont par dimension.** `HARD_FLOORS = {guardrails: 1.0, memory: 1.0}` —
+   ces deux dimensions sont **déterministes** (aucun appel LLM), donc 100 % est le
+   seul plancher sensé : un jailbreak qui passe n'est pas « acceptable à 0,8 ». La
+   qualité, non déterministe, n'a **pas** de plancher absolu.
+3. **La non-régression se compare à une BASELINE versionnée** (`data/eval-baseline.json`,
+   commitée, mise à jour **explicitement** quand on accepte un nouveau niveau).
+   Sans elle, `enforce_threshold` ne prouve rien — et « non-régression » est le mot
+   du brief.
+4. **La tolérance s'exprime en CAS, pas en points** : `max_regression_cases = 1`.
+   Sur 7 cas de qualité, 1 cas = 0,143 point ; un seuil en points serait un nombre
+   inventé. Et le chiffre vient d'une **mesure de ce dépôt** (2 attentes sur 7
+   instables, cf. `eval/corpus.py`) : un cas perdu est un tirage au sort, deux sont
+   un signal.
+5. **La porte CI ne note que le DÉTERMINISTE.** C'est déjà la doctrine défendue en
+   tête de [`.github/workflows/ci.yml`](.github/workflows/ci.yml) — on l'étend, on
+   ne la contredit pas. Les corpus live alimentent le **rapport**, jamais le
+   blocage.
+6. **Aucun prix inventé.** Les **tokens** sont toujours rapportés (lus dans
+   `usage_metadata`, déjà disponible grâce à `stream_usage=True`) ; une somme en
+   euros n'apparaît que si un barème est **configuré**. Un tarif de mémoire serait
+   un chiffre faux dans un rapport de décision.
+
+**Deux conséquences qui tombent gratuitement :**
+
+- **L'agent dégradé du test de régression n'est pas une doublure de test** : c'est
+  `GUARDRAILS_ENABLED=false`, un vrai commutateur de production. Le starter devait
+  écrire une classe `AllowAllGuardrails` ; ici le kill switch **est** la
+  dégradation — donc le test mesure quelque chose qui peut réellement arriver en
+  prod.
+- **`current_version()` = SHA git + provider/modèle + empreinte des corpus.** Une
+  note n'est comparable que si le **jeu de données** est identique : une baseline
+  enregistrée sous une autre empreinte est **écartée avec un motif**, jamais
+  comparée en silence.
+
+### Découpe
+
+- [x] **M1 — le harnais hors ligne** (`eval/offline.py`) : `CorpusRun`/`CaseResult`,
+      `score_guardrails(enabled=…)`, `score_memory(workdir)`. La plomberie
+      (embeddings déterministes, padding 30 tours, plancher d'oubli) est
+      **factorisée** depuis `tests/test_memory_cases.py` au lieu d'être dupliquée,
+      et `eval/corpus.py` gagne `corpus_fingerprint()` + `DELIBERATELY_NOT_BLOCKED`.
+- [x] **M2 — l'étage** (`eval/mlops.py`) : `Scores`/`Dimension`, `current_version()`,
+      `run_eval()`, `enforce_threshold()`, `DeliveryBlocked`, `Baseline` + load/save,
+      `write_report()`, la CLI.
+- [x] **M3 — les tokens** : `eval/run.py` expose `usage` dans le retour de
+      `make_target` ; `config.py` gagne le barème optionnel (`EVAL_PRICE_PER_1M_*`,
+      vides par défaut).
+- [x] **M4 — les tests** (`tests/test_mlops.py`, 11 tests) et le raccordement de
+      `test_moderation.py` / `test_memory_cases.py` sur la plomberie partagée
+      (~60 lignes de fixtures en moins, aucune assertion perdue).
+- [x] **M5 — la porte** : `make score`, le câblage CI (hors ligne), la baseline
+      initiale commitée (`data/eval-baseline.json`), `docs/ci.md` §8.
+
+### Vérifié, pas déduit (2026-07-29)
+
+| Chemin | Résultat |
+|---|---|
+| `make score` (hors ligne, = la CI) | mémoire **12/12**, garde-fous **35/35**, globale 1.000, baseline comparée, **sortie 0** |
+| `make score ARGS=--degraded` | garde-fous **0.486** (17/35), globale 0.743, **2 motifs** de blocage, **sortie 1** |
+| `make score ARGS=--live` | qualité **7/7**, latence p50 **5546 ms** / p95 6241 ms, **26 816 tokens** (25 948 / 868), prix non configuré |
+| `uv run pytest` | **250 passed** (dont les tests live) |
+| `ruff check .` | propre |
+
+Le motif de blocage du dégradé est **actionnable**, pas binaire : il nomme la
+dimension, la note, et les 18 cas en échec un par un (`hate-1`, `violence-1`,
+`injection-1`… jusqu'aux 3 cas de sortie).
+
+La latence p50 mesurée ici (**~5,5 s**) recoupe l'investigation TTFT close
+([`docs/latence.md`](docs/latence.md)) — même ordre de grandeur, sur un chemin
+d'exécution différent. Ce n'est pas une régression, c'est une confirmation
+indépendante.
+
+**Ce qui reste ouvert sur ce chantier :** la note de qualité n'a **pas** de
+baseline enregistrée (le fichier commité ne porte que le déterministe, seul
+recalculable en CI). Tant que personne ne lance
+`make score ARGS='--live --update-baseline'`, un run live n'a donc pas de porte de
+non-régression sur la qualité — seulement un rapport. C'est un choix, pas un
+oubli : une note de qualité commitée depuis un poste, sur un modèle donné,
+deviendrait une porte que la CI ne peut pas reproduire.
+
+**Le garde-fou anti-dérive, parce qu'un scoreur qui mesure faux est pire que pas de
+scoreur :** les tests **asserten**t (diagnostics riches, un cas par test), le
+scoreur **compte** (booléen par cas, ne lève jamais). Deux consommateurs, une seule
+plomberie. Et `test_mlops.py` exige les deux dimensions déterministes à **35/35 et
+12/12** — si un prédicat du scoreur cesse de correspondre à ce que les assertions
+veulent dire, la note tombe, le plancher mord, la CI rougit. La dérive ne peut pas
+se signaler comme un succès.
+
+**Déviation argumentée à assumer :** le rapport est en **français accentué**, et nos
+tests l'assertent via `fold()`. Le test du starter cherche `"memoire"` après
+`.lower()` — ce qui échouerait sur « mémoire ». Écrire « memoire » sans accent pour
+faire passer une assertion serait dégrader le livrable pour flatter le test ; c'est
+la même classe de bug que `f404775` a déjà payée, et `fold()` est l'outil que ce
+dépôt a construit pour elle.
+
+---
+
+## Chantier 5 — Reliquat d'audit : Q2 (I2 et Q1 faits) ⬜
+
+Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md). Il ne reste
+qu'**un** finding ouvert — Q2 (A1, A2, I1, I2, Q1 et Q3 sont réglés) :
+
+- ~~**I2 — providers annoncés sans paquet d'intégration.**~~ ✅ **déjà fait** (constaté
+  le 2026-07-29 : cette ligne était périmée). `llm/_extras.py` existe, le garde
+  `provider_package_required` enveloppe l'import là où il se produit vraiment —
+  `llm/factory.py:65` **et** `llm/embeddings.py:49`, les deux endroits qui
+  instancient un provider — et `tests/test_llm_extras.py` rend l'invariant
+  **exécutable** : ajouter un alias sans déclarer son extra casse un test. Détail
+  d'origine : `groq`, `google_genai`, `azure_ai` étaient annoncés dans
+  `_PROVIDER_ALIASES` et `.env.example` sans paquet `langchain-*` installé, donc
+  `ImportError` brut au runtime.
 - ~~**Q1 — `honest_refusal` trop laxiste.**~~ ✅ **fait le 2026-07-26**, forcé par le
   changement de prompt de l'escalade : en retirant « suggère de contacter un
   conseiller », le seul signal que l'évaluateur savait lire a disparu — alors que la
@@ -292,8 +441,16 @@ seuls findings encore ouverts (A1, A2, I1 et Q3 sont réglés) :
   chez un agent *de support*. L'évaluateur passe donc presque toujours.
 - **Q2 — les évaluateurs supposent `content: str`.** Certains providers renvoient
   une liste de blocs → `AttributeError`. Fragile pour l'agnosticisme revendiqué.
+  **Où il a survécu, précisément** (relevé le 2026-07-29) : la plupart des accès
+  sont déjà gardés (`api.py:103`, `memory/compaction.py:157`,
+  `memory/consolidate.py:100`, `graph/nodes.py` via `str()`), mais **pas la porte
+  d'éval** — `eval/run.py:76` et `:80` prennent `m.content` brut pour construire
+  `answer` et `tool_output`, que les évaluateurs passent ensuite à `.lower()` /
+  `fold()`. Donc un provider à blocs de contenu ne dégrade pas une réponse : il
+  fait **tomber le filet de non-régression**, au moment précis où on change de
+  provider. Deux autres points non gardés : `agent.py:106` et `graph/nodes.py:481,533`.
 
-**Une fois les deux restants traités :** archiver l'audit dans `docs/archive/` avec son
+**Une fois Q2 traité :** archiver l'audit dans `docs/archive/` avec son
 bandeau (règle de [`docs/archive/README.md`](docs/archive/README.md)) — il devient
 un instantané daté, pas une liste de tâches.
 

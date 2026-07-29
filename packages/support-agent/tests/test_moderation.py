@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from support_agent.eval.corpus import load_guardrail_cases
+from support_agent.eval.corpus import DELIBERATELY_NOT_BLOCKED, load_guardrail_cases
 from support_agent.guardrails.input_guard import (
     MODERATION_MESSAGE,
     SELF_HARM_MESSAGE,
@@ -25,11 +25,14 @@ from support_agent.guardrails.input_guard import (
 from support_agent.guardrails.moderation import RegexContentModerator, fold
 from support_agent.guardrails.output_guard import SAFE_OUTPUT_MESSAGE, build_output_guard
 
-# Categories the starter expects blocked that this project deliberately does NOT
-# block. Encoded as data, and asserted as NOT blocked below, so the deviation is
-# a decision under test rather than a silent gap: implementing it later FAILS
-# these tests and forces the choice to be made again, out loud.
-DELIBERATELY_NOT_BLOCKED = {"out_of_scope"}
+# `DELIBERATELY_NOT_BLOCKED` (the `out_of_scope` deviation) used to be defined
+# here. It moved to `eval/corpus.py`, with the other decisions this project takes
+# on top of the starter's corpora, when the MLOps scorer (`eval/offline.py`) came
+# to need the exact same list: two hand-written copies would let the scorer and
+# these assertions disagree about what "correct" means, and the score would be
+# the one that lies. The deviation is still asserted as NOT blocked below, so
+# implementing it later FAILS these tests and forces the choice to be made again,
+# out loud.
 
 
 @pytest.fixture(scope="module")

@@ -79,9 +79,39 @@ def make_target(graph: CompiledStateGraph) -> Callable[[dict], dict]:
         tool_output = "\n".join(
             m.content for m in messages if isinstance(m, ToolMessage)
         )
-        return {"route": route, "answer": answer, "tool_output": tool_output}
+        return {
+            "route": route,
+            "answer": answer,
+            "tool_output": tool_output,
+            "usage": _token_usage(messages),
+        }
 
     return target
+
+
+def _token_usage(messages: list) -> dict[str, int]:
+    """Sum the token usage carried by the messages PERSISTED IN STATE.
+
+    Feeds the `cout` line of the MLOps report (`eval/mlops.py`).
+
+    ⚠️ This is a FLOOR, not the true total, and the report says so. It counts only
+    LLM calls whose reply was appended to the graph state — a node that calls the
+    model to make a decision without adding a message (the router, a tool-choice
+    pass) is invisible here. The exact figure lives in the LangSmith trace, which
+    sees every call; this is the number available without a LangSmith round trip,
+    and its job is to make a regression in token consumption VISIBLE, not to bill
+    anyone.
+
+    `usage_metadata` is the provider-agnostic shape LangChain normalises into, so
+    no provider branch is needed. Absent (or None) means the provider did not
+    report usage — counted as zero rather than crashing a report.
+    """
+    totals = {"input_tokens": 0, "output_tokens": 0}
+    for message in messages:
+        usage = getattr(message, "usage_metadata", None) or {}
+        for key in totals:
+            totals[key] += usage.get(key) or 0
+    return totals
 
 
 def main() -> None:
