@@ -20,6 +20,10 @@ from support_agent.guardrails.injection import (
     InjectionDetector,
     RegexInjectionDetector,
 )
+from support_agent.guardrails.moderation import (
+    ContentModerator,
+    RegexContentModerator,
+)
 from support_agent.guardrails.pii import (
     DEFAULT_POLICY,
     PIIDetector,
@@ -44,6 +48,27 @@ PII_BLOCK_MESSAGE = (
     "Pour votre sécurité, merci de ne pas partager d'informations sensibles ici "
     "(numéro de carte complet, identifiants). Je peux vous aider sans ces données."
 )
+# Harmful content. UNLIKE the injection refusal, this one names the reason —
+# there is no attacker to keep in the dark, and a customer who crossed a line
+# deserves to know which one rather than being stonewalled.
+MODERATION_MESSAGE = (
+    "Je ne peux pas répondre à ce message. Je reste à votre disposition pour "
+    "toute question sur vos commandes, livraisons, retours ou remboursements."
+)
+# Self-harm gets its OWN message, and this is the reason the moderator returns a
+# category instead of a boolean. Answering a person in distress with the generic
+# refusal above would be the wrong thing to say to them. No number is hard-coded:
+# it would be wrong outside France, and a wrong emergency number is worse than
+# none — the concrete line belongs in configuration, per deployment.
+SELF_HARM_MESSAGE = (
+    "Je suis un assistant du service client et je ne suis pas en mesure de vous "
+    "aider sur ce sujet, mais vous n'êtes pas seul·e : si vous traversez un moment "
+    "difficile, parlez-en à un proche, à votre médecin, ou à un service d'écoute "
+    "près de vous, qui saura vous accompagner."
+)
+# Category -> what the customer reads. A category with no entry falls back to
+# MODERATION_MESSAGE, so adding a rule to the moderator can never crash a turn.
+MODERATION_MESSAGES: dict[str, str] = {"self_harm": SELF_HARM_MESSAGE}
 
 
 @dataclass(frozen=True)
@@ -71,11 +96,15 @@ class InputGuard:
         injection_detector: InjectionDetector,
         max_input_chars: int,
         pii_policy: dict[str, PIIStrategy] | None = None,
+        content_moderator: ContentModerator | None = None,
     ) -> None:
         self._pii = pii_detector
         self._injection = injection_detector
         self._max_input_chars = max_input_chars
         self._pii_policy = pii_policy or DEFAULT_POLICY
+        # Optional so an existing caller that built an InputGuard by hand keeps
+        # working with moderation simply absent, rather than silently enabled.
+        self._moderator = content_moderator
 
     def check(self, text: str) -> GuardDecision:
         # 1. Deterministic validation (cheapest, no detection needed).
@@ -97,7 +126,22 @@ class InputGuard:
                 user_message=INJECTION_MESSAGE, sanitized_text=text,
             )
 
-        # 3. PII masking — does NOT block the turn (customer stays served), unless
+        # 3. Harmful content. AFTER injection (an injection attempt dressed up as
+        # an insult should still read as injection in the logs) and BEFORE PII
+        # masking, because there is no point masking a message we are refusing.
+        if self._moderator is not None:
+            category = self._moderator.scan(text)
+            if category is not None:
+                return GuardDecision(
+                    blocked=True,
+                    # The category IS the log line — this is why the port returns
+                    # a category rather than a boolean.
+                    reason=f"content_{category}",
+                    user_message=MODERATION_MESSAGES.get(category, MODERATION_MESSAGE),
+                    sanitized_text=text,
+                )
+
+        # 4. PII masking — does NOT block the turn (customer stays served), unless
         # a 'block'-strategy entity is present in the policy.
         pii = apply_pii_policy(text, self._pii, self._pii_policy)
         if pii.blocked:
@@ -114,10 +158,12 @@ def build_input_guard(
     max_input_chars: int,
     pii_detector: PIIDetector | None = None,
     injection_detector: InjectionDetector | None = None,
+    content_moderator: ContentModerator | None = None,
 ) -> InputGuard:
     """Assemble the default input guard (baseline detectors behind the ports)."""
     return InputGuard(
         pii_detector=pii_detector or RegexPIIDetector(),
         injection_detector=injection_detector or RegexInjectionDetector(),
         max_input_chars=max_input_chars,
+        content_moderator=content_moderator or RegexContentModerator(),
     )

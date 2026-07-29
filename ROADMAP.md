@@ -171,6 +171,36 @@ récurrence.
   normal), **pas** d'`interrupt()` — ce dernier reste réservé au handoff humain
   externe (Phase 7).
 
+> 🗄️ **Décidé le 2026-07-29 (où vivent Case et Ticket) : un TROISIÈME schéma.**
+> La table où l'**agent écrit** doit être séparée des tables que le **marchand
+> possède**, sur le même serveur Postgres. Trois schémas, chacun avec sa
+> rétention et son propriétaire :
+>
+> | Schéma | Propriétaire | Rétention |
+> |---|---|---|
+> | `agent_state` | nous | **balayé par le TTL RGPD** (`MEMORY_TTL_DAYS`) |
+> | `shop` | le marchand (doublure) | jetable (`make seed ARGS=--reset`) |
+> | `support` — Cases + Tickets | l'agent | durable, **jamais balayé** |
+>
+> Quatre raisons, de la plus forte à la plus faible :
+> 1. **Ça supprime un hack.** `_ensure_customer()` (`actions/sql/backend.py`)
+>    fabrique un client bidon uniquement parce que `tickets.customer_id` est une
+>    FK vers `customers`. Hors du périmètre marchand, on abandonne la FK — et
+>    c'est la modélisation JUSTE : en prod le client vit chez le marchand, il n'y
+>    a rien à référencer. `customer_id` devient une simple chaîne.
+> 2. **Le moindre privilège devient applicable** : `SELECT` seul sur `shop`,
+>    `INSERT` sur `support`. C'est la base qui l'empêche, pas la relecture.
+> 3. **`--reset` cesse de détruire le travail de l'agent.** Aujourd'hui il efface
+>    les tickets des conversations avec la fixture (cf.
+>    `test_seed_reset_rebuilds_and_drops_conversation_tickets`) — conséquence du
+>    schéma partagé, pas un choix.
+> 4. **Pas dans `agent_state` non plus** : le *sweeper* de rétention y mangerait
+>    les tickets. Un ticket d'escalade est un registre métier, pas une donnée de
+>    personnalisation.
+>
+> Non construit à ce jour : la doublure est en SQLite (dev) et en RAM (conteneur,
+> forcé par `compose.yaml`). Ce bloc est le plan, pas l'état.
+
 ## Phase 12 — Sécurité & guardrails ✅
 **Concept :** prompt-injection, filtrage/masquage des données personnelles (PII),
 limites sur ce que les outils ont le droit de faire, validation des entrées/sorties.
@@ -266,6 +296,57 @@ in-process est documenté comme à remplacer par un store partagé (Redis) en pr
 sans changer le code des outils. Tests +4 (22/22 guardrails, suite complète
 33/33), lint clean. Vérif hors-ligne : ticket **et** mémoire persistés sans PII
 brute, rate-limit appliqué, graphe sans cycle d'import. **Phase 12 terminée.**
+
+**Fait (D) — modération de contenu (chantier 2, 2026-07-29) :** 4e port
+`ContentModerator` + `RegexContentModerator` (`guardrails/moderation.py`), câblé
+**en entrée** (`InputGuard`, étape 3, après l'injection et avant le masquage PII)
+**et en sortie** (`OutputGuard`, où il **remplace** toute la réponse — une phrase
+haineuse n'a pas de « portion » à caviarder). Le corpus d'acceptance du starter
+est désormais **exécuté** et non paraphrasé : `data/eval/guardrail_cases.jsonl`
+(35 cas) piloté par `tests/test_moderation.py` (26 tests).
+
+**Mesuré avant / après** — le chiffre qui compte est la dernière ligne :
+
+| Catégorie | Avant | Après |
+|---|---|---|
+| `hate` · `violence` · `sexual` | 0/8 | **8/8** |
+| `secret_leak` (entrée) | 0/3 | **3/3** |
+| `pii` (sortie) | 2/3 | **3/3** |
+| `prompt_injection` | 4/4 | 4/4 |
+| `out_of_scope` | 0/5 | 0/5 *(écarté, argumenté)* |
+| **`legitimate` (faux positifs)** | **12/12** | **12/12** |
+| **TOTAL** | **18/35** | **30/35** |
+
+Trois décisions non évidentes :
+- **Le port renvoie une CATÉGORIE, pas un booléen.** C'est ce qui rend le blocage
+  journalisable (`reason=content_hate` — le nœud le loguait déjà, zéro code en
+  plus) *et* ce qui permet des réponses différenciées.
+- **L'auto-agression est sa propre catégorie**, avec son propre message. Répondre
+  à quelqu'un en détresse par le refus générique serait la mauvaise chose à lui
+  dire. L'ordre des règles est porteur : `self_harm` est testé **avant**
+  `violence`, sinon « me faire du mal » part dans la branche refus.
+- **Repli d'accents obligatoire** (`fold()` : NFD + suppression des diacritiques
+  + apostrophes). Ce n'est pas cosmétique — c'est la même classe de bug que
+  `f404775` (`honest_refusal` notait l'apostrophe du modèle), en version sécurité :
+  sans lui, l'attaquant tape sans accents une fois et passe.
+- **Précision > rappel, assumé.** Pas de `\bhais\b` ni `\btuer\b` nus : ils
+  partiraient sur du trafic support normal. Refuser à tort un client en colère
+  (« c'est scandaleux », « je vais porter plainte ») coûte un vrai client ; un
+  raté dégrade vers le refus du modèle. 7 cas « en colère mais légitime » sont
+  sous test pour épingler ça.
+
+Vérifié en live : message haineux **32 ms**, menace **1,5 ms**, détresse **1,5 ms**
+— contre **6 163 ms** pour le chemin légitime. Le facteur 4 000 est la preuve que
+le garde court-circuite avant tout appel LLM.
+
+⚠️ **Reste ouvert : `out_of_scope` (5 cas).** Deux natures s'y cachent, et une
+seule est tranchée. Les 3 cas d'**estimation/authentification** (« combien vaut
+mon maillot ? ») sont écartés à dessein : un « la FAQ ne le couvre pas » honnête
+sert mieux le client qu'un blocage. Les 2 cas de **conseil** (juridique,
+financier) ne sont **pas** tranchés — le brief les nomme explicitement, et c'est
+une position de responsabilité, pas d'UX. Encodés comme déviation *sous test*
+(`DELIBERATELY_NOT_BLOCKED`) pour qu'une implémentation future casse le test et
+force la décision au lieu de la glisser en silence.
 
 **Durcissement futur des détecteurs (derrière les ports, sans toucher au graphe) :**
 la baseline regex est une *première ligne*. Deux upgrades naturels, non urgents :

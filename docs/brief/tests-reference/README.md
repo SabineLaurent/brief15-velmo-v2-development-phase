@@ -20,15 +20,18 @@ Ils sont donc **hors de la collecte pytest** — `testpaths = ["packages"]` dans
 | Fichier | Statut dans ce dépôt |
 |---|---|
 | `test_memory.py` | ✅ **le plus utile** — R1/R2/R3/R5 en assertions. R1 et R2 ont été **portés** contre les vraies coutures : `packages/support-agent/tests/test_memory_requirements.py` |
-| `test_guardrails.py` | 🟠 **cahier des charges du chantier 2.** 3 critères sur 5 portent sur des fonctionnalités absentes ici (modération haine/violence/sexuel), ou **contredisent** une décision documentée : le hors-périmètre n'est pas bloqué (on répond « la FAQ ne le dit pas »), et le garde de sortie **caviarde** au lieu de bloquer |
+| `test_guardrails.py` | ✅ **chantier 2 fait (2026-07-29).** La modération haine/violence/sexuel existe (`guardrails/moderation.py`), et son corpus `guardrail_cases.jsonl` est **porté et exécuté** : `data/eval/guardrail_cases.jsonl` + `packages/support-agent/tests/test_moderation.py`. **30/35**, faux positifs **0/12**. Restent 5 cas `out_of_scope` écartés sous test — détail et argument : ROADMAP §Phase 12-D |
 | `test_mlops.py` | 🟠 **cahier des charges du chantier 3.** `run_eval` → `Scores`, `current_version`, `enforce_threshold`/`DeliveryBlocked`, `write_report` : rien de tout ça n'existe encore. `eval/` a les évaluateurs, il manque l'agrégation en note globale + le seuil bloquant + le rapport |
 | `test_business.py` | ⛔ **à ne pas porter.** Exige le domaine Velmo : remboursements, plafond 50 €, modification d'article, table d'escalade, seed SQLAlchemy. Le porter voudrait dire construire le produit Velmo ici — précisément ce que la bifurcation vers l'agnosticisme a écarté |
 | `conftest.py` | 🔎 gardé pour le contexte : il montre les fixtures que les tests supposent (`reference_agent` / `degraded_agent`, base SQLite seedée, `EchoLLM` hors ligne) |
 
 ## Deux dépendances externes qu'ils supposent
 
-- `load_jsonl()` lit un dossier `eval/` à la racine du dépôt — **il n'existe pas
-  ici**, donc `test_legitimate_messages_not_blocked` n'aurait rien à charger.
+- `load_jsonl()` lit un dossier `eval/` à la racine du dépôt. ✅ **Corrigé le
+  2026-07-29** pour les garde-fous : `guardrail_cases.jsonl` (35 cas) a été porté
+  en `data/eval/`, et c'est lui qui pilote `tests/test_moderation.py`. Les deux
+  autres corpus du starter (`memory_cases.jsonl`, `quality_cases.jsonl`) sont
+  **encore à porter** — matière du chantier 3.
 - `reference_agent.respond(customer_id, message)` est **synchrone**. La couture de
   ce dépôt est `stream_reply(message, *, user_id, thread_id)`, un générateur
   **asynchrone**.
