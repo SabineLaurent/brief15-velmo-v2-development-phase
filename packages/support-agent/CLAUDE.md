@@ -31,6 +31,18 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
   annonce dans `.env` un provider que l'install ne peut pas construire.
   `tests/test_llm_extras.py` rend cet invariant **exécutable** : la dérive casse
   un test, pas un déploiement.
+- ⚠️ **On lit `message.text`, JAMAIS `message.content`.** `.content` est le format
+  **natif du provider** : une `str` chez la plupart, une **liste de blocs**
+  (`[{"type": "text", "text": "..."}]`) chez d'autres. `.text` est la
+  normalisation de LangChain et rend la même chaîne dans les deux cas. Lire
+  `.content` casse de deux façons, et la seconde est la pire : `AttributeError`
+  sur un `.lower()` (la porte d'éval tombe), ou — avec un `str()` défensif —
+  **aucune erreur** et un `repr` Python scanné par les gardes ou injecté dans un
+  prompt de résumé. C'était le finding **Q2** de l'audit du 2026-07-19, présent en
+  10 endroits. `tests/test_message_text.py` le rend exécutable en lisant l'**AST**
+  du package : un onzième accès casse un test. Besoin réel du format natif
+  (inspecter un bloc image) → `.content_blocks`, ou une exemption argumentée
+  ajoutée à ce test.
 
 ## La couture (`api.py`) — la seule chose qu'un front voit
 

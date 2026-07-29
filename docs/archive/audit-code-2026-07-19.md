@@ -1,5 +1,32 @@
 # Audit de code — agent de support agnostique
 
+> ## 🗄️ ARCHIVE — instantané du 19/07/2026, **entièrement traité**
+>
+> Ce document a été une **liste de tâches** ; il n'en est plus une. Les **sept**
+> findings sont clos, et cette page est conservée comme cliché daté du code de
+> l'époque (Phase 12), pas comme état courant.
+>
+> | Finding | Sort | Où |
+> |---|---|---|
+> | **A1** — garde de sortie contourné en streaming | ✅ arbitré en faveur de la sécurité : la couture ne streame plus les tokens | `519f254` · `docs/streaming.md` |
+> | **A2** — escalade cassée via la couture | ✅ un chunk non vide sur tout chemin, devenu invariant du package | `519f254` |
+> | **I1** — `sqlite_path` incohérent | ✅ deux chemins nommés par leur rôle (`WORKING_MEMORY_DB_PATH` / `AGENT_MEMORY_DB_PATH`) | `config.py` |
+> | **I2** — providers annoncés sans paquet | ✅ `llm/_extras.py` + garde à l'import, invariant exécutable | `tests/test_llm_extras.py` |
+> | **Q1** — `honest_refusal` trop laxiste | ✅ détecte l'énoncé de non-savoir, plus le vocabulaire d'un agent de support | `eval/evaluators.py` |
+> | **Q2** — les évaluateurs supposent `content: str` | ✅ tout le package lit `message.text` ; invariant vérifié sur l'**AST** | `tests/test_message_text.py` |
+> | **Q3** — dossiers résiduels à la racine | ✅ nettoyés | — |
+>
+> **Ce que l'audit a rapporté, et qui vaut d'être retenu :** ses deux findings
+> rouges portaient tous les deux sur la **même couture** (`api.py`), et aucun
+> n'était visible depuis les tests d'alors — l'un dégradait la sécurité en
+> silence, l'autre affichait une bulle vide. Les cinq mineurs, eux, ont chacun
+> laissé derrière eux un **test d'invariant** plutôt qu'un correctif seul : c'est
+> la vraie plus-value de l'exercice.
+>
+> **Sources à jour :** `TODO_priorities.md` (travail en cours),
+> `docs/revue-code-2026-07-25.md` et `docs/80a6c9e-revue-code-2026-07-26.md`
+> (revues plus récentes), le code lui-même.
+
 **Objet :** revue du code à la recherche d'anomalies, dysfonctionnements, incohérences et code mort.
 **Date :** 2026-07-19
 **Périmètre :** `packages/support-agent/src` (tous modules), `packages/frontend/src`, tests, `config.py`, `Makefile`, `.env.example`, `pyproject.toml`.

@@ -154,7 +154,11 @@ def _transcript(messages: Sequence[BaseMessage]) -> str:
     """
     lines: list[str] = []
     for message in messages:
-        text = message.content if isinstance(message.content, str) else str(message.content)
+        # `.text`, not `str(.content)`: the latter did not crash on content
+        # blocks, it stringified a Python list INTO the summary prompt
+        # (`[{'type': 'text', 'text': ...}]`). No exception, just noise fed to
+        # the model — the failure mode that hides longest.
+        text = message.text
         if isinstance(message, ToolMessage):
             lines.append(f"[tool result] {text}")
         elif isinstance(message, AIMessage):
@@ -220,7 +224,7 @@ def make_compact(
             logger.exception("Compaction LLM call failed; keeping the full history.")
             return {}
 
-        summary = reply.content if isinstance(reply.content, str) else str(reply.content)
+        summary = reply.text
         if not summary.strip():
             # An empty summary would trade real messages for nothing at all.
             logger.warning("Compaction produced an empty summary; keeping full history.")

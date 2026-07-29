@@ -72,13 +72,17 @@ def make_target(graph: CompiledStateGraph) -> Callable[[dict], dict]:
 
         route = state.values.get("route")
         messages = state.values.get("messages", [])
+        # `.text`, never `.content` — finding Q2 of the 2026-07-19 audit, and this
+        # was the site that mattered most. The evaluators call `.lower()` and
+        # `fold()` on what comes out of here, so a provider returning content
+        # BLOCKS did not degrade an answer: it raised AttributeError and took the
+        # whole non-regression gate down, at the exact moment one changes provider
+        # — which is the one moment the gate exists for.
         answer = next(
-            (m.content for m in reversed(messages) if isinstance(m, AIMessage) and m.content),
+            (m.text for m in reversed(messages) if isinstance(m, AIMessage) and m.text),
             "",
         )
-        tool_output = "\n".join(
-            m.content for m in messages if isinstance(m, ToolMessage)
-        )
+        tool_output = "\n".join(m.text for m in messages if isinstance(m, ToolMessage))
         return {
             "route": route,
             "answer": answer,

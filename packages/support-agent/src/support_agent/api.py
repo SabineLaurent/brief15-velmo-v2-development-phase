@@ -100,8 +100,13 @@ def _reply_from_result(result: dict) -> str:
 
     messages = result.get("messages") or []
     last = messages[-1] if messages else None
-    if isinstance(last, AIMessage) and isinstance(last.content, str) and last.content:
-        return last.content
+    # `.text`, never `.content` — see the invariant in this package's CLAUDE.md.
+    # The old `isinstance(last.content, str)` guard did not crash on a provider
+    # that returns content BLOCKS, which is worse: it fell through to the
+    # "should not happen" branch below and served GRACEFUL_ERROR_MESSAGE over a
+    # perfectly good reply — an outage on a provider swap, with one log line.
+    if isinstance(last, AIMessage) and last.text:
+        return last.text
 
     # Should not happen: every branch ends by appending an AIMessage. If it does,
     # the customer still gets something coherent instead of an empty bubble.

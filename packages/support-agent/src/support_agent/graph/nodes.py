@@ -142,7 +142,17 @@ def make_guard_input(guard: InputGuard) -> Callable[[SupportState], dict]:
         if last_human is None:
             return {"input_blocked": False}
 
-        decision = guard.check(str(last_human.content))
+        # `.text` and not `str(.content)`: on a provider that returns content
+        # BLOCKS the old form handed the moderator a Python repr, so every regex
+        # was scanning `[{'type': 'text', 'text': "..."}]` instead of the
+        # sentence. It did not raise — a guard that silently scans the wrong
+        # string is the worst shape this bug can take.
+        #
+        # ⚠️ Assumed and narrow: masking below replaces the message with a plain
+        # string, so a multimodal message would lose its non-text blocks. That is
+        # the SAFE direction (the guard cannot scan an image, so dropping it is
+        # fail-closed) and today no path sends one.
+        decision = guard.check(last_human.text)
 
         if decision.blocked:
             logger.warning("Input guard blocked a message: reason=%s", decision.reason)
@@ -159,10 +169,7 @@ def make_guard_input(guard: InputGuard) -> Callable[[SupportState], dict]:
                 "Input guard masked PII: %s", ", ".join(decision.pii_entities)
             )
         # Overwrite the message in place only if masking actually changed it.
-        if (
-            decision.sanitized_text != str(last_human.content)
-            and last_human.id is not None
-        ):
+        if decision.sanitized_text != last_human.text and last_human.id is not None:
             updates["messages"] = [
                 HumanMessage(content=decision.sanitized_text, id=last_human.id)
             ]
@@ -431,7 +438,7 @@ class EpisodicRecall:
 
         episodes = recall_episodes(
             self._store,
-            query=str(last_human.content),
+            query=last_human.text,
             limit=self._limit,
             min_score=self._min_score,
         )
@@ -476,15 +483,14 @@ def make_escalate(
 
     def escalate(state: SupportState, runtime: Runtime[AgentContext]) -> dict:
         user_id = runtime.context.user_id
-        last_user_message = next(
+        body = next(
             (
-                m.content
+                m.text
                 for m in reversed(state["messages"])
                 if isinstance(m, HumanMessage)
             ),
             "",
         )
-        body = str(last_user_message)
         if tool_guard is not None:
             # Same hygiene as the ticket TOOL: never persist raw PII in a case,
             # even though `guard_input` already masked the message in place.
@@ -530,10 +536,10 @@ def human_takeover(state: SupportState) -> dict:
     advisor still owns it, the bot merely resumes answering everything else.
     """
     last_user_message = next(
-        (m.content for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
+        (m.text for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
         "",
     )
-    if _TAKEOVER_RELEASE_PATTERN.search(str(last_user_message)):
+    if _TAKEOVER_RELEASE_PATTERN.search(last_user_message):
         logger.info("Customer released the human takeover on this thread.")
         return {
             "handled_by_human": False,
@@ -559,8 +565,10 @@ def make_guard_output(guard: OutputGuard) -> Callable[[SupportState], dict]:
         if not isinstance(last, AIMessage) or last.id is None:
             return {}
 
-        decision = guard.check(str(last.content))
-        if not decision.replaced and decision.sanitized_text == str(last.content):
+        # Same reason as `guard_input`: on a blocks provider, `str(.content)`
+        # made the leak/PII detectors scan a Python repr instead of the reply.
+        decision = guard.check(last.text)
+        if not decision.replaced and decision.sanitized_text == last.text:
             return {}  # nothing to change
 
         if decision.replaced:

@@ -15,7 +15,7 @@ ci-dessous n'est déduit de la lecture seule.
 **Aucune modification appliquée.**
 
 > 📌 À lire avec [`revue-securite-2026-07-25.md`](revue-securite-2026-07-25.md)
-> (identité non prouvée, V1/V2) et [`audit-code-2026-07-19.md`](audit-code-2026-07-19.md)
+> (identité non prouvée, V1/V2) et [`audit-code-2026-07-19.md`](archive/audit-code-2026-07-19.md)
 > (l'audit dont C1 ci-dessous est le reliquat).
 
 ---

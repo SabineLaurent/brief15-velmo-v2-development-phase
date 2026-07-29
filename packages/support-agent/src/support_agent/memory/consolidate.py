@@ -96,11 +96,13 @@ def _transcript(graph, thread_id: str) -> list[str] | None:
     lines: list[str] = []
     for message in messages[-_MAX_TRANSCRIPT_MESSAGES:]:
         if isinstance(message, HumanMessage):
-            lines.append(f"customer: {message.content}")
-        elif isinstance(message, AIMessage) and isinstance(message.content, str):
-            # Tool-call turns carry an empty content; they are steps, not speech.
-            if message.content:
-                lines.append(f"agent: {message.content}")
+            lines.append(f"customer: {message.text}")
+        elif isinstance(message, AIMessage):
+            # Tool-call turns carry no text; they are steps, not speech. `.text`
+            # is "" for them, so the emptiness test still does the filtering —
+            # and it now also holds for a provider that returns content blocks.
+            if message.text:
+                lines.append(f"agent: {message.text}")
     return lines
 
 

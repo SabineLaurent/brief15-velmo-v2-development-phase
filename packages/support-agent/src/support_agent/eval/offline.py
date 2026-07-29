@@ -340,7 +340,7 @@ def _check_r1(case: dict[str, Any]) -> CaseResult:
     history = graph.get_state(config).values["messages"]
 
     expected = case["evaluation"]["expected_substring"]
-    held = any(expected in str(message.content) for message in history)
+    held = any(expected in message.text for message in history)
     # The turn count is part of the requirement, not decoration: recalling a fact
     # from a 3-turn conversation does not answer R1.
     long_enough = turns >= R1_MIN_TURNS and len(history) == 2 * turns

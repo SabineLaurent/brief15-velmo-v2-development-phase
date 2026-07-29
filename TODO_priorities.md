@@ -22,7 +22,7 @@
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 3ter bis | **Corpus d'acceptance du starter** — les 3 `eval/*.jsonl` portés et exécutés | la matière à noter du chantier 3 (MLOps) ; découpe mémoire/garde-fous/qualité prête | ✅ |
 | 7 | **Étage MLOps** — note globale, seuil bloquant, rapport, baseline | le **dernier** des trois chantiers du brief encore ouvert ; l'étape 5 Azure est bloquée par un droit d'accès, celui-ci ne dépend de personne | ✅ |
-| 5 | Reliquat d'audit — **Q2** (I2 et Q1 faits) | dernier finding ouvert ; conditionne l'archivage de l'audit | ⬜ |
+| 5 | Reliquat d'audit — **Q2** (I2 et Q1 faits) | dernier finding ouvert ; conditionnait l'archivage de l'audit — **fait, audit archivé** | ✅ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -108,7 +108,7 @@ sa raison d'être. **À reprendre uniquement si la sonde devient réellement gê
 
 ## Chantier 1 — Audit A2 : escalade cassée via la couture ✅
 
-Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md) §A2.
+Réf. [`docs/archive/audit-code-2026-07-19.md`](docs/archive/audit-code-2026-07-19.md) §A2.
 Quand le routeur choisit `escalate`, le graphe se met en pause (`interrupt()`) ;
 `stream_reply` ne streamait rien et son repli ne trouvait pas d'`AIMessage` →
 **bulle vide** dans Chainlit, payload `__interrupt__` ignoré.
@@ -122,7 +122,7 @@ documenté du package : *tout chemin livre exactement un chunk non vide*
 
 ## Chantier 2 — Audit A1 : guard de sortie contourné en streaming ✅
 
-Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md) §A1.
+Réf. [`docs/archive/audit-code-2026-07-19.md`](docs/archive/audit-code-2026-07-19.md) §A1.
 `stream_reply` diffusait les tokens **avant** que `guard_output` ne s'exécute : sur
 le seul chemin client réel (Chainlit), la rédaction PII/secrets et la protection
 anti-fuite du system prompt étaient **cosmétiques**.
@@ -417,9 +417,9 @@ dépôt a construit pour elle.
 
 ---
 
-## Chantier 5 — Reliquat d'audit : Q2 (I2 et Q1 faits) ⬜
+## Chantier 5 — Reliquat d'audit : CLOS, audit archivé ✅
 
-Réf. [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md). Il ne reste
+Réf. [`docs/archive/audit-code-2026-07-19.md`](docs/archive/audit-code-2026-07-19.md). Il ne reste
 qu'**un** finding ouvert — Q2 (A1, A2, I1, I2, Q1 et Q3 sont réglés) :
 
 - ~~**I2 — providers annoncés sans paquet d'intégration.**~~ ✅ **déjà fait** (constaté
@@ -450,9 +450,35 @@ qu'**un** finding ouvert — Q2 (A1, A2, I1, I2, Q1 et Q3 sont réglés) :
   fait **tomber le filet de non-régression**, au moment précis où on change de
   provider. Deux autres points non gardés : `agent.py:106` et `graph/nodes.py:481,533`.
 
-**Une fois Q2 traité :** archiver l'audit dans `docs/archive/` avec son
-bandeau (règle de [`docs/archive/README.md`](docs/archive/README.md)) — il devient
-un instantané daté, pas une liste de tâches.
+  ✅ **Fait le 2026-07-29** — et l'ampleur réelle était **le double** du relevé :
+  **10 sites**, pas 5. Le correctif n'est pas un helper maison : `BaseMessage.text`
+  existe (langchain-core 1.5.2) et normalise déjà le cas. Vérifié sur la doc via
+  Context7, qui a aussi transformé le statut du finding — la page
+  `integrations/chat/google_generative_ai` dit que **Gemini 3 renvoie des blocs**,
+  or `google_genai` est dans `_PROVIDER_ALIASES`. Ce n'était donc pas une
+  fragilité théorique mais un provider **annoncé dans `.env.example`** sur lequel
+  la porte d'éval tombait.
+
+  **Le plus intéressant, et ce qui justifie d'avoir élargi au-delà d'`eval/` :**
+  les 5 sites déjà « gardés » par un `str(message.content)` ne corrigeaient rien,
+  ils **masquaient**. Pas d'exception, mais un `repr` Python scanné par les
+  gardes-fous (`nodes.py:145`, `:568`) et injecté dans le prompt de compaction
+  (`compaction.py:157`). Un garde qui scanne la mauvaise chaîne sans le dire est
+  la pire forme que pouvait prendre ce bug. `api.py:103` était du même ordre :
+  `isinstance(content, str)` ne plantait pas, il servait `GRACEFUL_ERROR_MESSAGE`
+  par-dessus une réponse parfaitement bonne.
+
+  Invariant rendu **exécutable** (`tests/test_message_text.py`, 10 tests) en
+  lisant l'**AST** du package : zéro accès `.content`. À noter — un `grep` lancé
+  juste avant avait déclaré le code propre, et le test a trouvé un reliquat réel
+  dans `eval/offline.py`. La leçon vaut le test.
+
+**Audit archivé** le 2026-07-29 dans
+[`docs/archive/audit-code-2026-07-19.md`](docs/archive/audit-code-2026-07-19.md),
+avec son bandeau et le sort des 7 findings (règle de
+[`docs/archive/README.md`](docs/archive/README.md)). Premier document archivé pour
+**épuisement** plutôt que pour divergence : il n'est pas devenu faux, il est
+devenu fini.
 
 ---
 
@@ -482,6 +508,6 @@ si le cas se présente.
 
 ## Divers (petit, à caser)
 
-- [x] Indexer [`docs/audit-code-2026-07-19.md`](docs/audit-code-2026-07-19.md)
+- [x] Indexer [`docs/archive/audit-code-2026-07-19.md`](docs/archive/audit-code-2026-07-19.md)
       dans la section « Where things live » du `CLAUDE.md` racine (fait : `6575c0e`,
       avec `TODO_priorities.md` et `vision.md`).

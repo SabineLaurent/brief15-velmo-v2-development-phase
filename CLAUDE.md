@@ -150,7 +150,8 @@ make score    # NOTE l'agent, écrit le rapport, BLOQUE sous le seuil (chantier
 - « Quand la CI se déclenche, et ce qu'elle garde (ou pas) ? » → `docs/ci.md`
 - « Quelles sont les étapes du tuto ? » → `ROADMAP.md` (scope A) · `docs/roadmap-frontend.md` (scope B)
 - « À quoi doit ressembler le produit FINI (prod-grade 2026) ? » → `docs/perimetre-final.md`
-- « Quels bugs / dettes connus traînent dans le code ? » → `docs/audit-code-2026-07-19.md`
+- « Quels bugs / dettes connus traînent dans le code ? » → `docs/revue-code-2026-07-25.md`
+  (l'audit du 19/07 est **entièrement traité** et archivé : `docs/archive/audit-code-2026-07-19.md`)
 - « Où en est la sécurité de la surface réseau (étapes 1→4) ? » → `docs/revue-securite-2026-07-25.md`
 - « Quels défauts de **correction** (hors sécurité) restent ouverts ? » → `docs/revue-code-2026-07-25.md`
 - « Qu'a donné la revue du chantier **escalade** ? » → `docs/80a6c9e-revue-code-2026-07-26.md`

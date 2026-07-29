@@ -103,7 +103,7 @@ def main() -> None:
                 config=config,
             )
 
-        reply = result["messages"][-1].content
+        reply = result["messages"][-1].text
         print(f"Agent  > {reply}\n")
 
 
