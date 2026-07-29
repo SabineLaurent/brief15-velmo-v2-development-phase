@@ -121,6 +121,26 @@ qui refuse les valeurs falsy (`_for_langsmith` → `{"results": []}`). Juge
 LLM-as-judge volontairement remis à plus tard. Cible `make eval`. Vérifié en
 live : 6/6 cas passent en pytest, expérience LangSmith EU sans erreur.
 
+> 🐛 **Défaut ouvert (constaté le 2026-07-29) : `honest_refusal` est INSTABLE.**
+> Le cas `out-of-faq-honest-refusal` échoue par intermittence — 1 échec observé
+> sur 8 exécutions. Ce n'est pas l'agent : c'est l'évaluateur qui note **faux** un
+> refus parfaitement correct. Exemple réel qui a échoué :
+>
+> > « Non, notre FAQ **ne mentionne aucune** vente de billets d'avion. Je **ne
+> > peux donc pas** confirmer que ce service est proposé. »
+>
+> Les signaux cherchent `"ne mentionne pas"` (le modèle a écrit « ne mentionne
+> **aucune** ») et `"ne peux pas"` (le modèle a inséré « **donc** »). Vérifié hors
+> ligne : les 5 signaux applicables renvoient `False`.
+>
+> **Même classe de bug que `f404775`** (« honest_refusal was scoring the model's
+> choice of apostrophe ») : du *substring matching* sur de la prose libre casse
+> sur une variante de négation ou un adverbe inséré. Rustiner la liste de signaux
+> ne ferait que déplacer le problème d'un cran — la vraie réponse est un **juge
+> sémantique**, donc c'est de la matière du **chantier 3**, pas un correctif isolé.
+> ⚠️ En attendant, un `make check` rouge sur ce seul cas n'est pas une régression :
+> relancer avant d'enquêter.
+
 ## Phase 10 — Persistance & robustesse (durcissement pré-prod) ✅
 **Concept :** backends durables (checkpointer/store), retries/backoff/timeout,
 fallback provider — un agent servi redémarre et encaisse les erreurs transitoires.
