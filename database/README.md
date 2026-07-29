@@ -19,7 +19,7 @@
 | Oui aux deux | **`database/working_memory` · `agent_memory`** | perte sèche : ça n'existe nulle part ailleurs |
 | Écrit par un **humain** | `data/` | c'est de la **source**, versionnée dans git |
 | Reconstructible | `database/index/` *(à venir)* | une **projection** : sa perte coûte du CPU |
-| Appartient à un **système tiers** | `database/business/` *(à venir)*, **en dev seulement** | une doublure : en prod, on appelle son API |
+| Appartient à un **système tiers** | `database/shop/`, **en dev seulement** | une doublure : en prod, on appelle son API |
 
 ## La distinction qui compte : ce qu'on POSSÈDE vs ce qu'on DOUBLE
 
@@ -29,13 +29,13 @@ Tout ce qui est ici n'a pas le même destin en production. Deux catégories :
 |---|---|---|---|
 | `working_memory/` · `agent_memory/` | SQLite | **Postgres, à nous** | **nous**, des deux côtés |
 | `index/` *(à venir)* | fichier local | Chroma serveur / base managée | nous (mais reconstructible) |
-| `business/` *(à venir)* | SQLite | ❌ **disparaît** | **le marchand** |
+| `shop/` | SQLite (`make seed`) | ❌ **disparaît** | **le marchand** |
 
 Les mémoires sont à nous **des deux côtés**. La base métier — commandes, clients,
 tickets : le standard d'un commerce — est une **doublure**, qui n'existe que parce
-qu'on n'a pas le vrai système sous la main. Aujourd'hui elle est même seulement en
-RAM (`actions/backend.py`, `_seed_orders()` / `_seed_tickets()` rejoués à chaque
-démarrage) ; lui donner un fichier ne changera rien à son statut.
+qu'on n'a pas le vrai système sous la main. Elle a désormais son fichier
+(`shop/shop.db`, cf. plus bas) : ça ne change **rien** à son statut, et c'est
+exactement le piège que la ligne suivante désamorce.
 
 En production, **on ne la migre pas : on la débranche**, et `get_order_status` /
 `create_ticket` appellent Zendesk, Salesforce ou le SI du marchand. Le backend
@@ -59,7 +59,8 @@ database/
 ├── agent_memory/
 │   └── memories.db        ← ce qu'on sait du client (clé : user_id)
 ├── index/                 ← (à venir, Phase 13) l'index vectoriel de la FAQ
-└── business/              ← (à venir) la doublure du SI marchand
+└── shop/
+    └── shop.db            ← la doublure du SI marchand (`make seed`)
 ```
 
 ### `working_memory/` — un CHECKPOINT, pas un souvenir
@@ -100,15 +101,41 @@ Il aura son propre dossier plutôt que d'être mêlé aux deux mémoires, préci
 parce qu'il est **reconstructible** : on doit pouvoir l'effacer sans hésiter, et
 hésiter avant d'effacer les deux autres.
 
-### `business/` — réservé, la doublure du SI marchand
+### `shop/` — la doublure du SI marchand
 
-Commandes, clients, tickets — le standard d'un commerce. Aujourd'hui **en RAM**
-(`actions/backend.py`), re-seedé à chaque démarrage : un `InMemoryBackend` qui sert
-à démontrer `get_order_status`, `create_ticket` et la détection de récurrence.
+Commandes, clients, tickets — le standard d'un commerce. **Deux adaptateurs
+existent derrière le port `actions/`**, et `SUPPORT_BACKEND` (`.env`) choisit :
 
-Le jour où on veut des commandes qui **survivent au redémarrage** (utile dès qu'on
-teste un parcours sur plusieurs sessions), ce dossier accueille son SQLite. Voir
-la mise en garde plus haut : c'est une **doublure**, pas une base à nous.
+| `SUPPORT_BACKEND` | Adaptateur | Contenu | Survit au redémarrage |
+|---|---|---|---|
+| `memory` *(défaut)* | `InMemorySupportBackend` | 3 commandes écrites à la main | ❌ |
+| `sqlite` | `SqlSupportBackend` | 14 commandes / 10 clients / expéditions / retours / remboursements / tickets | ✅ `shop/shop.db` |
+
+C'est **le port qui rend les deux interchangeables** : ni les outils ni le graphe
+ne savent lequel répond. Basculer, c'est une variable d'environnement — le même
+esprit que l'agnosticisme LLM, appliqué au SI métier.
+
+```bash
+make seed                 # peuple la boutique (idempotent : rejouable sans risque)
+make seed ARGS=--reset    # drop + recrée + re-seed
+```
+
+⚠️ **Deux pièges pratiques.**
+
+1. En `sqlite`, parle à l'agent en tant que client **existant** (`C-marc-dubois`,
+   `C-sophie-martin`…). Avec un `user_id` inconnu, aucune commande ne t'appartient
+   et l'agent a raison de le dire — ce n'est pas une panne, c'est l'autorisation.
+2. Le défaut reste `memory` **à dessein** : les deux adaptateurs n'ont pas la même
+   convention d'identifiants (`CMD-1001` vs `O-2024-0103`) et `eval/dataset.py`
+   épingle celle de `memory`.
+
+**Pourquoi il n'y a pas d'Alembic ici.** On ne migre pas une doublure — on la
+jette et on la reconstruit. `create_all()` crée les tables *manquantes* mais ne
+modifie pas celles qui existent : ajoute une colonne à un modèle et les fichiers
+déjà sur disque gardent l'ancienne forme, sans erreur, jusqu'à ce qu'une requête
+casse loin de la cause. `--reset` **est** la réponse à ça, et elle est gratuite
+parce que le jeu de données est déterministe. Voir la mise en garde plus haut :
+c'est une doublure, pas une base à nous.
 
 ## Pourquoi DEUX fichiers ?
 
@@ -157,6 +184,15 @@ c'est l'**ingestion**, qui cesse d'être faite par l'application. Détail dans
 | `DATABASE_URL` | *(vide)* — **requis** si backend `postgres` |
 | `DATABASE_SCHEMA` | `agent_state` |
 | `MEMORY_TTL_DAYS` | `365` (vide = conservation infinie) |
+| `SUPPORT_BACKEND` | `memory` (3 commandes en RAM) · `sqlite` (la boutique seedée) |
+| `SHOP_DB_PATH` | `./database/shop/shop.db` (backend `sqlite`) |
+
+⚠️ `PERSISTENCE_BACKEND` et `SUPPORT_BACKEND` sont **deux réglages distincts**, et
+les confondre est l'erreur naturelle : le premier gouverne la mémoire, **à nous
+des deux côtés** ; le second gouverne le SI marchand, qu'on **double** ici et
+qu'on **débranche** en prod. Ils n'ont ni le même cycle de vie ni le même
+propriétaire. C'est aussi pour ça que `SUPPORT_BACKEND=postgres` n'existe pas et
+lève une erreur : la valeur appartient à l'autre switch.
 
 Les deux `_DB_PATH` sont nommées d'après le **rôle**, pas le moteur, et suffixées
 ainsi parce que c'est ce qu'elles contiennent — un chemin passé tel quel à

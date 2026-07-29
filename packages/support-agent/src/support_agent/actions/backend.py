@@ -196,14 +196,44 @@ def _seed_ticket(user_id: str, subject: str, body: str, status: str) -> Ticket:
     )
 
 
-# One shared demo backend per process, like `get_store()` for memory. A real app
-# would build the adapter from config (`.env`) here instead of hardcoding it.
+# One shared backend per process, like `get_store()` for memory, and built FROM
+# CONFIG rather than hardcoded — that is what makes the port real: two adapters
+# exist, and `.env` picks one without the tools or the graph changing.
 _BACKEND: SupportBackend | None = None
 
 
 def get_backend() -> SupportBackend:
-    """Return the process-wide business backend (the demo in-memory adapter)."""
+    """Return the process-wide business backend, chosen by `SUPPORT_BACKEND`.
+
+    Imports the SQL adapter lazily: it pulls in SQLAlchemy and touches the
+    filesystem, and the default `memory` path should pay for neither.
+    """
     global _BACKEND
-    if _BACKEND is None:
+    if _BACKEND is not None:
+        return _BACKEND
+
+    # Imported here to avoid a circular import at module scope: `config` is
+    # cheap, but the SQL adapter imports THIS module for `_ticket_id`.
+    from support_agent.config import get_settings
+
+    choice = get_settings().support_backend.strip().lower()
+    if choice == "memory":
         _BACKEND = InMemorySupportBackend()
+    elif choice == "sqlite":
+        from support_agent.actions.sql.backend import SqlSupportBackend
+
+        _BACKEND = SqlSupportBackend.from_path(get_settings().shop_db_path)
+    else:
+        # Unknown value = configuration error, not a silent fallback: falling back
+        # to the demo adapter would look like it worked and quietly serve three
+        # fake orders in production.
+        raise ValueError(
+            f"Unknown SUPPORT_BACKEND '{choice}'. Expected 'memory' or 'sqlite'."
+        )
     return _BACKEND
+
+
+def reset_backend_cache() -> None:
+    """Drop the cached backend (tests that switch `SUPPORT_BACKEND` need this)."""
+    global _BACKEND
+    _BACKEND = None

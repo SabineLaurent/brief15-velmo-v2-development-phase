@@ -55,6 +55,13 @@ def _format_tickets(tickets: list[Ticket]) -> str:
     return "\n".join(lines)
 
 
+# Shape of an order id when the adapter does not declare its own. An adapter
+# overrides it with an `order_id_example` attribute (see `SqlSupportBackend`).
+# This is prompt-visible text, not cosmetics: shown the wrong shape, the model
+# invents ids in that shape when the customer has not supplied one.
+DEFAULT_ORDER_ID_EXAMPLE = "CMD-1001"
+
+
 def build_action_tools(
     backend: SupportBackend, tool_guard: ToolGuard | None = None
 ) -> list[BaseTool]:
@@ -66,15 +73,19 @@ def build_action_tools(
             validation, PII masking before persistence, rate limiting). `None`
             disables it — same behavior as before guardrails existed.
     """
+    # Duck-typed, NOT part of the `SupportBackend` Protocol: how order ids are
+    # spelled is a presentation hint, and widening the port for it would force
+    # every future adapter to supply one.
+    order_id_example = getattr(backend, "order_id_example", DEFAULT_ORDER_ID_EXAMPLE)
 
     @tool
     def get_order_status(order_id: str, runtime: ToolRuntime[AgentContext]) -> str:
         """Look up the current status of a customer order.
 
         Use this whenever the customer asks about a specific order: where it is,
-        whether it shipped, its tracking number, or its delivery date. The
-        `order_id` looks like 'CMD-1001'. If the customer has not given an order
-        id, ask them for it before calling this tool.
+        whether it shipped, its tracking number, or its delivery date. If the
+        customer has not given an order id, ask them for it before calling this
+        tool — never guess one.
         """
         # user_id comes from the trusted runtime context: the backend only
         # returns the order if it belongs to THIS customer (never from the LLM).
@@ -85,7 +96,8 @@ def build_action_tools(
             # (do not reveal that a foreign order id exists).
             return (
                 f"No order '{order_id}' found on this customer's account. "
-                "Double-check the order id with them (it looks like 'CMD-1001')."
+                f"Double-check the order id with them (it looks like "
+                f"'{order_id_example}')."
             )
         return _format_order(order)
 
@@ -220,6 +232,12 @@ def build_action_tools(
                 ],
             }
         )
+
+    # Append the id shape to the LLM-facing description rather than baking it into
+    # the docstring: the docstring is shared by every adapter, the example is not.
+    get_order_status.description += (
+        f" Order ids on this backend look like '{order_id_example}'."
+    )
 
     return [
         get_order_status,

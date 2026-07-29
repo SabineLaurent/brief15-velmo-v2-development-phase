@@ -53,7 +53,8 @@ membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
         │   ├── memory/      # mémoire court terme (checkpointer) + long terme (store)
         │   ├── knowledge/   # base FAQ : ingestion, embeddings, retriever (RAG)
         │   ├── graph/       # orchestration LangGraph (nœuds, arêtes, state)
-        │   ├── actions/ · guardrails/ · eval/
+        │   ├── actions/     # port métier + 2 adaptateurs (dont sql/ = doublure)
+        │   ├── guardrails/ · eval/
         │   ├── agent.py     # CLI interactif (assemblage du graphe)
         │   └── api.py       # ⭐ la couture stream_reply (porte de sortie, cache LangGraph)
         └── tests/
@@ -74,6 +75,34 @@ membres via `[tool.uv.workspace]` et partage un unique `uv.lock` + `.venv`.
 > Ce fichier racine reste la source des **invariants transverses** (toujours
 > chargés) ; les fichiers de package **précisent**, ils ne remplacent pas.
 
+## Velmo : un ancien starter abandonné (⚠️ pas une cible de travail)
+
+**Ce dépôt-ci est LE livrable** — celui qui est rendu, celui qu'on soigne. Tout
+le travail se fait ici.
+
+`/Users/sabine/repo-local_git/brief15-velmo-v2-development-phase` (branche
+`lang-suite`, seconde racine du workspace VSCode) est le **starter d'exercice
+fourni en formation**. Sabine a commencé dessus, puis a bifurqué vers la piste
+agnostique dans un dépôt neuf — celui-ci. **La piste Velmo est abandonnée**
+(confirmé le 2026-07-29).
+
+Règles :
+
+- **Ne rien porter *vers* Velmo.** Ne pas traiter ses chantiers comme du travail
+  à faire là-bas, ne pas y écrire de code, ne jamais commiter à cheval sur les
+  deux dépôts (git, `pyproject.toml`, `uv.lock` et `.venv` distincts).
+- **Les briefs = une checklist de conformité, pas un plan de portage.**
+  `docs/brief/chantier{1,2,3}-*.md` (rédigés **ici**) servent à vérifier que ce
+  projet reste dans les clous de l'exercice. Idem pour les tests d'acceptance du
+  starter, gardés en `docs/brief/tests-reference/` (hors collecte pytest, voir
+  son README) : `test_memory.py` valait le portage, `test_guardrails.py` et
+  `test_mlops.py` sont les cahiers des charges des chantiers 2 et 3,
+  `test_business.py` ne doit **jamais** être porté (domaine métier Velmo :
+  remboursements, plafond 50 €, table d'escalade).
+- **Un critère du starter qui contredit une décision documentée ici s'écarte en
+  l'argumentant** (ex. le hors-périmètre n'est pas bloqué ; le garde de sortie
+  caviarde au lieu de bloquer). Le brief laisse l'architecture à notre main.
+
 ## Commandes
 
 Passe par le `Makefile` (porte d'entrée unique ; `make help` pour la liste) :
@@ -88,6 +117,12 @@ make docker-up  # la pile complète en conteneurs : postgres + agent-api + clien
               #   publie sur 0.0.0.0 et uvicorn écoute sur 127.0.0.1, donc pas
               #   d'Errno 48 : sans ça on croit tester sa pile locale et on
               #   interroge le conteneur, en silence.
+make seed     # peuple la DOUBLURE métier (boutique SQL : commandes, clients,
+              #   tickets). Idempotent ; `ARGS=--reset` pour tout reconstruire.
+              #   ⚠️ Doublure ≠ base à nous : en prod on la DÉBRANCHE pour appeler
+              #   l'API du marchand. Pas d'Alembic ici, c'est délibéré — on ne
+              #   migre pas une fixture, on la jette (database/README.md).
+              #   Activée par SUPPORT_BACKEND=sqlite (défaut : memory).
 make consolidate  # distille les fils terminés en épisodes (mémoire épisodique,
               #   Phase 14). À BLANC par défaut ; `ARGS=--write` pour écrire.
               #   Le SEUL appel LLM de cette mémoire, et il est hors du tour client.

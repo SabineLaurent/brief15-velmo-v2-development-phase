@@ -94,6 +94,18 @@ services:
       # il faut alors remonter le volume `agent-state` sur /app/database.
       WORKING_MEMORY_DB_PATH: /app/database/working_memory/checkpoints.db
       AGENT_MEMORY_DB_PATH: /app/database/agent_memory/memories.db
+      # 🏪 La DOUBLURE métier reste en RAM dans le conteneur, quoi que dise le
+      # .env de l'hôte — même raison que KNOWLEDGE_DIR ci-dessus, avec une
+      # conséquence plus brutale. Un `SUPPORT_BACKEND=sqlite` hérité de l'hôte
+      # ferait chercher /app/database/shop/shop.db, qui n'est ni dans l'image ni
+      # monté : SQLite créerait un fichier VIDE, l'adaptateur refuserait de
+      # démarrer sur une boutique sans données (c'est son rôle), et comme le
+      # graphe est construit dans le LIFESPAN, uvicorn n'ouvrirait jamais son
+      # port. Sur Azure ça se lit « container didn't respond to HTTP pings ».
+      # Ce n'est pas une régression subie : c'est le statut correct d'une
+      # doublure. La pile Docker existe pour éprouver Postgres et la mémoire —
+      # pas pour rendre durable la base qu'on DÉBRANCHE en production.
+      SUPPORT_BACKEND: memory
 
     depends_on:
       postgres:

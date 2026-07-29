@@ -117,6 +117,16 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
   (`memory/postgres_conn.py`) et *sweeper* de rétention RGPD (`MEMORY_TTL_DAYS`,
   compté depuis le **dernier accès**). ⚠️ `psycopg[binary]` obligatoire (sans
   libpq, échec **à l'import**) et image `pgvector/pgvector`, pas `postgres`.
+- **Backend métier** (`actions/`) : **deux** adaptateurs derrière le port, choisis
+  par `SUPPORT_BACKEND` — `memory` (3 commandes en RAM, défaut) et `sqlite`
+  (`actions/sql/`, la boutique peuplée par `make seed` : 14 commandes, 10 clients,
+  expéditions, retours, tickets durables). C'est la **preuve exécutable** que le
+  port n'est pas décoratif. ⚠️ Ne pas basculer le défaut sur `sqlite` : les deux
+  conventions d'id diffèrent (`CMD-1001` vs `O-2024-0103`) et `eval/dataset.py`
+  épingle celle de `memory` — la porte d'éval casserait sur un détail de nommage.
+  ⚠️ Et ne **jamais** faire de `JOIN` entre cette base et les mémoires : la
+  frontière doit rester un **appel**, sinon elle devient impossible en prod
+  (`database/README.md`).
 - **Guardrails** : kill switch `GUARDRAILS_ENABLED` ; off = graphe identique à avant.
 - Les providers **auto-découvrent** leurs `*_API_KEY` depuis `.env`.
 

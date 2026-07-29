@@ -194,6 +194,22 @@ class Settings(BaseSettings):
     # the way out (the pre-fix behaviour). Input redaction is never relaxed.
     guardrails_owned_email_domains: str = "velmo.example"
 
+    # --- Business backend (the `actions/` port, Phase 8) ---
+    # Which adapter answers order lookups and ticket writes. NOT the same switch
+    # as `persistence_backend`: that one governs memory we OWN, this one governs a
+    # system we merely DOUBLE and unplug in production (see database/README.md).
+    #   memory -> `InMemorySupportBackend`: 3 hand-written orders, lost on restart
+    #   sqlite -> `SqlSupportBackend`: the seeded shop under `shop_db_path`
+    #
+    # The default stays "memory" on purpose. The two adapters use different id
+    # conventions (`CMD-1001` vs `O-2024-0103`) and `eval/dataset.py` pins the
+    # in-memory ones, so making sqlite the default would break the eval gate on a
+    # detail that has nothing to do with the agent's behaviour.
+    support_backend: str = "memory"
+    # Runtime state, so under database/ like the memories — never data/, which is
+    # versioned source. Created and populated by `make seed`.
+    shop_db_path: str = "./database/shop/shop.db"
+
     # --- Observability, LangSmith (Phase 2) ---
     langsmith_tracing: bool = False
     langsmith_project: str = "agnostic-support-agent"
