@@ -1,20 +1,39 @@
 # Makefile — porte d'entrée unique des commandes du projet.
-# Tape `make` (ou `make help`) pour voir toutes les cibles disponibles.
+# Tape `make` (ou `make help`) pour voir toutes les cibles, groupées par usage.
+#
+# Deux conventions dans ce fichier :
+#   · `##  <texte>` après une cible  → la ligne d'aide de cette cible
+#   · `##@ <texte>` sur sa propre ligne → un titre de section dans `make help`
+# Ajouter une cible sans sa ligne `##` la rend invisible dans l'aide : c'est
+# volontaire (une cible interne n'a pas à être annoncée), mais ce n'est jamais
+# un oubli acceptable pour une cible destinée à l'utilisatrice.
 
 .DEFAULT_GOAL := help
 
-# Toutes les commandes Python passent par uv (env reproductible).
+# Toutes les commandes Python passent par uv (env reproductible, un seul .venv
+# partagé par les membres du workspace).
 UV := uv
 
-.PHONY: help setup install run serve ui consolidate eval latency test lint format check clean \
-        docker-build docker-up docker-logs docker-down
+# ⚠️ Tenir cette liste alignée sur les cibles réelles. Une cible absente d'ici
+# cesse de tourner le jour où un fichier du même nom apparaît à la racine.
+.PHONY: help \
+        setup install \
+        run serve ui \
+        test lint format check \
+        eval latency \
+        seed consolidate memory \
+        docker-build docker-up docker-logs docker-down \
+        clean
 
 help: ## Affiche cette aide
 	@echo "Agnostic Support AI Agent — commandes disponibles :"
+	@awk 'BEGIN {FS = ":.*## "} \
+		/^##@ / { printf "\n\033[1m%s\033[0m\n", substr($$0, 5); next } \
+		/^[a-zA-Z_-]+:.*## / { printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2 }' \
+		$(MAKEFILE_LIST)
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
-	@echo ""
+
+##@ Installation
 
 setup: install ## Installe les deps ET crée le .env s'il manque
 	@test -f .env || (cp .env.example .env && echo "→ .env créé depuis .env.example (pense à renseigner tes clés).")
@@ -22,7 +41,14 @@ setup: install ## Installe les deps ET crée le .env s'il manque
 install: ## Installe/synchronise les dépendances (uv sync)
 	$(UV) sync
 
-run: ## Lance l'agent de support
+##@ Boutique de démo — une DOUBLURE jetable du SI marchand (database/README.md)
+
+seed: ## Peuple la boutique SQL (idempotent ; ARGS=--reset pour tout reconstruire)
+	$(UV) run python -m support_agent.actions.sql.seed $(ARGS)
+
+##@ Lancer l'agent
+
+run: ## Lance l'agent de support en CLI interactif
 	$(UV) run python -m support_agent.agent
 
 serve: ## Expose l'agent en HTTP (API SSE sur :8000, cf. docs/plan-deploiement-2026-07-25.md)
@@ -32,17 +58,7 @@ ui: ## Lance l'UI Chainlit sur :8001 (dev local ; la version conteneur est sur :
 	@echo "→ l'UI appelle $${AGENT_API_URL:-http://localhost:8000} ; lance 'make serve' dans un autre terminal si ce n'est pas fait."
 	$(UV) run chainlit run packages/client/src/client_chainlit/app.py -w --port 8001
 
-consolidate: ## Distille les fils terminés en épisodes (à blanc ; ARGS=--write pour écrire)
-	$(UV) run python -m support_agent.memory.consolidate $(ARGS)
-
-memory: ## Inspecte / efface la mémoire d'un client (R5-R6) — ARGS='--user-id X [--forget "..."|--erase] [--write]'
-	$(UV) run python -m support_agent.memory.audit $(ARGS)
-
-eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
-	$(UV) run python -m support_agent.eval.run
-
-latency: ## Mesure le TTFT + la durée par nœud (cf. docs/latence.md)
-	$(UV) run python -m support_agent.latency
+##@ Qualité — hors ligne, gratuit, sans clé API (ce que la CI fait tourner)
 
 test: ## Lance les tests (pytest)
 	$(UV) run pytest
@@ -54,6 +70,24 @@ format: ## Formate le code (ruff)
 	$(UV) run ruff format .
 
 check: lint test ## Contrôle qualité complet (lint + tests)
+
+##@ Mesure — appelle un VRAI LLM : coûte des tokens et exige les clés du .env
+
+eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
+	$(UV) run python -m support_agent.eval.run
+
+latency: ## Mesure le TTFT + la durée par nœud (cf. docs/latence.md)
+	$(UV) run python -m support_agent.latency
+
+##@ Mémoire — tâches de maintenance, hors du tour client ; À BLANC par défaut (--write pour écrire)
+
+consolidate: ## Distille les fils terminés en épisodes (à blanc ; ARGS=--write pour écrire)
+	$(UV) run python -m support_agent.memory.consolidate $(ARGS)
+
+memory: ## Inspecte / efface la mémoire d'un client (R5-R6) — ARGS='--user-id X [--forget "..."|--erase] [--write]'
+	$(UV) run python -m support_agent.memory.audit $(ARGS)
+
+##@ Docker — ports 81xx (disjoints du dev local en 80xx, pour ne pas confondre les deux piles)
 
 docker-build: ## Construit les images (agent + client ; contexte = racine du repo)
 	docker build -f packages/support-agent/Dockerfile -t support-agent:dev .
@@ -69,6 +103,8 @@ docker-logs: ## Suit les logs de la pile (Ctrl-C pour sortir, les conteneurs con
 
 docker-down: ## Arrête la pile (le volume d'état est CONSERVÉ)
 	docker compose down
+
+##@ Entretien
 
 clean: ## Supprime les caches Python et outils
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
