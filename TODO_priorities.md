@@ -24,6 +24,7 @@
 | 7 | **Étage MLOps** — note globale, seuil bloquant, rapport, baseline | le **dernier** des trois chantiers du brief encore ouvert ; l'étape 5 Azure est bloquée par un droit d'accès, celui-ci ne dépend de personne | ✅ |
 | 5 | Reliquat d'audit — **Q2** (I2 et Q1 faits) | dernier finding ouvert ; conditionnait l'archivage de l'audit — **fait, audit archivé** | ✅ |
 | 8 | **La mémoire n'est notée que sur SQLite** — or la prod est Postgres | **R3 est une propriété de sécurité** vérifiée sur le mauvais moteur ; à fermer **avant** l'étape 5 Azure | ⬜ |
+| — | **Quota LangSmith épuisé** — plus aucune trace enregistrée | bloque `make eval` en pratique ; **rien à corriger dans le code** | 🔒 externe |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -480,6 +481,36 @@ avec son bandeau et le sort des 7 findings (règle de
 [`docs/archive/README.md`](docs/archive/README.md)). Premier document archivé pour
 **épuisement** plutôt que pour divergence : il n'est pas devenu faux, il est
 devenu fini.
+
+---
+
+## 🔒 Externe — le quota LangSmith est épuisé (constaté 2026-07-29)
+
+**Ce n'est pas un bug du projet, et c'est justement pour ça que ça s'inscrit ici :**
+sans note, la prochaine session diagnostiquera une panne de configuration.
+
+Chaque exécution qui appelle un vrai LLM (`make score ARGS=--live`, `pytest` avec
+les clés, `make eval`) crache en stderr :
+
+```
+LangSmithRateLimitError: 429 ... "tenant exceeded usage limits:
+Monthly unique traces usage limit exceeded"
+```
+
+**Le symptôme est traître** : l'envoi de traces est **en arrière-plan**, donc la
+commande se termine **verte** pendant que plus rien n'est enregistré. Un run réussi
+et une UI vide, en même temps.
+
+**Conséquence réelle :** `make eval` tourne mais ne produit plus d'expérience
+comparable dans LangSmith — or c'est précisément là que vivent les évaluations
+non déterministes que la CI refuse de garder (`docs/ci.md` §8). Le suivi de la
+qualité *live* est donc suspendu jusqu'à réinitialisation du quota ou changement
+de plan. **La porte de livraison n'est pas affectée** : `make score` est hors ligne
+et ne dépend pas de LangSmith.
+
+⚠️ Ne pas confondre avec l'autre cause de « traces disparues » déjà documentée :
+regarder l'instance **US** alors que le compte est en **EU**. Ici l'endpoint est
+bon, c'est le quota qui est atteint.
 
 ---
 
