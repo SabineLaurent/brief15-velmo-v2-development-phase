@@ -432,6 +432,32 @@ R4 dans `tests/test_compaction.py`. Tous **hors ligne** (embeddings factices,
 SQLite en `tmp_path`) : une suite qui réclame un provider et une clé est une suite
 qu'on finit par ne plus lancer.
 
+➕ **Et le corpus du starter est exécuté** (2026-07-29) : les 12 cas de
+`data/eval/memory_cases.jsonl` sont pilotés par `tests/test_memory_cases.py`
+(19 tests, hors ligne). Ils n'ajoutent pas une exigence, ils ajoutent de la
+**largeur** — dix natures de fait de plus, et surtout **deux paires** que les
+fichiers précédents n'avaient pas :
+
+- la **paire R3** est la même phrase avec un numéro de commande différent, pour
+  deux clients. Sous embeddings sac-de-mots les deux faits ont des vecteurs
+  **identiques** : la similarité ne peut pas les distinguer, seul
+  `memories_namespace(user_id)` les sépare. C'est ce qui rend cette paire
+  meilleure qu'un test d'isolation à texte distinct — elle retire la possibilité
+  de passer par chance lexicale. Vérifiée en cassant le namespace : le test
+  devient rouge, et lui seul.
+- la **paire R5** vérifie l'oubli par **trois chemins** (rappel sémantique, dump
+  d'audit, valeur de retour) *et* après réouverture du fichier SQLite — une purge
+  qui n'aurait vidé qu'un cache en RAM passerait les trois premiers.
+
+Deux adaptations à savoir défendre, toutes deux dans le même esprit que le piège
+de portage ci-dessous : **chaque tag est asserté contre le mécanisme qui
+l'implémente** (R1 → checkpointer, R2/R3 → store, R5 → `forget_user_memories`), et
+sur R2 l'assertion porte sur la **présence** dans le rappel, pas sur le rang.
+Noter le rang sous des embeddings factices mesurerait le faux : « statut de
+compte » ne partage aucun mot avec « je suis revendeur », donc un vrai modèle le
+classe et celui-là ne peut pas. Le rang est asserté là où c'est loyal — face à un
+concurrent réel — dans `test_memory_requirements.py`.
+
 R1 et R2 ont été ajoutés le 2026-07-29 en comparant notre suite aux critères
 d'acceptance du dépôt de démarrage (`docs/brief/tests-reference/`) : ils étaient
 implémentés et raisonnés, mais aucun test ne les tenait. Attention au piège de

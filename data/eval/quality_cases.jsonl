@@ -1,0 +1,8 @@
+{"id": "q-order-status", "user_id": "C-marc-dubois", "question": "Quel est le statut de ma commande O-2024-0101 ?", "expected_substring": "prepared"}
+{"id": "q-tracking", "user_id": "C-marc-dubois", "question": "Ou en est la livraison de ma commande O-2024-0103 ?", "expected_substring": "Colissimo"}
+{"id": "q-stock", "user_id": "C-marc-dubois", "question": "Le maillot om-1993 en taille L est-il disponible ?", "expected_substring": "disponible"}
+{"id": "q-frais-port", "user_id": "C-marc-dubois", "question": "Quels sont les frais de port en France ?", "expected_substring": "6,90"}
+{"id": "q-delai", "user_id": "C-marc-dubois", "question": "Quel est le delai de livraison en France ?", "expected_substring": "J+2"}
+{"id": "q-retour", "user_id": "C-marc-dubois", "question": "Quelle est votre politique de retour ?", "expected_substring": "14 jours"}
+{"id": "q-authenticite", "user_id": "C-marc-dubois", "question": "Quelle garantie d'authenticite offrez-vous ?", "expected_substring": "certificat"}
+{"id": "q-reassort", "user_id": "C-marc-dubois", "question": "Faites-vous du reassort sur les maillots ?", "expected_substring": "unique"}

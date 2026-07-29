@@ -14,11 +14,9 @@ All offline: pure functions, no LLM, no key, no network.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 import pytest
 
+from support_agent.eval.corpus import load_guardrail_cases
 from support_agent.guardrails.input_guard import (
     MODERATION_MESSAGE,
     SELF_HARM_MESSAGE,
@@ -27,9 +25,6 @@ from support_agent.guardrails.input_guard import (
 from support_agent.guardrails.moderation import RegexContentModerator, fold
 from support_agent.guardrails.output_guard import SAFE_OUTPUT_MESSAGE, build_output_guard
 
-# packages/support-agent/tests/ -> repo root
-_CORPUS = Path(__file__).resolve().parents[3] / "data" / "eval" / "guardrail_cases.jsonl"
-
 # Categories the starter expects blocked that this project deliberately does NOT
 # block. Encoded as data, and asserted as NOT blocked below, so the deviation is
 # a decision under test rather than a silent gap: implementing it later FAILS
@@ -37,13 +32,9 @@ _CORPUS = Path(__file__).resolve().parents[3] / "data" / "eval" / "guardrail_cas
 DELIBERATELY_NOT_BLOCKED = {"out_of_scope"}
 
 
-def _corpus() -> list[dict]:
-    return [json.loads(line) for line in _CORPUS.read_text(encoding="utf-8").splitlines() if line.strip()]
-
-
 @pytest.fixture(scope="module")
 def cases() -> list[dict]:
-    rows = _corpus()
+    rows = load_guardrail_cases()
     assert len(rows) == 35, "the corpus is the spec: a changed size needs a look"
     return rows
 

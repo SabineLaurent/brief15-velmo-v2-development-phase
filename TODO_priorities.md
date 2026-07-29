@@ -20,6 +20,7 @@
 | 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade | ✅ |
 | 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | 🚧 **la garde ✅** (`.github/workflows/ci.yml`) · **l'image ⬜** (à l'étape 5, avec l'ACR) |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
+| 3ter bis | **Corpus d'acceptance du starter** — les 3 `eval/*.jsonl` portés et exécutés | la matière à noter du chantier 3 (MLOps) ; découpe mémoire/garde-fous/qualité prête | ✅ |
 | 5 | Reliquat d'audit — I2 · Q2 (**Q1 fait**) | derniers findings ouverts ; conditionne l'archivage de l'audit | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
@@ -247,6 +248,27 @@ clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
   (`make eval`), le Postgres réel et les appels LLM ont besoin de secrets et de
   réseau : ils appartiennent à un **second étage**, déclenché à la main ou sur
   `main`, jamais au chemin qui doit rester vert et rapide sur chaque commit.
+
+---
+
+## Chantier 3ter bis — Corpus d'acceptance du starter : les trois portés ✅
+
+**Fait le 2026-07-29.** Les trois `eval/*.jsonl` du starter vivent en `data/eval/`,
+byte-identiques, lus par `eval/corpus.py` et **exécutés** : 35 cas garde-fous
+(hors ligne), 12 cas mémoire (hors ligne, 19 tests), 7/8 cas qualité (intégration,
+**7/7 en live, stable sur deux runs**). Détail et décisions : ROADMAP §Phase 9.
+
+**Ce que ça débloque pour le chantier 3 (MLOps) :** la matière à noter existe
+maintenant en trois familles, ce qui est exactement la découpe que
+`test_mlops.py` réclame (`scores.memory` / `scores.guardrails` / `scores.quality`).
+Ce qui manque n'est plus des cas, c'est l'**agrégation** en note globale, le
+`enforce_threshold` bloquant et le `write_report`.
+
+**Ce que ça a mesuré au passage, et qui pointe le même endroit :** 2 des 7 attentes
+qualité sont des *notations* (`prepared`, `J+2`) et non des faits, et la surface de
+la réponse varie d'un run à l'autre à fait constant. Avec le flake de
+`honest_refusal`, ça fait **deux dettes qui convergent sur le juge sémantique** —
+elles se règlent ensemble, pas séparément.
 
 ---
 

@@ -121,6 +121,51 @@ qui refuse les valeurs falsy (`_for_langsmith` → `{"results": []}`). Juge
 LLM-as-judge volontairement remis à plus tard. Cible `make eval`. Vérifié en
 live : 6/6 cas passent en pytest, expérience LangSmith EU sans erreur.
 
+**Fait (2026-07-29) — les corpus du starter entrent dans l'éval.** Les trois
+fichiers `eval/*.jsonl` du starter sont désormais portés en `data/eval/`,
+**byte-identiques** (vérifié au `shasum`), lus par un unique parseur
+(`eval/corpus.py`) et **exécutés** :
+
+| Corpus | Cas | Où | Nature |
+|---|---|---|---|
+| `guardrail_cases.jsonl` | 35 | `tests/test_moderation.py` | hors ligne |
+| `memory_cases.jsonl` | 12 | `tests/test_memory_cases.py` (19 tests) | hors ligne |
+| `quality_cases.jsonl` | 8 → **7 dans le run** | `tests/test_quality_cases.py` | intégration (skip sans clé) |
+
+Le corpus qualité passe par `make_target()` + `ALL_EVALUATORS`, la **même** couture
+que `test_eval.py` : un cas qui régresse casse `make check` comme un cas de
+`EVAL_CASES`. Nouvel évaluateur `answer_contains` (le fait attendu, normalisé par
+le `fold()` des guardrails). **Mesuré : 7/7 en live, stable sur deux runs
+consécutifs** — la porte d'éval passe de 7 à 14 cas d'agent. Suite complète :
+**239 tests** (+28).
+
+Quatre décisions non évidentes :
+- **Le corpus est en lecture seule.** Byte-identique au starter, et tout ce que ce
+  projet décide par-dessus vit dans le **code** (`ACCEPTED_PARAPHRASES`,
+  `UNSUPPORTED_QUALITY_CASES`). Sinon n'importe qui adoucit un critère en éditant
+  l'attente au lieu du code, et le mot « acceptance » ne veut plus rien dire.
+- **La doublure SQL est branchée pour ce module seulement.** Le corpus parle la
+  convention d'id de la boutique (`O-2024-0101`), pas celle de l'adaptateur RAM
+  (`CMD-1001`) qu'épingle `EVAL_CASES`. Le défaut n'est **pas** basculé (cf.
+  l'avertissement du `CLAUDE.md` du package) : le module sème une boutique jetable
+  sous `tmp_path`. Effet de bord gagné : c'est la première fois que la couture
+  d'éval tourne contre l'**autre** adaptateur — la neutralité du port, prouvée sur
+  un vrai run d'agent.
+- **`q-stock` est hors du run, et nommé.** Le port métier n'a aucune capacité
+  stock, donc le cas n'a rien à lire — et son token attendu (`disponible`) est un
+  mot qu'un refus contient aussi (« n'est **pas** disponible »), donc le noter en
+  substring passerait sur l'inverse de la réponse voulue. Épinglé par un test
+  **structurel** sur les méthodes du port : ajouter le stock plus tard casse ce
+  test et force le cas à revenir dans le run.
+- **Deux attentes sur sept sont des NOTATIONS, pas des faits** (`prepared`, `J+2`),
+  et c'est le chiffre qui compte. Les deux se développent légitimement en français
+  — `suivi-commande.md` énumère lui-même le vocabulaire de statuts (« préparée »),
+  `delais-livraison.md` glose lui-même « J+2 (environ 2 jours ouvrés) ». Mesuré au
+  passage : sur deux runs consécutifs le même cas est revenu en « en préparation »
+  puis « est préparée » — **le fait n'a jamais bougé, seule sa surface**. C'est
+  l'argument chiffré pour un **juge sémantique**, pas pour une liste de synonymes
+  plus longue.
+
 > 🐛 **Défaut ouvert (constaté le 2026-07-29) : `honest_refusal` est INSTABLE.**
 > Le cas `out-of-faq-honest-refusal` échoue par intermittence — 1 échec observé
 > sur 8 exécutions. Ce n'est pas l'agent : c'est l'évaluateur qui note **faux** un

@@ -24,6 +24,9 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from support_agent.eval.corpus import ACCEPTED_PARAPHRASES
+from support_agent.guardrails.moderation import fold
+
 Feedback = dict[str, Any]
 Evaluator = Callable[[dict, dict, dict], Feedback | None]
 
@@ -102,6 +105,33 @@ def mentions_order(inputs: dict, outputs: dict, reference_outputs: dict) -> Feed
     return {"key": "mentions_order", "score": order_id.lower() in answer.lower()}
 
 
+def answer_contains(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedback | None:
+    """The answer must carry the expected FACT (the starter's quality corpus).
+
+    Substring matching earns its keep here in a way it does not in
+    `honest_refusal`: what is matched is a FACT the customer asked for — a price
+    (`6,90`), a delay (`J+2`), a window (`14 jours`), a carrier (`Colissimo`) —
+    not the shape of a sentence. A model can phrase the answer a hundred ways;
+    all of them contain the number.
+
+    Two properties make it robust anyway:
+      - `fold()` (accents, case, apostrophes) — the same normalisation the
+        moderation rules use, and the same class of bug `f404775` paid for;
+      - `ACCEPTED_PARAPHRASES` for the handful of expectations written in the
+        BACKEND's English vocabulary, which a French reply legitimately relays
+        in French.
+    """
+    expected = reference_outputs.get("expect_substring")
+    if not expected:
+        return None
+    answer = fold(outputs.get("answer") or "")
+    needles = ACCEPTED_PARAPHRASES.get(expected.lower(), (expected,))
+    return {
+        "key": "answer_contains",
+        "score": any(fold(needle) in answer for needle in needles),
+    }
+
+
 def no_cross_user_leak(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedback | None:
     """The backend must refuse to reveal another customer's order.
 
@@ -124,5 +154,6 @@ ALL_EVALUATORS: list[Evaluator] = [
     cites_source,
     honest_refusal,
     mentions_order,
+    answer_contains,
     no_cross_user_leak,
 ]
