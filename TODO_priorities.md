@@ -23,6 +23,7 @@
 | 3ter bis | **Corpus d'acceptance du starter** — les 3 `eval/*.jsonl` portés et exécutés | la matière à noter du chantier 3 (MLOps) ; découpe mémoire/garde-fous/qualité prête | ✅ |
 | 7 | **Étage MLOps** — note globale, seuil bloquant, rapport, baseline | le **dernier** des trois chantiers du brief encore ouvert ; l'étape 5 Azure est bloquée par un droit d'accès, celui-ci ne dépend de personne | ✅ |
 | 5 | Reliquat d'audit — **Q2** (I2 et Q1 faits) | dernier finding ouvert ; conditionnait l'archivage de l'audit — **fait, audit archivé** | ✅ |
+| 8 | **La mémoire n'est notée que sur SQLite** — or la prod est Postgres | **R3 est une propriété de sécurité** vérifiée sur le mauvais moteur ; à fermer **avant** l'étape 5 Azure | ⬜ |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
 | — | Cache de la dimension d'embeddings | ⏸️ suspendu — même logique | 🚫 |
@@ -479,6 +480,45 @@ avec son bandeau et le sort des 7 findings (règle de
 [`docs/archive/README.md`](docs/archive/README.md)). Premier document archivé pour
 **épuisement** plutôt que pour divergence : il n'est pas devenu faux, il est
 devenu fini.
+
+---
+
+## Chantier 8 — La mémoire notée sur le moteur de PROD, pas seulement SQLite ⬜
+
+**Constaté le 2026-07-29, en répondant à « quid de Postgres ? » juste après avoir
+livré l'étage MLOps.** C'est un angle mort *créé* par ce chantier-là, pas un vieux
+défaut : `eval/offline.py` construit ses stores avec
+`persistence_backend="sqlite"`. Donc quand le rapport annonce **mémoire 12/12**,
+c'est vrai — **sur SQLite**. La cible de production est un seul Postgres avec
+pgvector (`docs/architecture-cible-2026-07-25.md`).
+
+**Pourquoi ce n'est pas cosmétique :** **R3, c'est l'isolation entre clients**, une
+propriété de *sécurité*. Elle est prouvée contre `SqliteStore` ; ce qui tiendra les
+vraies données clients sera `PostgresStore`. La séparation repose sur
+`memories_namespace(user_id)` — notre code, donc partagé entre les deux — mais la
+**requête de similarité** qui pourrait ramener la ligne d'un autre client est
+propre à chaque store (sqlite-vec vs pgvector). C'est exactement la moitié non
+partagée qui n'est vérifiée nulle part automatiquement.
+
+**Ce qui existe déjà, et sa limite :** Postgres a été réellement exercé à l'étape 3
+du déploiement — **à la main, une fois**. C'est une vérification, pas une garde de
+non-régression. Tout le reste de ce dépôt a converti ses vérifications manuelles en
+invariants exécutables ; celle-ci ne l'est pas encore.
+
+**Ce que ça demande :**
+- un bloc `services:` dans `.github/workflows/ci.yml` avec l'image
+  `pgvector/pgvector` (⚠️ pas `postgres` — l'extension doit être présente),
+  et un `DATABASE_URL` qui pointe dessus ;
+- `score_memory()` qui prend le **backend en paramètre** au lieu de le coder en
+  dur, pour que les 12 cas tournent **deux fois**, une par store ;
+- la même chose pour `tests/test_memory_cases.py`, qui partage la plomberie.
+
+**Le coût, à assumer :** la CI passe de ~15 s à une ou deux minutes, et ça ajoute
+une pièce mobile — le piège classique du *healthcheck*, un conteneur pas encore
+prêt quand les tests démarrent.
+
+**Quand :** avant l'**étape 5** (Azure déploiera sur Flexible Server, autant que la
+garde existe avant la prod, pas après). Ne bloque pas la Phase 11.
 
 ---
 
