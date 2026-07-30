@@ -23,7 +23,7 @@
 | 3ter bis | **Corpus d'acceptance du starter** — les 3 `eval/*.jsonl` portés et exécutés | la matière à noter du chantier 3 (MLOps) ; découpe mémoire/garde-fous/qualité prête | ✅ |
 | 7 | **Étage MLOps** — note globale, seuil bloquant, rapport, baseline | le **dernier** des trois chantiers du brief encore ouvert ; l'étape 5 Azure est bloquée par un droit d'accès, celui-ci ne dépend de personne | ✅ |
 | 5 | Reliquat d'audit — **Q2** (I2 et Q1 faits) | dernier finding ouvert ; conditionnait l'archivage de l'audit — **fait, audit archivé** | ✅ |
-| 8 | **La mémoire n'est notée que sur SQLite** — or la prod est Postgres | **R3 est une propriété de sécurité** vérifiée sur le mauvais moteur ; à fermer **avant** l'étape 5 Azure | ⬜ |
+| 8 | **La mémoire n'est notée que sur SQLite** — or la prod est Postgres | **R3 est une propriété de sécurité** vérifiée sur le mauvais moteur ; à fermer **avant** l'étape 5 Azure | ✅ |
 | — | **Quota LangSmith épuisé** — plus aucune trace enregistrée | bloque `make eval` en pratique ; **rien à corriger dans le code** | 🔒 externe |
 | — | Ingestion prod-grade de la base de connaissance | **Phase 13**, pas avant | 📌 |
 | — | Index FAQ persistant (Chroma) | ❌ **abandonné** — voir ci-dessous | 🚫 |
@@ -514,7 +514,7 @@ bon, c'est le quota qui est atteint.
 
 ---
 
-## Chantier 8 — La mémoire notée sur le moteur de PROD, pas seulement SQLite ⬜
+## Chantier 8 — La mémoire notée sur le moteur de PROD, pas seulement SQLite ✅
 
 **Constaté le 2026-07-29, en répondant à « quid de Postgres ? » juste après avoir
 livré l'étage MLOps.** C'est un angle mort *créé* par ce chantier-là, pas un vieux
@@ -536,20 +536,89 @@ du déploiement — **à la main, une fois**. C'est une vérification, pas une g
 non-régression. Tout le reste de ce dépôt a converti ses vérifications manuelles en
 invariants exécutables ; celle-ci ne l'est pas encore.
 
-**Ce que ça demande :**
-- un bloc `services:` dans `.github/workflows/ci.yml` avec l'image
-  `pgvector/pgvector` (⚠️ pas `postgres` — l'extension doit être présente),
-  et un `DATABASE_URL` qui pointe dessus ;
-- `score_memory()` qui prend le **backend en paramètre** au lieu de le coder en
-  dur, pour que les 12 cas tournent **deux fois**, une par store ;
-- la même chose pour `tests/test_memory_cases.py`, qui partage la plomberie.
+**Ce qui a été fait :**
 
-**Le coût, à assumer :** la CI passe de ~15 s à une ou deux minutes, et ça ajoute
-une pièce mobile — le piège classique du *healthcheck*, un conteneur pas encore
-prêt quand les tests démarrent.
+- **Un « moteur » est devenu une notion de première classe** — `MemoryEngine`
+  (`eval/offline.py`) : un `PERSISTENCE_BACKEND` plus l'endroit où ses données
+  vont, qui distribue un **slot isolé par cas** (deux fichiers SQLite, ou un
+  schéma Postgres). `score_memory()` joue le corpus **une fois par moteur**, donc
+  la dimension compte `12 × moteurs`.
+- **Les mêmes 12 cas dans `tests/test_memory_cases.py`**, paramétrés par moteur
+  via une fixture. Postgres se **skippe** sans base (`make test` sur un portable
+  n'exige pas de serveur).
+- **La quatrième porte** : `make score ARGS=--require-postgres`, que la CI passe.
+  Les trois autres portes lisent un **chiffre** — et un chiffre ne peut pas
+  s'apercevoir qu'il a été calculé sur la moitié des moteurs. Sans elle, un
+  service de base qui ne démarre pas rendrait un **12/12 vert** couvrant deux
+  fois moins.
+- **Le rapport nomme les moteurs notés**, et **avertit** quand Postgres manque.
+  C'est la moitié « honnêteté » : sans base, le trou devient *connu* au lieu
+  d'être aveugle. C'est précisément ce qui manquait au 12/12 d'avant.
+- **`EVAL_DATABASE_URL`, et surtout PAS `DATABASE_URL`.** L'éval **crée et
+  SUPPRIME** des schémas `eval_*` ; on ne fait pas ça dans la base configurée de
+  quelqu'un par héritage. Et `offline_settings` existe pour qu'une note ne dépende
+  jamais du `.env` local — un champ de `Settings` aurait remis l'entrée du scorer
+  sur ce chemin-là.
+- **Bonus non prévu : R1 est enfin durable.** Le fil était rejoué sur un
+  `InMemorySaver`, y compris dans la passe « sqlite ». Il tourne maintenant sur le
+  saver du moteur, et se relit à travers un **second objet saver** sur le même
+  stockage — donc `PostgresSaver` fait son aller-retour sous assertion, ce qui
+  n'existait nulle part (`test_persistence.py` ne validait que la config).
 
-**Quand :** avant l'**étape 5** (Azure déploiera sur Flexible Server, autant que la
-garde existe avant la prod, pas après). Ne bloque pas la Phase 11.
+**Quatre pièges payés en route, à ne pas re-découvrir.** Les deux premiers ont été
+trouvés par la **revue de code**, après une première version qui passait au vert —
+et c'est l'enseignement : la revue a trouvé ce que 281 tests verts ne montraient
+pas, parce qu'aucun test n'assertait le **second** run.
+
+1. 🔴 **Supprimer un schéma sous un pool vivant fait retomber tout le monde dans
+   `public`.** `purge_eval_schemas` tournait à **chaque** `score_memory`, or
+   `get_postgres_pool` est `lru_cache`d : au 2ᵉ run d'un même process (ce que fait
+   `test_mlops.py` avec ses fixtures `scores` et `degraded`), la purge supprimait
+   les schémas auxquels les pools encore en cache étaient liés. `configure` ne
+   rejoue pas sur un cache hit, donc **rien ne les recréait** — et Postgres
+   **ignore silencieusement** une entrée absente du `search_path`. Résultat mesuré :
+   les 11 slots écrivaient dans `public`, **et le corpus notait quand même 24/24**,
+   parce que `memories_namespace(user_id)` portait l'isolation à lui seul. Un vert
+   dont l'isolation par cas avait disparu : exactement le « juste pour la mauvaise
+   raison » que ce chantier combat. Correctif : la purge **recrée** immédiatement
+   ce qu'elle supprime, les pools sont **fermés** en fin de run, et
+   `test_scoring_twice_in_one_process_keeps_every_slot_in_its_own_schema` assure
+   l'invariant sur le **stockage**, pas sur la note.
+2. 🔴 **`CREATE EXTENSION IF NOT EXISTS` ne déplace pas une extension existante.**
+   Il matche par **nom** sur toute la base : si l'application a démarré d'abord,
+   pgvector est déjà dans `DATABASE_SCHEMA` (`agent_state`) et l'ordre est un
+   no-op. Les schémas d'éval mouraient alors au `setup()` sur
+   `type "vector" does not exist` — reproduit. Correctif : détecter le schéma réel
+   de l'extension et la **relocaliser** dans `public`, qui est sur le `search_path`
+   de tous les backends du dépôt (donc jamais moins disponible pour personne).
+3. **`_` est un joker dans `LIKE`**, et les deux préfixes finissent par un `_`.
+   `LIKE 'eval_score_%'` matchait donc aussi `eval_scoreboard`, supprimé en
+   CASCADE — alors que le commentaire jurait le contraire. Remplacé par
+   `left(nspname, n) = prefix`, une vraie comparaison de préfixe.
+4. **La baseline comparait des cas ABSOLUS**, or le compte dépend maintenant du
+   nombre de moteurs. Une baseline à 24 bloquait un 12/12 parfait sans base
+   (« régresse de 12 cas »), et la baseline à 12 face à un run CI à 24 retirait la
+   porte en silence. La comparaison est désormais **par moteur** des deux côtés, et
+   le nombre de moteurs est enregistré dans `data/eval-baseline.json`.
+
+**Le coût, assumé :** la CI passe de ~15 s à une ou deux minutes, et gagne une
+pièce mobile. Le piège du *healthcheck* est couvert par `options: --health-cmd`
+sur le service (GitHub attend « accepte les connexions », pas « le conteneur
+tourne »).
+
+**Ce que ça ne couvre PAS, et c'est délibéré :** un Postgres **injoignable** fait
+**échouer** le run, il ne le dégrade pas en 12 cas ratés. Un problème
+d'infrastructure qui se lit « l'agent a perdu la mémoire » est le pire des
+diagnostics.
+
+**La baseline reste à 12 cas, et ce n'est plus un arbitrage — juste un fait.**
+`data/eval-baseline.json` enregistre 12 cas sur 1 moteur. Depuis le correctif n°4
+ci-dessus, la comparaison est **par moteur** : 12/1 contre 24/2, c'est le même
+niveau, donc ni blocage abusif en local ni porte retirée en CI. Le fichier gagnera
+`"engines": 2` au prochain `--update-baseline` lancé depuis un environnement qui a
+les deux moteurs ; d'ici là, `engines` absent est lu comme `1`, ce qui est
+exactement ce qu'il valait quand la ligne a été écrite. La **couverture**, elle,
+reste gardée par `--require-postgres` : une porte booléenne, insensible au compte.
 
 ---
 

@@ -21,32 +21,49 @@ recall by meaning against a competitor). This file adds the corpus's BREADTH:
 ten more kinds of fact, and two pairs — the R3 pair and the R5 pair — that were
 written to catch cross-contamination.
 
+**And every durable case runs ONCE PER ENGINE** (chantier 8): SQLite always,
+Postgres too when `EVAL_DATABASE_URL` offers one. R3 is the isolation between
+customers — a security property — and the query that could hand back another
+customer's row belongs to the store, not to us: sqlite-vec here, pgvector there.
+Proving it on one engine says nothing about the other, and production is the other.
+
 Offline by construction: no provider, no key, no network. The embeddings are a
 deterministic bag-of-words over the corpus's own vocabulary, and the durable
-store is a SQLite file under `tmp_path`.
+storage is a temp directory of SQLite files (plus, when offered, throwaway
+schemas in a real Postgres).
 """
 
 from __future__ import annotations
 
+import itertools
+from collections.abc import Iterator
+
 import pytest
-from langgraph.graph import END, START, MessagesState, StateGraph
 
 from support_agent.eval.corpus import load_memory_cases, memory_user_turns
 from support_agent.eval.offline import (
+    EVAL_DATABASE_URL_ENV,
     FORGET_FLOOR,
+    POSTGRES,
     R1_MIN_TURNS,
+    SCORE_SCHEMA_PREFIX,
+    SQLITE,
+    TEST_SCHEMA_PREFIX,
     VOCAB,
-    durable_store,
-    offline_settings,
+    MemoryEngine,
+    close_eval_pools,
+    eval_postgres_url,
+    purge_eval_schemas,
     remember_user_turns,
     replay_conversation,
+    resume_history,
+    score_memory,
 )
 from support_agent.memory.privacy import (
     forget_user_memories,
     list_user_memories,
     search_user_memories,
 )
-from support_agent.memory.short_term import get_checkpointer
 
 # The offline plumbing this module used to define — the deterministic bag-of-words
 # embeddings, the 30-turn padding, the durable temp store, the erasure floor — now
@@ -58,9 +75,106 @@ from support_agent.memory.short_term import get_checkpointer
 # The division of labour, and it is deliberate:
 #   this file      asserts — one case per test, rich diagnostics on failure
 #   eval/mlops.py  counts  — a boolean per case, never raises
-# `tests/test_mlops.py` then requires the memory dimension to be a perfect 12/12,
-# so a scorer predicate that drifted away from these assertions fails CI instead
-# of quietly reporting a pass.
+# `tests/test_mlops.py` then requires the memory dimension to be perfect on EVERY
+# engine it scored, so a scorer predicate that drifted away from these assertions
+# fails CI instead of quietly reporting a pass.
+
+
+# --- One engine per parameter -------------------------------------------------
+
+_POSTGRES_URL = eval_postgres_url()
+
+# Schema names must be unique for the whole SESSION, because they cannot be
+# recycled: `get_postgres_pool` is `lru_cache`d, so dropping a schema mid-session
+# would leave a live pool pointing at nothing (see `purge_eval_schemas`). A
+# counter is enough — and `_purge_stale_schemas` below is what keeps yesterday's
+# names from piling up in a developer's database.
+_slot_numbers = itertools.count()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _purge_stale_schemas() -> Iterator[None]:
+    """Reset what previous sessions left behind, and close our pools at the end.
+
+    The teardown is not tidiness: one pool per Postgres-parametrised test, each
+    with its own worker threads and none of them closed, grows with the corpus and
+    ends in `too many clients` on a wider one.
+    """
+    if _POSTGRES_URL:
+        purge_eval_schemas(_POSTGRES_URL, TEST_SCHEMA_PREFIX)
+    yield
+    close_eval_pools()
+
+
+@pytest.fixture(params=[SQLITE, POSTGRES])
+def engine(request: pytest.FixtureRequest, tmp_path) -> MemoryEngine:
+    """A durable engine of its own for one test: files, or throwaway schemas.
+
+    Postgres SKIPS rather than fails when no URL is configured: `make test` on a
+    laptop must not require a database. What stops that skip from becoming the
+    silent half-coverage this chantier fixes is on the other side —
+    `make score ARGS=--require-postgres` in CI, which goes red when the engine
+    it demands did not run.
+    """
+    if request.param == POSTGRES:
+        if not _POSTGRES_URL:
+            pytest.skip(f"{EVAL_DATABASE_URL_ENV} non défini : pas de Postgres à noter")
+        return MemoryEngine(
+            POSTGRES,
+            tmp_path,
+            database_url=_POSTGRES_URL,
+            # The unique part lives in the PREFIX, so tests can keep asking for a
+            # readable slot name ("memories", "fil") and still never collide.
+            schema_prefix=f"{TEST_SCHEMA_PREFIX}{next(_slot_numbers)}_",
+        )
+    return MemoryEngine(SQLITE, tmp_path)
+
+
+# --- The harness itself, on the engine that has a server ----------------------
+
+
+@pytest.mark.skipif(not _POSTGRES_URL, reason=f"{EVAL_DATABASE_URL_ENV} non défini")
+def test_scoring_twice_in_one_process_keeps_every_slot_in_its_own_schema(tmp_path) -> None:
+    """The purge must RESET its schemas, never merely drop them.
+
+    The bug this pins down, found by review and reproduced before the fix: the
+    purge runs on every `score_memory`, while `get_postgres_pool` is `lru_cache`d.
+    So the SECOND scoring run in a process dropped the schemas that the first
+    run's still-cached pools were bound to. `configure` does not re-run on a cache
+    hit, so nothing recreated them — and Postgres silently ignores a missing entry
+    in `search_path`, so every slot's tables were created in `public` instead.
+
+    What made it dangerous is that it did not fail: all eleven slots shared one
+    physical store and the corpus still scored 24/24, because
+    `memories_namespace(user_id)` was carrying the isolation by itself. A green
+    run with the per-case isolation silently gone is precisely what this chantier
+    exists to prevent, so the assertion is on the STORAGE, not on the score.
+
+    `run_eval()` calls `score_memory` twice per pytest process (its `scores` and
+    `degraded` fixtures), so this is the real configuration, not a contrived one.
+    """
+    import psycopg
+
+    first = score_memory(tmp_path / "run1")
+    second = score_memory(tmp_path / "run2")
+    assert first.score == 1.0
+    assert second.score == 1.0, [f.case_id for f in second.failures]
+
+    # The seven slots that hold a long-term store (R2 ×4, R3, R5 ×2) must each
+    # still own their `store` table. Under the bug these schemas did not merely
+    # lose their tables — they no longer existed at all.
+    with psycopg.connect(_POSTGRES_URL, autocommit=True) as conn:
+        owners = conn.execute(
+            "SELECT schemaname FROM pg_catalog.pg_tables "
+            "WHERE tablename = 'store' AND left(schemaname, %s) = %s",
+            (len(SCORE_SCHEMA_PREFIX), SCORE_SCHEMA_PREFIX),
+        ).fetchall()
+
+    assert len(owners) == 7, (
+        f"expected one store per slot schema, got {sorted(row[0] for row in owners)} — "
+        "a slot whose schema vanished writes into `public`, and every slot then "
+        "shares one store"
+    )
 
 
 # --- The corpus is the spec -------------------------------------------------
@@ -105,15 +219,18 @@ def test_every_searched_fact_is_visible_to_the_fake_embeddings() -> None:
 @pytest.mark.parametrize(
     "case", load_memory_cases("R1"), ids=[c["id"] for c in load_memory_cases("R1")]
 )
-def test_R1_the_first_turn_survives_a_long_conversation(case: dict) -> None:
+def test_R1_the_first_turn_survives_a_long_conversation(
+    case: dict, engine: MemoryEngine
+) -> None:
     """R1: what the customer said early is still in the fil 30 turns later.
 
     Thirty-odd separate `invoke` calls, not one call with a long list — that is
     the difference between "the graph can hold a list" and "the agent remembers
     the discussion", which is what the requirement asks for.
     """
-    checkpointer = get_checkpointer(offline_settings(persistence_backend="memory"))
-    graph, config, turns = replay_conversation(case, checkpointer, pad_to=R1_MIN_TURNS)
+    graph, config, turns = replay_conversation(
+        case, engine.checkpointer("fil"), pad_to=R1_MIN_TURNS
+    )
 
     history = graph.get_state(config).values["messages"]
     # Each turn contributes the customer message + the agent reply.
@@ -121,7 +238,7 @@ def test_R1_the_first_turn_survives_a_long_conversation(case: dict) -> None:
     assert turns >= R1_MIN_TURNS
 
     expected = case["evaluation"]["expected_substring"]
-    assert any(expected in str(m.content) for m in history), (
+    assert any(expected in m.text for m in history), (
         f"[{case['id']}] {expected!r} fell out of a {turns}-turn fil"
     )
 
@@ -129,27 +246,28 @@ def test_R1_the_first_turn_survives_a_long_conversation(case: dict) -> None:
 @pytest.mark.parametrize(
     "case", load_memory_cases("R1"), ids=[c["id"] for c in load_memory_cases("R1")]
 )
-def test_R1_a_long_conversation_resumes_on_a_new_graph_object(case: dict) -> None:
-    """R1 across a restart: the checkpointer holds the fil, not the process.
+def test_R1_a_long_conversation_resumes_on_a_new_saver(
+    case: dict, engine: MemoryEngine
+) -> None:
+    """R1 across a restart: the ENGINE holds the fil, not the process.
 
-    Rebuilding the graph over the same saver stands in for the process being
-    restarted — the property `sqlite`/`postgres` then extend across real process
-    boundaries (`test_persistence.py`).
+    A new graph over a NEW saver object on the same storage — the same shape as
+    R5's "gone_from_disk", and the strongest form this can take without spawning
+    a second process. It used to be a new graph over the SAME in-memory saver,
+    which could only ever prove that an object still held its own dict; now that
+    both engines are durable (`MemoryEngine.checkpointer`), the restart is real
+    on both, and it is `PostgresSaver`'s round trip that had never been asserted
+    anywhere before.
     """
-    checkpointer = get_checkpointer(offline_settings(persistence_backend="memory"))
-    _, config, _ = replay_conversation(case, checkpointer, pad_to=R1_MIN_TURNS)
+    _, config, turns = replay_conversation(
+        case, engine.checkpointer("fil"), pad_to=R1_MIN_TURNS
+    )
 
-    def noop(state: MessagesState) -> dict:
-        return {}
+    resumed = resume_history(engine.checkpointer("fil"), config)
 
-    builder = StateGraph(MessagesState)
-    builder.add_node("noop", noop)
-    builder.add_edge(START, "noop")
-    builder.add_edge("noop", END)
-    resumed = builder.compile(checkpointer=checkpointer).get_state(config).values["messages"]
-
+    assert len(resumed) == 2 * turns, f"[{case['id']}] the fil did not survive the saver"
     expected = case["evaluation"]["expected_substring"]
-    assert any(expected in str(m.content) for m in resumed)
+    assert any(expected in m.text for m in resumed)
 
 
 # --- R2: remember durable facts from one session to the next ------------------
@@ -159,12 +277,12 @@ def test_R1_a_long_conversation_resumes_on_a_new_graph_object(case: dict) -> Non
     "case", load_memory_cases("R2"), ids=[c["id"] for c in load_memory_cases("R2")]
 )
 def test_R2_a_durable_fact_survives_into_a_new_session(
-    case: dict, tmp_path
+    case: dict, engine: MemoryEngine
 ) -> None:
     """R2: a second session, days later, finds what the first one learned.
 
-    Two independent store objects over the same file — the second never sees the
-    first, which is exactly the situation "the customer comes back next week"
+    Two independent store objects over the same storage — the second never sees
+    the first, which is exactly the situation "the customer comes back next week"
     puts the agent in.
 
     The assertion is PRESENCE in the recalled set, not rank. Ranking under fake
@@ -173,10 +291,10 @@ def test_R2_a_durable_fact_survives_into_a_new_session(
     and dressing that up would test the test. The rank property is asserted where
     it is fair — with a real competitor — in `test_memory_requirements.py`.
     """
-    session1 = durable_store(tmp_path / "memories.db")
+    session1 = engine.store("memories")
     remember_user_turns(session1, case)
 
-    session2 = durable_store(tmp_path / "memories.db")
+    session2 = engine.store("memories")
     recalled = " ".join(
         record.text
         for record in search_user_memories(
@@ -191,8 +309,10 @@ def test_R2_a_durable_fact_survives_into_a_new_session(
 # --- R3: strict isolation between users --------------------------------------
 
 
-def test_R3_neither_user_of_the_pair_can_reach_the_others_fact(tmp_path) -> None:
-    """R3, on the pair the corpus built for it.
+def test_R3_neither_user_of_the_pair_can_reach_the_others_fact(
+    engine: MemoryEngine,
+) -> None:
+    """R3, on the pair the corpus built for it, on EVERY engine.
 
     The two cases are the same sentence with a different order number, stored for
     two different customers. Under bag-of-words embeddings the two facts have
@@ -200,8 +320,13 @@ def test_R3_neither_user_of_the_pair_can_reach_the_others_fact(tmp_path) -> None
     keeping them separate is `memories_namespace(user_id)`. That is what makes
     this pair worth executing rather than one isolation test with distinct text:
     it removes the possibility of passing by lexical luck.
+
+    And it is the reason the whole engine parameter exists. `memories_namespace`
+    is ours and shared; the vector search that could return the neighbour's row
+    is the store's own. This test on `sqlite` says nothing about `pgvector`, and
+    pgvector is what will hold the real customers.
     """
-    store = durable_store(tmp_path / "memories.db")
+    store = engine.store("memories")
     cases = load_memory_cases("R3")
     assert len(cases) == 2
     for case in cases:
@@ -233,7 +358,7 @@ def test_R3_neither_user_of_the_pair_can_reach_the_others_fact(tmp_path) -> None
     "case", load_memory_cases("R5"), ids=[c["id"] for c in load_memory_cases("R5")]
 )
 def test_R5_the_forgotten_fact_is_gone_and_verifiably_so(
-    case: dict, tmp_path
+    case: dict, engine: MemoryEngine
 ) -> None:
     """R5: "oublie mon adresse" deletes it, and the deletion is checkable.
 
@@ -245,7 +370,7 @@ def test_R5_the_forgotten_fact_is_gone_and_verifiably_so(
     survive, so a silently swallowed write fails here loudly rather than being
     reported as a successful erasure.
     """
-    store = durable_store(tmp_path / "memories.db")
+    store = engine.store("memories")
     remember_user_turns(store, case)
     user_id = case["user_id"]
     forbidden = case["evaluation"]["forbidden_substring"]
@@ -268,21 +393,21 @@ def test_R5_the_forgotten_fact_is_gone_and_verifiably_so(
     "case", load_memory_cases("R5"), ids=[c["id"] for c in load_memory_cases("R5")]
 )
 def test_R5_the_erasure_does_not_outlive_the_process(
-    case: dict, tmp_path
+    case: dict, engine: MemoryEngine
 ) -> None:
-    """The half of R5 a same-process assertion cannot see: it hit the DISK.
+    """The half of R5 a same-process assertion cannot see: it hit the STORAGE.
 
-    Since Phase 10 the store is a durable SQLite file, so "deleted" must mean
-    deleted in the file — an in-process cache that merely stopped returning the
-    row would satisfy the test above and hand the fact back after a restart.
+    Since Phase 10 the store is durable, so "deleted" must mean deleted in the
+    file (or in the schema) — an in-process cache that merely stopped returning
+    the row would satisfy the test above and hand the fact back after a restart.
     """
-    session1 = durable_store(tmp_path / "memories.db")
+    session1 = engine.store("memories")
     remember_user_turns(session1, case)
     forget_user_memories(
         session1, case["user_id"], case["evaluation"]["target"], min_score=FORGET_FLOOR
     )
 
-    session2 = durable_store(tmp_path / "memories.db")
+    session2 = engine.store("memories")
     survivors = list_user_memories(session2, case["user_id"])
 
     forbidden = case["evaluation"]["forbidden_substring"]

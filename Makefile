@@ -77,7 +77,14 @@ check: lint test ## Contrôle qualité complet (lint + tests)
 # qui la rend utilisable comme porte de CI. `ARGS=--live` ajoute la dimension
 # QUALITÉ et franchit alors la frontière : ça appelle un vrai modèle et ça coûte
 # des tokens. Le seuil et la baseline : TODO_priorities.md §Chantier 7.
-score: ## Note l'agent, écrit le rapport, BLOQUE sous le seuil (ARGS=--live|--degraded|--update-baseline)
+#
+# ⭐ La dimension MÉMOIRE est notée une fois PAR MOTEUR de persistance. SQLite
+# toujours ; Postgres aussi si `EVAL_DATABASE_URL` en désigne un (chantier 8) —
+# R3 est l'isolation entre clients, et la requête de similarité qui pourrait
+# ramener la ligne du voisin est celle du store, pas la nôtre. Sans base, le
+# rapport DIT que Postgres n'a pas été exercé ; `ARGS=--require-postgres` refuse
+# ce cas (c'est ce que la CI passe).
+score: ## Note l'agent, écrit le rapport, BLOQUE sous le seuil (ARGS=--live|--degraded|--update-baseline|--require-postgres)
 	$(UV) run python -m support_agent.eval.mlops $(ARGS)
 
 ##@ Mesure — appelle un VRAI LLM : coûte des tokens et exige les clés du .env

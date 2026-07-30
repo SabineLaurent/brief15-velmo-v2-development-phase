@@ -129,6 +129,15 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
   (`memory/postgres_conn.py`) et *sweeper* de rétention RGPD (`MEMORY_TTL_DAYS`,
   compté depuis le **dernier accès**). ⚠️ `psycopg[binary]` obligatoire (sans
   libpq, échec **à l'import**) et image `pgvector/pgvector`, pas `postgres`.
+  ⭐ **Le corpus mémoire est noté une fois PAR MOTEUR** (`MemoryEngine` dans
+  `eval/offline.py`) : SQLite toujours, Postgres dès que `EVAL_DATABASE_URL` en
+  désigne un — la CI en démarre un. Raison : **R3 est l'isolation entre clients**,
+  une propriété de sécurité, et la requête de similarité qui pourrait ramener la
+  ligne du voisin appartient au store (sqlite-vec ⇄ pgvector), pas à nous. Sans
+  base la note ne mentait pas, elle **taisait** son moteur ; le rapport le dit
+  maintenant, et `make score ARGS=--require-postgres` (la CI) refuse le cas.
+  ⚠️ Ne pas remettre `persistence_backend` en dur dans `eval/` : c'est le défaut
+  que le chantier 8 a fermé.
 - **Backend métier** (`actions/`) : **deux** adaptateurs derrière le port, choisis
   par `SUPPORT_BACKEND` — `memory` (3 commandes en RAM, défaut) et `sqlite`
   (`actions/sql/`, la boutique peuplée par `make seed` : 14 commandes, 10 clients,

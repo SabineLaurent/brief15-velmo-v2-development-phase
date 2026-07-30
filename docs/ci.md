@@ -271,6 +271,39 @@ Le détail de la manœuvre — pourquoi la note globale n'est **pas** la porte, 
 comment une moyenne masque une chute de sécurité — est dans
 [`TODO_priorities.md`](../TODO_priorities.md) §Chantier 7.
 
+### Un Postgres jetable dans le job — et une porte qui ne lit pas un chiffre
+
+Depuis le chantier 8, le job `check` démarre un **service** `pgvector/pgvector:pg17`
+(la même image que `compose.yaml` — pas `postgres`, qui n'embarque pas l'extension)
+et expose `EVAL_DATABASE_URL`. Effet : les 12 cas du corpus mémoire tournent
+**deux fois**, une par moteur de persistance.
+
+Pourquoi ça valait un conteneur de plus dans la garde : **R3, c'est l'isolation
+entre clients**, une propriété de *sécurité*. Ce qui sépare deux clients —
+`memories_namespace(user_id)` — est notre code, commun aux deux moteurs. Mais la
+**requête de similarité** qui pourrait ramener la ligne du voisin appartient au
+store : sqlite-vec ici, pgvector là. C'est la moitié non partagée, et elle n'était
+vérifiée nulle part automatiquement — une fois à la main, à l'étape 3 du
+déploiement, et plus jamais. Tout le reste de ce dépôt a converti ses
+vérifications manuelles en invariants exécutables ; celle-ci ne l'était pas.
+
+⭐ Et une **quatrième porte**, la seule qui ne regarde pas une note :
+`make score ARGS=--require-postgres`. Les trois autres lisent un **chiffre**, et
+un chiffre ne peut pas s'apercevoir qu'il a été calculé sur la moitié des
+moteurs. Sans ce drapeau, un service qui ne démarre pas — ou un nom de variable
+mal orthographié — donnerait un **12/12 vert** couvrant deux fois moins. C'est la
+règle que ce dépôt avait déjà écrite ailleurs (`baseline_status`) : *une porte
+silencieusement sautée est une porte qu'on croit avoir*.
+
+En local, sans base, rien n'est cassé : `make score` note SQLite, et le rapport
+**dit** que Postgres n'a pas été exercé. La différence entre un trou connu et un
+angle mort tient entièrement dans cette phrase imprimée.
+
+⚠️ Le `options: --health-cmd` du service n'est pas décoratif : sans lui, GitHub
+lance les steps dès que le **conteneur** tourne, pas quand Postgres **accepte les
+connexions**. C'est le piège classique de la pièce mobile, et il se paie en
+`connection refused` sur une base qui aurait été prête deux secondes plus tard.
+
 ---
 
 ## 9. Ce que la CI a rapporté avant même d'exister
@@ -358,8 +391,13 @@ production** — et le même Dockerfile dans les deux cas.
 ## 11. Le coût
 
 Gratuit et illimité pour un dépôt **public**. Pour un dépôt **privé**, le plan Free
-donne 2 000 minutes/mois. À une minute par run, il faudrait plus de soixante pushes
-par jour pour s'en approcher.
+donne 2 000 minutes/mois. À une ou deux minutes par run, il faudrait plusieurs
+dizaines de pushes par jour pour s'en approcher.
+
+Le service Postgres du chantier 8 est la seule dépense assumée : quelques dizaines
+de secondes de plus (démarrage de l'image + le corpus mémoire joué deux fois),
+contre une propriété de sécurité vérifiée sur le moteur de production au lieu de
+l'autre. Le marché était vite fait.
 
 ---
 

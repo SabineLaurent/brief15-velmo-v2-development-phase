@@ -434,7 +434,8 @@ qu'on finit par ne plus lancer.
 
 ➕ **Et le corpus du starter est exécuté** (2026-07-29) : les 12 cas de
 `data/eval/memory_cases.jsonl` sont pilotés par `tests/test_memory_cases.py`
-(19 tests, hors ligne). Ils n'ajoutent pas une exigence, ils ajoutent de la
+(36 tests hors ligne : 19 sur SQLite, 17 de plus dès qu'un Postgres est offert —
+voir juste en dessous). Ils n'ajoutent pas une exigence, ils ajoutent de la
 **largeur** — dix natures de fait de plus, et surtout **deux paires** que les
 fichiers précédents n'avaient pas :
 
@@ -446,8 +447,22 @@ fichiers précédents n'avaient pas :
   de passer par chance lexicale. Vérifiée en cassant le namespace : le test
   devient rouge, et lui seul.
 - la **paire R5** vérifie l'oubli par **trois chemins** (rappel sémantique, dump
-  d'audit, valeur de retour) *et* après réouverture du fichier SQLite — une purge
-  qui n'aurait vidé qu'un cache en RAM passerait les trois premiers.
+  d'audit, valeur de retour) *et* après réouverture du stockage — une purge qui
+  n'aurait vidé qu'un cache en RAM passerait les trois premiers.
+
+⭐ **Et depuis le 2026-07-30, ces 12 cas tournent une fois PAR MOTEUR de
+persistance** (chantier 8) : SQLite toujours, **Postgres/pgvector** dès qu'une base
+est offerte (`EVAL_DATABASE_URL` ; la CI en démarre une). Le raisonnement tient en
+une phrase : **R3 est une propriété de sécurité**, et elle repose sur deux moitiés
+dont une seule est à nous. `memories_namespace(user_id)` est notre code, commun aux
+deux moteurs ; la **requête de similarité** qui pourrait ramener la ligne du voisin
+appartient au store — sqlite-vec ici, pgvector là. La prouver sur l'un ne dit rien
+de l'autre, et la production, c'est l'autre.
+
+Effet secondaire qui valait le détour : **R1 est enfin durable**. Le fil était
+rejoué sur un saver en RAM ; il tourne maintenant sur celui du moteur et se relit à
+travers un **second objet saver** sur le même stockage. `PostgresSaver` fait donc
+son aller-retour sous assertion, ce qui n'existait nulle part.
 
 Deux adaptations à savoir défendre, toutes deux dans le même esprit que le piège
 de portage ci-dessous : **chaque tag est asserté contre le mécanisme qui

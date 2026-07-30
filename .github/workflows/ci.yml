@@ -75,6 +75,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # ⭐ Un Postgres JETABLE, le temps du job — chantier 8 de TODO_priorities.md.
+    #
+    # Le problème qu'il règle : la dimension MÉMOIRE était notée sur SQLite, et
+    # seulement là. « Mémoire 12/12 » était donc vrai — sur le mauvais moteur. Or
+    # R3, c'est l'ISOLATION ENTRE CLIENTS, une propriété de sécurité. Ce qui sépare
+    # deux clients, `memories_namespace(user_id)`, est à nous et commun aux deux
+    # moteurs ; mais la REQUÊTE DE SIMILARITÉ qui pourrait ramener la ligne du
+    # voisin appartient au store — sqlite-vec d'un côté, pgvector de l'autre. La
+    # moitié non partagée n'était vérifiée nulle part automatiquement : une fois à
+    # la main, à l'étape 3 du déploiement, et plus jamais depuis.
+    #
+    # ⚠️ `pgvector/pgvector`, PAS `postgres` : l'image officielle n'embarque pas
+    # l'extension `vector`, et le store long terme ne peut pas s'en passer. Même
+    # image que `compose.yaml`, pour que la CI et la pile locale exercent le même
+    # moteur — deux versions différentes, et le vert de l'une ne dit plus rien de
+    # l'autre.
+    #
+    # Le `options` n'est pas décoratif : sans healthcheck, GitHub démarre les
+    # steps dès que le CONTENEUR tourne, pas quand Postgres accepte les
+    # connexions. C'est le piège classique — un premier test qui échoue sur un
+    # « connection refused » d'une base qui sera prête 2 secondes plus tard.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: agent
+          POSTGRES_PASSWORD: agent
+          POSTGRES_DB: agent
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent -d agent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    # La base que l'ÉVALUATION peut noter. Volontairement PAS `DATABASE_URL` :
+    # celle-là configure l'application, et un `make score` qui créerait — et
+    # SUPPRIMERAIT — des schémas dans la base configurée d'une développeuse serait
+    # un piège. Ce nom-ci veut dire « oui, note aussi sur ce Postgres-là »
+    # (`eval/offline.py`, `EVAL_DATABASE_URL_ENV`).
+    env:
+      EVAL_DATABASE_URL: postgres://agent:agent@localhost:5432/agent
+
     steps:
       # 📌 Chaque action est référencée COMME SA PROPRE DOC le prescrit, et les deux
       # ne prescrivent pas la même chose. Ce n'est pas une incohérence, c'est le
@@ -131,5 +175,13 @@ jobs:
       # n'est pas parfaite) ou si une dimension régresse de plus d'un cas contre
       # `data/eval-baseline.json`. Le rapport part sous `database/` (gitignoré) :
       # c'est une sortie de run, pas une source.
-      - name: make score (note + seuil bloquant)
-        run: make score
+      #
+      # ⭐ `--require-postgres` : la quatrième porte, et la seule qui ne regarde pas
+      # un CHIFFRE. Les trois autres lisent une note — or une note ne peut pas
+      # s'apercevoir qu'elle a été calculée sur la moitié des moteurs. Sans ce
+      # drapeau, un service `postgres` qui n'aurait pas démarré (ou un
+      # `EVAL_DATABASE_URL` mal orthographié) donnerait un 12/12 vert qui couvre
+      # deux fois moins qu'il n'en a l'air. En local, sans base, `make score` reste
+      # utilisable : il note SQLite et le rapport DIT que Postgres n'a pas tourné.
+      - name: make score (note + seuil bloquant, Postgres exigé)
+        run: make score ARGS=--require-postgres

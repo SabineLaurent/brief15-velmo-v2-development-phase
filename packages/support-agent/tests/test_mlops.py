@@ -49,6 +49,7 @@ from support_agent.eval.mlops import (
     save_baseline,
     write_report,
 )
+from support_agent.eval.offline import POSTGRES, SQLITE
 from support_agent.guardrails.moderation import fold
 
 
@@ -142,11 +143,28 @@ def test_the_deterministic_dimensions_are_perfect(scores: Scores) -> None:
     This is what closes that hole: both deterministic corpora must be scored
     COMPLETE and PERFECT. Combined with `HARD_FLOORS`, any drift shows up as a
     red CI run rather than as a confident number.
+
+    The memory total is `12 × engines`, not 12, since chantier 8: the corpus is
+    replayed once per persistence engine. The count is asserted against the
+    engines the run REPORTS having used, not against a constant — hard-coding 24
+    would fail on a laptop without Postgres, and hard-coding 12 would stop
+    noticing whether the second pass ran at all.
     """
-    assert scores.dimensions[MEMORY].passed == len(load_memory_cases()) == 12
+    memory = scores.dimensions[MEMORY]
+    engines = int(memory.signals["engines"])
+    assert engines >= 1
+    assert memory.passed == memory.total == len(load_memory_cases()) * engines
     assert scores.dimensions[GUARDRAILS].passed == len(load_guardrail_cases()) == 35
     assert scores.memory == 1.0
     assert scores.guardrails == 1.0
+
+    # Every engine scored is named in the signals, and perfect on its own — an
+    # average across engines could hide one failing store behind another passing.
+    assert {SQLITE: 1.0} | ({POSTGRES: 1.0} if engines > 1 else {}) == {
+        backend: rate
+        for backend in (SQLITE, POSTGRES)
+        if (rate := memory.signals.get(f"{backend}_rate")) is not None
+    }
 
 
 def test_the_hard_floor_blocks_what_the_global_average_hides() -> None:
@@ -171,6 +189,73 @@ def test_the_hard_floor_blocks_what_the_global_average_hides() -> None:
     assert leaky.global_ > 0.8  # the average is reassuring...
     with pytest.raises(DeliveryBlocked, match=GUARDRAILS):
         enforce_threshold(leaky, 0.8)  # ...and the floor is not fooled
+
+
+def test_a_memory_note_scored_on_sqlite_alone_is_refused_when_postgres_is_required() -> None:
+    """Chantier 8: the gate no number can express — WHICH ENGINE was measured.
+
+    A perfect 12/12 on SQLite passes the threshold, passes the hard floor and
+    passes the baseline, all three, while saying nothing about pgvector — the
+    store that will actually hold customer data, and therefore the one R3
+    (isolation between customers) has to be proven on.
+
+    So CI runs `--require-postgres`, and this asserts what that buys: a database
+    service that failed to start, or an `EVAL_DATABASE_URL` with a typo, turns
+    into a red run instead of a green one that quietly covers half as much.
+    """
+    sqlite_only = Scores(
+        version="test",
+        corpus=corpus_fingerprint(),
+        dimensions={
+            MEMORY: Dimension(
+                MEMORY, passed=12, total=12, signals={"engines": 1.0, f"{SQLITE}_rate": 1.0}
+            ),
+            GUARDRAILS: Dimension(GUARDRAILS, passed=35, total=35),
+        },
+    )
+    # Every other gate is satisfied — that is the point.
+    enforce_threshold(sqlite_only, 0.8)
+
+    with pytest.raises(DeliveryBlocked, match="Postgres"):
+        enforce_threshold(sqlite_only, 0.8, require_postgres=True)
+
+    both = Scores(
+        version="test",
+        corpus=corpus_fingerprint(),
+        dimensions={
+            MEMORY: Dimension(
+                MEMORY,
+                passed=24,
+                total=24,
+                signals={"engines": 2.0, f"{SQLITE}_rate": 1.0, f"{POSTGRES}_rate": 1.0},
+            ),
+            GUARDRAILS: Dimension(GUARDRAILS, passed=35, total=35),
+        },
+    )
+    enforce_threshold(both, 0.8, require_postgres=True)  # must not raise
+
+
+def test_the_report_says_which_engines_the_memory_note_covers(
+    scores: Scores, tmp_path
+) -> None:
+    """The other half of chantier 8: an honest number, not just a gated one.
+
+    `make score` on a laptop legitimately scores SQLite alone. What must never
+    happen again is that run printing "mémoire 12/12" with no mention of the
+    engine — which is exactly how the blind spot survived until 2026-07-29. So
+    the report names the engines it measured, and warns when Postgres is missing.
+    """
+    report = tmp_path / "report.md"
+    write_report(scores, report)
+    text = report.read_text(encoding="utf-8")
+
+    assert SQLITE in text
+    if int(scores.dimensions[MEMORY].signals["engines"]) > 1:
+        assert POSTGRES in text
+    else:
+        # The warning is the deliverable here, not a nicety: it is what tells a
+        # reader that the 12/12 does not cover the production engine.
+        assert "⚠️" in text and "production" in text
 
 
 def test_a_slow_decay_is_caught_by_the_baseline_not_by_the_threshold() -> None:
@@ -201,6 +286,53 @@ def test_a_slow_decay_is_caught_by_the_baseline_not_by_the_threshold() -> None:
     # threshold — so assert the REASON is the regression, not the average.
     with pytest.raises(DeliveryBlocked, match="régresse de 2 cas"):
         enforce_threshold(quality_scores(5), 0.8, baseline=baseline)
+
+
+def test_the_baseline_compares_per_engine_not_by_raw_case_count() -> None:
+    """A count stopped being comparable when the corpus began replaying per engine.
+
+    Both directions are wrong, and both were reachable:
+
+    * a baseline recorded WITH Postgres (24/24) against a perfect 12/12 run on a
+      laptop with no database read as "régresse de 12 cas" — blocking delivery on
+      a run where every single case passed;
+    * the reverse — the committed 12-case baseline against a 24-case CI run —
+      made `lost` negative, silently retiring the gate for that dimension.
+
+    Neither is a regression: it is the same corpus on a different number of
+    engines. So the comparison is per engine on both sides, and a real regression
+    still has to be caught — the third block below.
+    """
+    def memory_scores(passed: int, total: int, engines: int) -> Scores:
+        return Scores(
+            version="candidate",
+            corpus=corpus_fingerprint(),
+            dimensions={
+                MEMORY: Dimension(
+                    MEMORY, passed=passed, total=total, signals={"engines": float(engines)}
+                )
+            },
+        )
+
+    two_engines = Baseline(
+        version="accepted",
+        corpus=corpus_fingerprint(),
+        dimensions={MEMORY: {"score": 1.0, "passed": 24, "total": 24, "engines": 2}},
+    )
+    # Perfect on one engine, against a two-engine baseline: not a regression.
+    enforce_threshold(memory_scores(12, 12, 1), 0.8, baseline=two_engines)
+
+    # And the inverse: a one-engine baseline must not excuse a two-engine loss.
+    one_engine = Baseline(
+        version="accepted",
+        corpus=corpus_fingerprint(),
+        dimensions={MEMORY: {"score": 1.0, "passed": 12, "total": 12, "engines": 1}},
+    )
+    enforce_threshold(memory_scores(24, 24, 2), 0.8, baseline=one_engine)
+
+    # A genuine regression is still caught: 2 cases lost per engine.
+    with pytest.raises(DeliveryBlocked, match="régresse de 2 cas"):
+        enforce_threshold(memory_scores(20, 24, 2), 0.8, baseline=one_engine)
 
 
 def test_a_baseline_recorded_on_another_corpus_is_not_compared() -> None:

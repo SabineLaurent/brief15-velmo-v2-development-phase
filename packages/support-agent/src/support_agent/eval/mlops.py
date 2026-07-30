@@ -10,6 +10,7 @@ Run it:
     make score                  # offline only: what CI gates on
     make score ARGS=--live      # adds the quality dimension (calls a real LLM)
     make score ARGS=--update-baseline
+    make score ARGS=--require-postgres   # refuse a memory note scored on SQLite alone
 
 Before Phase 9 this project could not say whether a change made the agent better
 or worse. Then it could measure (`eval/`), but nothing AGGREGATED the measures and
@@ -59,7 +60,15 @@ from typing import Any
 
 from support_agent.config import Settings, get_settings
 from support_agent.eval.corpus import corpus_dir, corpus_fingerprint
-from support_agent.eval.offline import CaseResult, CorpusRun, score_guardrails, score_memory
+from support_agent.eval.offline import (
+    EVAL_DATABASE_URL_ENV,
+    POSTGRES,
+    SQLITE,
+    CaseResult,
+    CorpusRun,
+    score_guardrails,
+    score_memory,
+)
 
 # The three dimensions the brief names, spelled once.
 MEMORY = "memory"
@@ -196,6 +205,11 @@ class Scores:
                     "score": round(dimension.score, 4),
                     "passed": dimension.passed,
                     "total": dimension.total,
+                    # How many persistence engines produced that count. Recorded
+                    # because the count alone stopped being comparable when the
+                    # memory corpus began replaying per engine: 12 and 24 can be
+                    # the same perfect run. Absent = one engine.
+                    "engines": int(dimension.signals.get("engines", 1)),
                 }
                 for name, dimension in self.dimensions.items()
             },
@@ -278,6 +292,13 @@ class Baseline:
         entry = self.dimensions.get(name)
         return int(entry["passed"]) if entry else None
 
+    def engines(self, name: str) -> int:
+        """How many engines produced that count. 1 for a baseline written before
+        the memory corpus started replaying per engine — which is the right
+        reading: it was one engine."""
+        entry = self.dimensions.get(name)
+        return int(entry.get("engines", 1)) if entry else 1
+
     def score(self, name: str) -> float | None:
         entry = self.dimensions.get(name)
         return float(entry["score"]) if entry else None
@@ -333,23 +354,45 @@ def baseline_status(scores: Scores, baseline: Baseline | None) -> str:
 # --- The gate ---------------------------------------------------------------
 
 
+def _scored_on_postgres(scores: Scores) -> bool:
+    """Did the memory dimension actually run against the production engine?
+
+    Read off the per-engine signals `score_memory` emits, rather than off the
+    environment: what matters is what the RUN did, not what its configuration
+    intended. A `DATABASE_URL` exported by a shell that never reached the scorer
+    would answer the second question and get the first one wrong.
+    """
+    memory = scores.dimensions.get(MEMORY)
+    return memory is not None and f"{POSTGRES}_rate" in memory.signals
+
+
 def enforce_threshold(
     scores: Scores,
     threshold: float = DEFAULT_THRESHOLD,
     *,
     baseline: Baseline | None = None,
     max_regression_cases: int = MAX_REGRESSION_CASES,
+    require_postgres: bool = False,
 ) -> None:
     """Return quietly, or raise `DeliveryBlocked` with every reason found.
 
-    Three independent gates, in the order a reader cares about:
+    Four independent gates, in the order a reader cares about:
 
       1. the brief's literal rule — global note below `threshold`;
       2. the hard floors — a deterministic dimension that is not perfect;
       3. non-regression — a measured dimension that lost more than
-         `max_regression_cases` against the accepted baseline.
+         `max_regression_cases` against the accepted baseline;
+      4. coverage — `require_postgres`, i.e. the memory corpus was scored on the
+         production engine and not on SQLite alone.
 
     Gate 3 is skipped when the corpus fingerprint moved (see `baseline_status`).
+
+    Gate 4 exists because gates 1-3 all read a NUMBER, and a number cannot notice
+    that it was computed over half the engines. Without it, a CI whose database
+    service failed to start — or whose `EVAL_DATABASE_URL` was misspelled — would
+    go green on a 12/12 that no longer covers what it claims. This repo already
+    wrote the rule down elsewhere (`baseline_status`): a silently skipped gate is
+    a gate you think you have.
     """
     problems: list[str] = []
 
@@ -374,13 +417,31 @@ def enforce_threshold(
             was = baseline.passed(name)
             if was is None:
                 continue
-            lost = was - dimension.passed
+            # PER ENGINE, on both sides. Raw counts stopped being comparable the
+            # day the memory corpus began replaying per engine: a baseline of
+            # 24/24 recorded where Postgres was available would read as "régresse
+            # de 12 cas" against a perfect 12/12 run on a laptop that has no
+            # database, and the reverse — a 12-engine-1 baseline against a
+            # 24-engine-2 run — silently retires the gate for that dimension.
+            # Neither is a regression; both are the same corpus on a different
+            # number of engines.
+            now_engines = int(dimension.signals.get("engines", 1)) or 1
+            lost = was / baseline.engines(name) - dimension.passed / now_engines
             if lost > max_regression_cases:
                 problems.append(
-                    f"{name} régresse de {lost} cas contre la baseline "
-                    f"({dimension.passed}/{dimension.total} vs {was}) — "
+                    f"{name} régresse de {lost:.0f} cas par moteur contre la baseline "
+                    f"({dimension.passed}/{dimension.total} sur {now_engines} moteur(s) "
+                    f"vs {was} sur {baseline.engines(name)}) — "
                     f"tolérance : {max_regression_cases}"
                 )
+
+    if require_postgres and not _scored_on_postgres(scores):
+        problems.append(
+            "la mémoire n'a PAS été notée sur Postgres alors que ce run l'exigeait "
+            f"(`{EVAL_DATABASE_URL_ENV}` absent ?) — R3 est l'isolation entre "
+            "clients, une propriété de SÉCURITÉ : la prouver sur SQLite seul ne "
+            "couvre pas le moteur qui tiendra les vraies données"
+        )
 
     if problems:
         raise DeliveryBlocked(
@@ -548,6 +609,29 @@ def _percent(value: float) -> str:
     return f"{value * 100:.0f} %"
 
 
+def _engines_note(signals: dict[str, float]) -> str:
+    """Say which storage engines the memory note covers — always, both ways.
+
+    The point of chantier 8: "mémoire 12/12" used to be true ON SQLITE and say so
+    nowhere. Naming the engines when both ran is not enough on its own, because
+    the dangerous run is the one where only SQLite did — so that case gets a
+    warning rather than a quieter sentence.
+    """
+    measured = [
+        (backend, signals[f"{backend}_rate"])
+        for backend in (SQLITE, POSTGRES)
+        if f"{backend}_rate" in signals
+    ]
+    rendered = " · ".join(f"{backend} {_percent(rate)}" for backend, rate in measured)
+    if len(measured) > 1:
+        return f"moteurs : {rendered}"
+    return (
+        f"⚠️ moteur : {rendered} SEULEMENT — Postgres, la cible de production, "
+        f"n'a pas été exercé (`{EVAL_DATABASE_URL_ENV}` non défini). R3 (isolation "
+        "entre clients) n'est donc prouvée que sur sqlite-vec, pas sur pgvector."
+    )
+
+
 def write_report(
     scores: Scores,
     path: Path | str,
@@ -624,6 +708,10 @@ def write_report(
             f"| **Note mémoire** | {memory.score:.3f} "
             f"({memory.passed}/{memory.total}) — {per_tag} |"
         )
+        # Its own row, not a parenthesis on the one above: which engine was
+        # measured is a property OF the note, and a reader who skims must not be
+        # able to take the 12/12 home without it.
+        add(f"| **Moteurs de persistance notés** | {_engines_note(memory.signals)} |")
     else:
         add("| **Note mémoire** | non mesurée |")
 
@@ -772,6 +860,13 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="note et rapporte sans bloquer (exploration locale)",
     )
+    parser.add_argument(
+        "--require-postgres",
+        action="store_true",
+        help="BLOQUE si la mémoire n'a pas aussi été notée sur Postgres "
+        f"(`{EVAL_DATABASE_URL_ENV}`) — ce que la CI exige, pour qu'un service de "
+        "base absent devienne rouge au lieu d'un 12/12 qui couvre moins",
+    )
     args = parser.parse_args(argv)
 
     scores = run_eval(live=args.live, guardrails_enabled=not args.degraded)
@@ -786,6 +881,9 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print(f"{name:<10}: {dimension.score:.3f} ({dimension.passed}/{dimension.total})")
     print(f"globale   : {scores.global_:.3f}")
+    memory = scores.dimensions.get(MEMORY)
+    if memory is not None:
+        print(f"moteurs   : {_engines_note(memory.signals)}")
     print(f"baseline  : {baseline_status(scores, baseline)}")
     print(f"rapport   : {report_path}")
 
@@ -800,7 +898,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        enforce_threshold(scores, args.threshold, baseline=baseline)
+        enforce_threshold(
+            scores,
+            args.threshold,
+            baseline=baseline,
+            require_postgres=args.require_postgres,
+        )
     except DeliveryBlocked as blocked:
         print(f"\n🔴 {blocked}", file=sys.stderr)
         return 1
