@@ -1,10 +1,15 @@
 # CI — la garde du dépôt : ce qui doit rester vrai à chaque push.
 #
-# Chantier 3quater de TODO_priorities.md, moitié « LA GARDE ». La moitié « l'image »
-# (build amd64 + push sur l'ACR) viendra dans un workflow SÉPARÉ à l'étape 5 du
-# déploiement : elle a besoin d'un ACR qui n'existe pas encore, et de secrets Azure.
-# Écrire aujourd'hui du YAML contre une cible inexistante ne prouverait rien.
-# Détail : docs/plan-deploiement-2026-07-25.md, étape 5.
+# Chantier 3quater de TODO_priorities.md. Deux jobs, deux questions :
+#   · `check`  — CI-1, LA GARDE : le code fait-il ce qu'on a écrit ?
+#   · `images` — CI-2 : l'artefact qu'on déploiera démarre-t-il, en amd64 ?
+#
+# ⚠️ Correction du 2026-07-31 : ce fichier annonçait que TOUTE la moitié
+# « image » attendait l'étape 5 et son ACR. C'était une confusion entre
+# CONSTRUIRE et PUBLIER. Construire en amd64 et vérifier ce qu'on a construit ne
+# demande ni registre ni secret — seul le PUSH sur l'ACR en demande. La moitié
+# vérifiable a donc été faite tout de suite ; la publication (CI-3) reste à
+# l'étape 5. Détail : docs/plan-deploiement-2026-07-25.md, étape 5.
 #
 # 📌 Règle à tenir quand ce second workflow arrivera : la GARDE tourne partout
 # (toute branche), la PUBLICATION ne tourne que sur `main`. Vérifier est gratuit
@@ -185,3 +190,58 @@ jobs:
       # utilisable : il note SQLite et le rapport DIT que Postgres n'a pas tourné.
       - name: make score (note + seuil bloquant, Postgres exigé)
         run: make score ARGS=--require-postgres
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # CI-2 — les IMAGES : elles se construisent en amd64, et elles tiennent leurs
+  # promesses. (TODO_priorities.md §Chantier 3quater.)
+  # ───────────────────────────────────────────────────────────────────────────
+  images:
+    name: images (amd64) — découplage + démarrage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # ⭐ PAS de `needs: check`, et c'est un choix. Les deux jobs répondent à deux
+    # questions indépendantes — « le code fait-il ce qu'on a écrit ? » et
+    # « l'artefact qu'on déploie démarre-t-il ? » — et aucune n'est un prérequis
+    # de l'autre. Les enchaîner ne ferait qu'ajouter l'attente de la première à
+    # la réponse de la seconde, alors qu'un test rouge et une image cassée se
+    # corrigent de toute façon séparément.
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Le script est en stdlib pure et `make docker-smoke` l'invoque en
+      # `--no-project` : uv sert d'interpréteur, il n'y a AUCUN `uv sync` ici.
+      # Ce job n'installe pas le projet — il ne teste que ce qui est dans les
+      # images, ce qui est précisément son intérêt.
+      - name: Installer uv
+        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          python-version: "3.12"
+
+      # ⭐ POURQUOI ce job existe, et pourquoi il ne peut pas se faire en local :
+      # la machine de dev est **arm64**, App Service Linux exécute du
+      # **linux/amd64**. Une image arm64 poussée sur Azure ne démarre pas, et
+      # l'échec arrive au DÉPLOIEMENT, pas au build — au pire endroit possible.
+      # Ici le runner EST amd64 : `--platform` y est un no-op, et c'est très bien.
+      # Ce qui compte est que le build et le démarrage aient lieu sur la vraie
+      # architecture cible. Le drapeau rend l'exigence explicite le jour où le
+      # runner change (GitHub propose désormais de l'arm64).
+      #
+      # ⚠️ Aucun cache de build (pas de `cache-from: type=gha`) : l'utiliser
+      # imposerait `docker buildx build --cache-…`, donc une commande DIFFÉRENTE
+      # de celle du Makefile — et le jour où les deux divergent, le vert de la CI
+      # ne dit plus rien de `make docker-smoke` en local. On paie quelques minutes
+      # pour garder une porte d'entrée unique (CLAUDE.md).
+      #
+      # Ce que le script assère ensuite, et que personne ne vérifiait plus depuis
+      # l'étape 4 du déploiement (à la main, une fois) :
+      #   1. l'image du client ne contient NI `support_agent`, NI `langchain`,
+      #      NI `langchain_core`, NI `langgraph` — la preuve du découplage ;
+      #   2. l'image de l'agent démarre pour de vrai : elle refuse de servir sans
+      #      clé (fail-closed), s'échauffe, et `/health` + `/ready` répondent.
+      # Aucun secret : l'unique dépendance réseau du démarrage (les embeddings)
+      # est servie par un stub local. C'est ce qui permet à cette garde de tourner
+      # sur chaque branche, comme le reste de la CI.
+      - name: make docker-smoke (build amd64 + vérification des deux images)
+        run: make docker-smoke PLATFORM=linux/amd64

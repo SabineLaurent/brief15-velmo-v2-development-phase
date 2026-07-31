@@ -2,10 +2,11 @@
 
 **Objet :** ce que vérifie l'intégration continue, quand elle se déclenche, ce
 qu'elle provoque — et surtout ce qu'elle **ne** provoque **pas**.
-**Date :** 2026-07-26
+**Date :** 2026-07-26 · **mis à jour le 2026-07-31** (§10 : le job `images`)
 **Fichier concerné :** [`../.github/workflows/ci.yml`](../.github/workflows/ci.yml)
-**Chantier :** 3quater de [`../TODO_priorities.md`](../TODO_priorities.md), moitié
-« la garde ». La moitié « l'image » arrive à l'étape 5 du déploiement.
+**Chantier :** 3quater de [`../TODO_priorities.md`](../TODO_priorities.md).
+**CI-1** (la garde) et **CI-2** (les images, en amd64) sont faites ; **CI-3** (la
+publication sur l'ACR) arrive à l'étape 5 du déploiement, avec les secrets Azure.
 **Se lit avec :** [`plan-deploiement-2026-07-25.md`](plan-deploiement-2026-07-25.md)
 (l'ordre de déploiement, §Étape 5) et [`glossaire.md`](glossaire.md) (*flaky*).
 
@@ -338,12 +339,23 @@ diagnostic de trente secondes et une fausse piste.
 
 ---
 
-## 10. La suite : la moitié « image », et pourquoi elle passe par la CI
+## 10. La moitié « image » — CI-2 est faite, seule la publication attend
 
-Le chantier a deux moitiés. **La garde** (ce document) est faite. **L'image**
-attend l'étape 5, parce qu'elle a besoin d'un ACR qui n'existe pas encore.
+**Une confusion corrigée le 2026-07-31.** Ce document (et l'en-tête de `ci.yml`)
+affirmaient que toute la moitié « image » attendait l'étape 5 « parce qu'elle a
+besoin d'un ACR qui n'existe pas encore ». C'était confondre **construire** et
+**publier** :
 
-**Le fait technique qui l'impose.** Mesuré sur la machine de développement :
+| | Besoin d'Azure ? | État |
+|---|---|---|
+| **CI-2** — construire en amd64, et vérifier ce qu'on a construit | **non** | ✅ job `images` |
+| **CI-3** — pousser sur l'ACR, mettre à jour les Web Apps | oui (registre + secrets) | ⬜ étape 5 |
+
+Le coût de cette confusion aurait été de découvrir un build cassé **au
+déploiement**, le jour où le droit Azure tombe — c'est-à-dire au moment où on a
+le moins envie de déboguer un `exec format error`.
+
+**Le fait technique qui impose la CI.** Mesuré sur la machine de développement :
 
 ```
 uname -m                  → arm64        (Apple Silicon)
@@ -377,7 +389,7 @@ résolu de façon universelle, et `.dockerignore` exclut déjà le `.venv` de l'
 **La bascule ne demandera aucun changement de Dockerfile** — seulement *où* et
 *avec quel `--platform`* on construit.
 
-> 📌 **Règle à tenir pour ce second workflow : la garde tourne partout (toute
+> 📌 **Règle à tenir quand CI-3 arrivera : la garde tourne partout (toute
 > branche), la publication ne tourne que sur `main`.** Vérifier est gratuit et doit
 > être omniprésent ; pousser une image sur le registre de production est un effet
 > de bord, et il n'a rien à faire depuis une branche de feature.
@@ -385,6 +397,46 @@ résolu de façon universelle, et `.dockerignore` exclut déjà le `.venv` de l'
 Le build local (`make docker-up`) reste inchangé : arm64, natif, rapide. Deux
 chemins de build, deux buts — **local pour itérer, CI pour produire l'artefact de
 production** — et le même Dockerfile dans les deux cas.
+
+### Ce que le job `images` vérifie, au-delà du « ça construit »
+
+Une image qui se construit n'est pas une image qui marche. `make docker-smoke`
+(le même en local et en CI) construit les deux images puis leur pose **deux
+questions qui n'avaient plus de réponse automatique depuis l'étape 4 du
+déploiement** — elles y avaient été vérifiées à la main, une fois :
+
+1. **L'image du client ne contient ni `support_agent`, ni `langchain`, ni
+   `langchain_core`, ni `langgraph`.** C'est la preuve du découplage : le client
+   parle à l'agent en HTTP, il n'embarque pas son cerveau. `langchain_core` est
+   le nom qui compte — c'est lui que traînerait une dépendance transitive
+   réintroduite par mégarde.
+2. **L'image de l'agent démarre vraiment** : elle refuse de servir sans clé
+   (démarrage *fail-closed*), s'échauffe, puis `/health` et `/ready` répondent, et
+   un `POST /chat` sans `X-API-Key` reçoit **401**.
+
+**Le point délicat, et pourquoi ce n'est pas de la triche.** Le *lifespan* de
+l'agent construit l'index FAQ **avant** d'ouvrir son port : sans modèle
+d'embeddings joignable, le conteneur ne démarre pas du tout, et le test
+n'assèrerait plus que l'absence d'une clé. Le script sert donc l'**unique
+dépendance réseau du démarrage** depuis un **stub local** parlant l'API
+d'embeddings OpenAI, branché par le rail `openai_compatible` **qui existe déjà**
+dans le projet. Rien d'autre n'est simulé : même image, même entrée, même
+démarrage fail-closed, vraie FAQ, vrai vector store, vrai HTTP. Et **aucun
+secret** — c'est ce qui permet à cette garde de tourner sur chaque branche, comme
+le reste de la CI. Ce qu'elle ne fait volontairement **pas** : envoyer un message.
+Y répondre demande un vrai modèle, et la qualité est le métier de `make score`.
+
+> 🔎 **Trouvé en route, et ça vaut pour l'étape 5.** L'échauffement mesuré sur ce
+> rail (15 à 25 s selon les runs — et cette dispersion est déjà un indice) contient
+> **7,3 s de `tiktoken` qui télécharge `cl100k_base` depuis
+> un CDN OpenAI** — un appel que `langchain-openai` fait pour découper le texte,
+> vers un hôte qui n'a **rien à voir** avec l'endpoint configuré. Vérifié, pas
+> déduit : le même import sous `docker run --network none` échoue sur
+> `openaipublic.blob.core.windows.net`. Sans conséquence aujourd'hui (le rail par
+> défaut est `mistral`, qui n'utilise pas tiktoken), mais un déploiement **Azure
+> OpenAI derrière un VNet fermé ne démarrerait pas** tant que ce CDN n'est pas
+> joignable ou l'encodage embarqué dans l'image. Le ~4,4 s de démarrage à froid du
+> plan de déploiement reste juste : il a été mesuré sur le rail `mistral`.
 
 ---
 
@@ -394,10 +446,18 @@ Gratuit et illimité pour un dépôt **public**. Pour un dépôt **privé**, le 
 donne 2 000 minutes/mois. À une ou deux minutes par run, il faudrait plusieurs
 dizaines de pushes par jour pour s'en approcher.
 
-Le service Postgres du chantier 8 est la seule dépense assumée : quelques dizaines
+Le service Postgres du chantier 8 est la première dépense assumée : quelques dizaines
 de secondes de plus (démarrage de l'image + le corpus mémoire joué deux fois),
 contre une propriété de sécurité vérifiée sur le moteur de production au lieu de
 l'autre. Le marché était vite fait.
+
+La seconde est le job `images` : il construit **deux images sans cache de build**.
+C'est délibéré — utiliser le cache GitHub imposerait un `docker buildx build
+--cache-from …`, donc une commande **différente** de celle du `Makefile`, et le
+vert de la CI cesserait de dire quoi que ce soit de `make docker-smoke` en local.
+Quelques minutes de runner contre une porte d'entrée unique (CLAUDE.md) : le même
+marché. Il tourne **en parallèle** de `check`, pas après — les deux répondent à
+des questions indépendantes, et aucune n'est le prérequis de l'autre.
 
 ---
 

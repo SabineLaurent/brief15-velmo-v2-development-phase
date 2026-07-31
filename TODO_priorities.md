@@ -18,7 +18,7 @@
 | 3 | **Déploiement conteneurisé** (Docker → Azure), 5 étapes | l'agent doit devenir un **service appelable** — objectif de livraison de la formation | 🚧 |
 | 3bis | Revue de code — **C2** (adresses boutique caviardées) · **C3** (500 au lieu de 401) | dégradaient des réponses **aujourd'hui** ; petits, faits avant l'étape 5 | ✅ |
 | 3ter | Revue de code — **C1** : escalade sans reprise via HTTP | 🔴 **le fil est condamné** après une escalade | ✅ |
-| 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | 🚧 **la garde ✅** (`.github/workflows/ci.yml`) · **l'image ⬜** (à l'étape 5, avec l'ACR) |
+| 3quater | **CI** (GitHub Actions) — la garde, puis l'image | **prérequis technique de l'étape 5** : l'image poussée sur ACR ne peut pas être construite sur un Mac **arm64** | 🚧 **CI-1 la garde ✅** · **CI-2 les images amd64 ✅** (`make docker-smoke`) · **CI-3 la publication ⬜** (étape 5, avec l'ACR) |
 | 4 | B1.4 — session, `thread_id` & identité | **reporté** : l'identité se règle à l'étape 5 du déploiement, là où la frontière réseau existe (elle existe depuis l'étape 4) | ⬜ |
 | 3ter bis | **Corpus d'acceptance du starter** — les 3 `eval/*.jsonl` portés et exécutés | la matière à noter du chantier 3 (MLOps) ; découpe mémoire/garde-fous/qualité prête | ✅ |
 | 7 | **Étage MLOps** — note globale, seuil bloquant, rapport, baseline | le **dernier** des trois chantiers du brief encore ouvert ; l'étape 5 Azure est bloquée par un droit d'accès, celui-ci ne dépend de personne | ✅ |
@@ -161,7 +161,7 @@ pas défendable — donc B1.4 y gagne en attendant.
 | 2 | Image Docker de la tranche `support-agent` (état sur volume) | ✅ |
 | 3 | Postgres + pgvector réellement exercé (`PERSISTENCE_BACKEND=postgres`) | ✅ |
 | 4 | Conteneur `client` : Chainlit devient client **HTTP** | ✅ |
-| 4bis | **CI** : la garde (lint + tests) puis l'image **amd64** — voir chantier 3quater | ⬜ |
+| 4bis | **CI** : la garde (lint + tests) puis l'image **amd64** — voir chantier 3quater | ✅ sauf la **publication** (CI-3), qui appartient à l'étape 5 ci-dessous |
 | 5 | Azure : ACR + **App Service** (2 Web Apps, 1 plan) + Flexible Server/pgvector, **identité prouvée** | ⬜ |
 
 **Étape 4 close (2026-07-25) — ce qu'elle a prouvé, chiffré :** `app.py` a changé
@@ -204,7 +204,7 @@ clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
 
 ---
 
-## Chantier 3quater — CI (intégration continue), avant la CD Azure ⬜
+## Chantier 3quater — CI (intégration continue), avant la CD Azure 🚧 (CI-1 ✅ · CI-2 ✅ · CI-3 ⬜)
 
 **Pourquoi maintenant, et pas « parce que ça se fait ».** La CI est ici un
 **prérequis technique** de l'étape 5, pas une bonne pratique optionnelle :
@@ -227,20 +227,16 @@ clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
 
 **Découpe proposée, dans l'ordre (chaque étape a un but distinct) :**
 
-- **CI-1 — la garde (aucun secret).** `push` + `pull_request` : `uv sync --frozen`,
+- **CI-1 — la garde (aucun secret).** ✅ `push` + `pull_request` : `uv sync --frozen`,
   `ruff check`, `pytest`. Plus une vérification que le **lock est à jour**
   (`uv lock --check`) : un `pyproject.toml` modifié sans relock casse la
   reproductibilité de l'image, en silence. Livrable : un rouge/vert qui veut dire
   quelque chose.
-- **CI-2 — l'image, en amd64.** Construire les **deux** images (agent + client) sur
-  le runner, `--platform linux/amd64`, **sans pousser**. C'est là que se règle le
-  problème d'architecture, avant qu'il ne se manifeste comme un conteneur qui
-  refuse de démarrer sur Azure. Deux assertions à y faire **exécuter**, parce
-  qu'elles sont aujourd'hui vérifiées à la main :
-  1. l'image du client **ne contient ni `support_agent`, ni `langgraph`, ni
-     `langchain`** (la preuve du découplage de l'étape 4 — cf. plus haut) ;
-  2. l'image de l'agent répond sur `/health` (fumée : elle démarre vraiment).
-- **CI-3 — la chaîne complète (= la CD).** Pousser sur ACR puis mettre à jour l'image
+- **CI-2 — l'image, en amd64.** ✅ **fait le 2026-07-31** — voir le bilan ci-dessous.
+  Construire les **deux** images (agent + client) sur le runner,
+  `--platform linux/amd64`, **sans pousser**, puis exécuter les deux assertions qui
+  n'étaient vérifiées qu'à la main.
+- **CI-3 — la chaîne complète (= la CD).** ⬜ Pousser sur ACR puis mettre à jour l'image
   des deux Web Apps. **Ne se fait qu'à l'étape 5**, avec les secrets Azure.
 
 **Deux pièges à traiter dès CI-1 :**
@@ -251,6 +247,56 @@ clore un dossier). Détail : [`docs/escalade.md`](docs/escalade.md).
   (`make eval`), le Postgres réel et les appels LLM ont besoin de secrets et de
   réseau : ils appartiennent à un **second étage**, déclenché à la main ou sur
   `main`, jamais au chemin qui doit rester vert et rapide sur chaque commit.
+
+### CI-2 — fait le 2026-07-31 : `make docker-smoke` + le job `images`
+
+**Une confusion levée d'abord, et c'est le vrai gain.** `ci.yml` et `docs/ci.md`
+affirmaient tous deux que la moitié « image » attendait l'étape 5, « parce qu'elle
+a besoin d'un ACR qui n'existe pas encore ». C'était confondre **construire** et
+**publier** : seul le *push* demande un registre et des secrets. La moitié
+vérifiable était donc faisable depuis le premier jour, et son absence nous
+promettait de découvrir un build cassé **au déploiement** — au moment où on a le
+moins envie de déboguer un `exec format error`.
+
+**Le point dur, et la seule chose qui n'était pas évidente.** Le *lifespan* de
+l'agent construit l'index FAQ **avant** d'ouvrir son port. Un conteneur sans
+modèle d'embeddings joignable ne démarre donc pas du tout : « l'image répond sur
+`/health` » est **impossible à vérifier sans clé**, ce que la découpe d'origine
+n'avait pas vu. Réponse : servir l'**unique dépendance réseau du démarrage**
+depuis un **stub local** parlant l'API d'embeddings OpenAI, branché par le rail
+`openai_compatible` *qui existe déjà*. Aucun secret ⇒ la garde reste sur toutes
+les branches. Bonus non prévu : c'est la **première fois que le rail
+`openai_compatible` — celui d'Azure OpenAI — est exercé bout en bout**.
+
+**Trois choses que l'exécution a apprises, et qu'aucune relecture n'aurait données :**
+
+1. 🔴 **`GET /chat` répond `405`, avant toute dépendance.** La première version
+   sondait l'authentification avec un GET : elle recevait 405 et n'avait donc rien
+   testé de l'auth — la même sonde aurait été **verte sur un serveur grand
+   ouvert**. Corrigé en `POST` + corps **valide** (un corps invalide déplace le
+   problème d'un cran : 422 avant 401).
+2. 🔎 **`tiktoken` télécharge `cl100k_base` depuis un CDN OpenAI au démarrage** —
+   7,3 s, et **échec complet** sous `docker run --network none` (vérifié). Sans
+   conséquence aujourd'hui (le rail par défaut est `mistral`), mais un **Azure
+   OpenAI derrière un VNet fermé ne démarrerait pas**. À reverser dans l'étape 5.
+3. **L'index FAQ n'est pas le coût du démarrage** : 2 appels d'embeddings pour 17
+   vecteurs. Le stub compte et affiche ces deux nombres exprès — une durée
+   d'échauffement sans eux ne dit pas si on a payé un batch ou trente allers-retours.
+
+**Vérifié, pas déduit :**
+
+| Chemin | Résultat |
+|---|---|
+| `make docker-smoke` (arm64 natif, builds en cache) | les 2 images OK, **44 s** bout en bout |
+| Sonde « pas de cerveau » retournée contre l'image de l'**agent** | **sortie 1**, les 4 modules nommés — l'assertion peut donc échouer |
+| `make -n docker-build PLATFORM=linux/amd64` | `docker build --platform linux/amd64 …` sur les deux images |
+| `docker run --network none … tiktoken` | échec sur `openaipublic.blob.core.windows.net` |
+| `ruff check .` | propre (le script est dans le périmètre du lint) |
+
+⚠️ **Ce qui n'est PAS prouvé sur cette machine :** que le build **amd64** aboutit.
+Sur un Mac arm64 il passerait par l'émulation ; c'est le runner amd64 de la CI qui
+le prouvera, et c'est exactement la raison d'être du job. Le premier run de
+`images` sur GitHub est donc le vrai verdict.
 
 ---
 

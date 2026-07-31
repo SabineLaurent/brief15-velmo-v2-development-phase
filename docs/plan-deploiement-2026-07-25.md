@@ -415,6 +415,21 @@ port: 8000, failing site start »*, un message qui **ne dit rien** de la vraie c
 La cause est dans le **log du conteneur**, et le commit `c95376c` (config validée
 avant tout I/O) est précisément ce qui garantit qu'elle y soit nommée en clair.
 
+> 🔎 **Ajout du 2026-07-31 — une dépendance réseau de démarrage qu'on ne
+> soupçonnait pas, et elle vise le rail Azure.** Trouvée en écrivant le smoke test
+> CI-2 : sur le rail **`openai_compatible`** (donc sur Azure OpenAI, le « bonus
+> cohérent » ci-dessus), `langchain-openai` fait appeler `tiktoken` au démarrage,
+> qui **télécharge `cl100k_base` depuis `openaipublic.blob.core.windows.net`** —
+> un hôte qui n'a **rien à voir** avec l'endpoint configuré. Mesuré : **7,3 s** du
+> warm-up, et **échec du démarrage** sous `docker run --network none`.
+> Conséquence concrète : le jour où le LLM passe chez Azure, une Web App dont la
+> sortie réseau est restreinte (VNet integration + NSG, ce qui est *le* réglage
+> qu'on voudra) **ne démarrera pas** — et elle le dira sous la forme du message
+> inutile ci-dessus. Deux parades, à choisir à l'étape 5 : autoriser ce CDN en
+> sortie, ou embarquer l'encodage dans l'image (`TIKTOKEN_CACHE_DIR` pré-peuplé au
+> build). Sans effet aujourd'hui : le rail par défaut est `mistral`, qui n'utilise
+> pas tiktoken — et c'est aussi pourquoi le **4,4 s ci-dessus reste juste**.
+
 **4. Les *app settings* se swappent — sauf si on les épingle.** Si on utilise des
 **slots** (le remplaçant des révisions ACA), un swap **échange les app settings** par
 défaut. Une variable qui doit rester attachée à son slot doit être cochée

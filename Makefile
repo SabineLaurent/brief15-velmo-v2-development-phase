@@ -22,7 +22,7 @@ UV := uv
         test lint format check score \
         eval latency \
         seed consolidate memory \
-        docker-build docker-up docker-logs docker-down \
+        docker-build docker-smoke docker-up docker-logs docker-down \
         clean
 
 help: ## Affiche cette aide
@@ -105,9 +105,27 @@ memory: ## Inspecte / efface la mémoire d'un client (R5-R6) — ARGS='--user-id
 
 ##@ Docker — ports 81xx (disjoints du dev local en 80xx, pour ne pas confondre les deux piles)
 
-docker-build: ## Construit les images (agent + client ; contexte = racine du repo)
-	docker build -f packages/support-agent/Dockerfile -t support-agent:dev .
-	docker build -f packages/client/Dockerfile -t client-chainlit:dev .
+# L'ARCHITECTURE cible du build. Vide = celle de la machine, ce qu'on veut en
+# local (rapide, et c'est la seule qui s'exécute sans émulation). La CI passe
+# `PLATFORM=linux/amd64` : c'est ce qu'exécute App Service Linux, alors que la
+# machine de dev est arm64 — une image arm64 poussée sur Azure ne démarre pas,
+# et l'erreur arrive au déploiement, pas au build. Sur un runner amd64 le
+# drapeau est un no-op ; il n'en est pas décoratif pour autant, c'est lui qui
+# rend l'exigence EXPLICITE le jour où le runner change (GitHub en propose
+# désormais en arm64).
+PLATFORM ?=
+DOCKER_PLATFORM := $(if $(PLATFORM),--platform $(PLATFORM),)
+
+docker-build: ## Construit les images (agent + client ; ARGS ignoré, PLATFORM=linux/amd64 pour Azure)
+	docker build $(DOCKER_PLATFORM) -f packages/support-agent/Dockerfile -t support-agent:dev .
+	docker build $(DOCKER_PLATFORM) -f packages/client/Dockerfile -t client-chainlit:dev .
+
+docker-smoke: docker-build ## Construit PUIS vérifie les deux images (découplage + démarrage réel)
+	@# `--no-project` : le script est en stdlib PURE et pilote `docker`. Il ne doit
+	@# pas installer — encore moins importer — l'environnement qu'il vérifie, sinon
+	@# un vert dirait « ça marche sur cette machine » au lieu de « ça marche dans
+	@# l'image ». Effet de bord utile : la CI n'a pas de `uv sync` à faire pour ça.
+	$(UV) run --no-project python scripts/docker_smoke.py
 
 docker-up: ## Démarre la pile conteneurisée en arrière-plan (construit si besoin)
 	docker compose up --build -d

@@ -117,6 +117,12 @@ make docker-up  # la pile complète en conteneurs : postgres + agent-api + clien
               #   publie sur 0.0.0.0 et uvicorn écoute sur 127.0.0.1, donc pas
               #   d'Errno 48 : sans ça on croit tester sa pile locale et on
               #   interroge le conteneur, en silence.
+make docker-smoke  # construit les 2 images PUIS les vérifie : le client n'embarque
+              #   aucun module du cerveau, et l'agent démarre pour de vrai
+              #   (/health + /ready + 401 sans clé). Aucun secret : la dépendance
+              #   réseau du démarrage (embeddings) est servie par un stub local.
+              #   `PLATFORM=linux/amd64` = ce que construit la CI (Azure est amd64,
+              #   cette machine est arm64). Job `images` de la CI.
 make seed     # peuple la DOUBLURE métier (boutique SQL : commandes, clients,
               #   tickets). Idempotent ; `ARGS=--reset` pour tout reconstruire.
               #   ⚠️ Doublure ≠ base à nous : en prod on la DÉBRANCHE pour appeler

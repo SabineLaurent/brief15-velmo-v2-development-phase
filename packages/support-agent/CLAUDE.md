@@ -104,6 +104,14 @@ Le root pose la règle non négociable ; **elle se joue dans ce package** :
   `PYTHONUNBUFFERED=1` (sinon les logs restent bloqués dans le tampon).
 - `database/` = **volume**, jamais l'image. `data/kb-velmo` = source versionnée,
   donc **dans** l'image.
+- ⭐ **`make docker-smoke` vérifie que cette image DÉMARRE**, pas seulement qu'elle
+  se construit : démarrage *fail-closed*, échauffement, `/health` + `/ready`, et
+  `POST /chat` sans clé ⇒ **401**. La CI le fait en `linux/amd64`. Le démarrage
+  ayant besoin d'un modèle d'embeddings joignable (le *lifespan* indexe la FAQ
+  **avant** d'ouvrir le port), le script sert cette seule dépendance depuis un stub
+  local via le rail `openai_compatible` — donc aucun secret. Toucher au `lifespan`,
+  au `CMD` ou à l'`EXPOSE` sans relancer cette cible, c'est reprendre le risque que
+  l'échec n'apparaisse qu'au déploiement.
 - Pièges déjà payés (détail : [`docs/plan-deploiement-2026-07-25.md`](../../docs/plan-deploiement-2026-07-25.md)) :
   un `--mount=type=bind` ne survit pas à son `RUN` · `env_file` de Compose **écrase**
   les `ENV` de l'image · même image de base obligatoire dans les deux stages.
