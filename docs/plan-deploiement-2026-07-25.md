@@ -114,7 +114,7 @@ le 2026-07-25, il est écarté pour trois raisons :
 1. **Son contrat public est le graphe.** `POST /runs/stream` prend un `assistant_id`
    et un `stream_mode` (ex. `messages-tuple`) : *le client choisit comment le graphe
    streame*. C'est exactement le streaming token depuis `answer` que le commit
-   `519f254` a interdit — offert cette fois par une API qu'on ne contrôle pas. Ça
+   `98dfa39` a interdit — offert cette fois par une API qu'on ne contrôle pas. Ça
    casse l'invariant n°3 et rouvre le finding A1.
 2. **Il amène sa propre gestion des threads et sa persistance**, en doublon de notre
    checkpointer/store, contre l'invariant n°1 (une seule base pour ce qu'on possède).
@@ -411,7 +411,7 @@ son port qu'**après** le `lifespan`, qui construit le graphe, sonde les embeddi
 appelle `setup()` sur Postgres. Provider injoignable ou `DATABASE_URL` fausse ⇒ le
 port ne s'ouvre jamais ⇒ Azure affiche *« Container didn't respond to HTTP pings on
 port: 8000, failing site start »*, un message qui **ne dit rien** de la vraie cause.
-La cause est dans le **log du conteneur**, et le commit `c95376c` (config validée
+La cause est dans le **log du conteneur**, et le commit `1c9e044` (config validée
 avant tout I/O) est précisément ce qui garantit qu'elle y soit nommée en clair.
 
 > 🔎 **Ajout du 2026-07-31 — une dépendance réseau de démarrage qu'on ne

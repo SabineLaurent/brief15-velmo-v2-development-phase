@@ -3,7 +3,7 @@
 **Objet :** revue de sécurité ciblée des changements introduits par la branche, à la
 recherche de vulnérabilités **exploitables** (pas de revue de style ni de qualité).
 **Date :** 2026-07-25
-**Commit testé :** `6dc258f` — *feat(compose): pin the container to authenticated mode, whatever .env says*
+**Commit testé :** `8566737` — *feat(compose): pin the container to authenticated mode, whatever .env says*
 **Base de comparaison :** `main` (36 commits d'écart)
 **Périmètre :** la nouvelle surface réseau et tout ce qu'elle expose —
 `support_agent/server.py`, `support_agent/api.py`, `client_chainlit/agent_client.py`,

@@ -4,7 +4,7 @@
 complémentaire de la revue de sécurité du même jour — qui, elle, ne cherchait que
 des vulnérabilités exploitables.
 **Date :** 2026-07-25
-**Commit testé :** `6dc258f` — *feat(compose): pin the container to authenticated mode, whatever .env says*
+**Commit testé :** `8566737` — *feat(compose): pin the container to authenticated mode, whatever .env says*
 **Branche :** `velmo-2.0` (arbre propre au moment de la revue)
 **Périmètre :** tout le code applicatif des deux packages (`support_agent`, `client_chainlit`),
 les tests, la conteneurisation (`compose.yaml`, les deux `Dockerfile`, `.dockerignore`),
