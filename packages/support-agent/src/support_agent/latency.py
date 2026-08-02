@@ -1,39 +1,19 @@
-"""TTFT / per-node latency harness (scope B — see docs/latence.md).
+"""TTFT / per-node latency harness.
 
-The metric that matters for a chat UI is NOT the total response time but the
-**time-to-first-token** (TTFT): the silence before the customer sees ANYTHING.
-This harness measures where the wall-clock time goes on a real turn — the TTFT
-plus the duration of every graph node — so we can PROVE a latency change instead
-of guessing it. The obvious use: compare "everything on the strong model" against
-the small->strong cascade (set `LLM_FAST_MODEL`), before vs after.
+Measures where the wall-clock time of a real turn goes: the time-to-first-token plus the
+duration of every graph node. It runs the REAL compiled graph via `api.get_agent`, so it
+makes real LLM calls and costs tokens.
 
-How it measures (one pass, two stream modes at once):
-- `stream_mode=["updates", "messages"]` yields `(mode, chunk)` tuples.
-  * "updates" fires when a node COMPLETES -> we time each node from the previous
-    super-step boundary (`router`, `model` x2 for the ReAct loop, `tools`, ...).
-  * "messages" carries streamed tokens -> the FIRST one from a customer-facing
-    node is the INTERNAL first-token time.
+One pass, two stream modes: "updates" times each node from the previous super-step
+boundary, "messages" gives the first streamed token.
 
-This runs the REAL compiled graph (via `api.get_agent`), so the per-node timeline
-is the real one. It makes real LLM calls (it costs tokens).
-
-⚠️ Read the two headline numbers correctly — they are NOT the same thing:
-
-- **first LLM token** is an INTERNAL diagnostic: when the first customer-facing
-  node started producing text. It tells us where the pre-roll silence goes
-  (routing + tool decision + RAG), which is what the cascade work optimizes.
-- **delivered** is what the CUSTOMER actually experiences, and it equals the
-  total: `stream_reply` hands the front the guarded terminal message in one
-  chunk, so nothing is on screen before the graph finishes. See `api.py` design
-  choice 1 — the output guard needs the complete reply, so tokens cannot be
-  released early.
-
-Shrinking "first LLM token" therefore only helps the customer via the total. Keep
-optimizing it anyway: it is the part of the total we can actually attribute.
+The two headline numbers differ. "first LLM token" is an INTERNAL diagnostic — when the
+first customer-facing node started producing text. "delivered" is what the customer
+experiences, and it equals the total, because the seam hands the front the guarded
+message in a single chunk.
 
     make latency
-    uv run python -m support_agent.latency "Je veux retourner un article"
-    uv run python -m support_agent.latency --runs 5
+    uv run python -m support_agent.latency "Je veux retourner un article" --runs 5
 """
 
 from __future__ import annotations
@@ -48,16 +28,8 @@ from support_agent.api import get_agent
 from support_agent.config import get_settings
 from support_agent.memory import AgentContext
 
-# The reference question from docs/latence.md: a factual query that takes the
-# full support path (router -> tool decision -> FAQ retrieval -> answer), i.e.
-# the worst case for TTFT (three sequential LLM hops).
 DEFAULT_QUESTION = "Quels sont vos délais de livraison ?"
 
-# The nodes that produce customer-facing TEXT. This is a MEASUREMENT detail and
-# lives here, not in the seam: `api.py` reads the terminal state and is
-# deliberately shape-agnostic, so it has no list of node names to share. We keep
-# one here only to tell "the answer is being written" apart from the router's
-# internal structured-output call when timing the first token.
 CUSTOMER_FACING_NODES = frozenset({"answer", "model"})
 
 
@@ -65,12 +37,9 @@ CUSTOMER_FACING_NODES = frozenset({"answer", "model"})
 class NodeTiming:
     """One graph node and how long it took (wall-clock, between super-steps).
 
-    When the node ran an LLM whose response carried usage, we also record the
-    input-token count and how many of those were served from the provider's
-    prompt cache (`cache_read`) — that is how we PROVE prompt caching bites
-    instead of assuming it (see docs/prompt-caching.md). Both are `None` when the
-    node exposed no usage (e.g. the router's structured-output call, or a
-    provider that does not report usage on a streamed response).
+    When the node ran an LLM reporting usage, we also record the input-token count and
+    how many of those were served from the provider's prompt cache. Both are `None` when
+    the node exposed no usage.
     """
 
     name: str
@@ -85,8 +54,8 @@ class Report:
 
     question: str
     nodes: list[NodeTiming]
-    ttft_s: float | None  # None if the turn streamed no customer-facing token
-    stream_s: float  # from first to last streamed token
+    ttft_s: float | None
+    stream_s: float
     total_s: float
     token_count: int
 
@@ -94,11 +63,9 @@ class Report:
 def _extract_usage(payload: object) -> tuple[int | None, int | None]:
     """Pull (input_tokens, cache_read) from a node's state update, if any.
 
-    An LLM node returns `{"messages": [AIMessage(...)]}`; the message carries
-    `usage_metadata` when the provider reports usage. We read `input_tokens` and
-    `input_token_details.cache_read` (the LangChain-normalised name for the tokens
-    served from the prompt cache — Azure/OpenAI's `cached_tokens`). Returns
-    `(None, None)` when the payload holds no message with usage.
+    Reads `usage_metadata` off the returned message; `cache_read` is LangChain's
+    normalised name for the provider's cached-token count. Returns `(None, None)` when
+    no message carries usage.
     """
     if not isinstance(payload, dict):
         return None, None
@@ -119,10 +86,9 @@ def _extract_usage(payload: object) -> tuple[int | None, int | None]:
 def measure_once(message: str, *, user_id: str, thread_id: str) -> Report:
     """Run one turn through the real graph and time it node by node + TTFT.
 
-    Uses a FRESH `thread_id` per call so a growing conversation history never
-    skews the timing. Assumes the graph is already built (warm) — build it once
-    outside the timed section (see `main`), as the first build is expensive
-    (embeddings probe, vector store) and unrelated to per-turn latency.
+    Uses a fresh `thread_id` so a growing history never skews the timing, and assumes
+    the graph is already built: the first build is expensive and unrelated to per-turn
+    latency.
     """
     agent = get_agent()
     context = AgentContext(user_id=user_id)
@@ -139,21 +105,17 @@ def measure_once(message: str, *, user_id: str, thread_id: str) -> Report:
     token_count = 0
 
     start = time.perf_counter()
-    prev = start  # the previous super-step boundary (last node completion)
+    prev = start
     for mode, chunk in agent.stream(
         inputs, context=context, config=config, stream_mode=["updates", "messages"]
     ):
         now = time.perf_counter()
         if mode == "updates":
-            # A node just finished: attribute the time since the last boundary to
-            # it. `model` legitimately appears twice (decide, then answer).
             for node_name, payload in chunk.items():
                 input_tokens, cache_read = _extract_usage(payload)
                 nodes.append(NodeTiming(node_name, now - prev, input_tokens, cache_read))
                 prev = now
         elif mode == "messages":
-            # Only customer-facing nodes count as answer text, so the router's
-            # internal structured-output call never skews the first-token time.
             token, meta = chunk
             if meta.get("langgraph_node") not in CUSTOMER_FACING_NODES:
                 continue
@@ -175,22 +137,16 @@ def print_report(report: Report, *, run_label: str = "") -> None:
     print(f"\n{header}question: {report.question!r}")
     for node in report.nodes:
         bar = "█" * min(40, round(node.duration_s * 10))
-        # Show the prompt-cache hit for LLM nodes that reported usage:
-        # cache_read / input_tokens (e.g. "cache 1856/2310").
         cache = ""
         if node.input_tokens is not None:
             read = node.cache_read or 0
             cache = f"  cache {read}/{node.input_tokens}"
         print(f"    {node.name:<14} {node.duration_s:6.2f}s  {bar}{cache}")
     ttft = f"{report.ttft_s:.2f}s" if report.ttft_s is not None else "n/a (no stream)"
-    # `delivered` == total: the seam hands the front the guarded terminal message
-    # in one chunk, so the customer sees nothing before the graph finishes.
     print(
         f"  → first LLM token {ttft} (internal)  |  writing {report.stream_s:.2f}s  "
         f"|  delivered {report.total_s:.2f}s  |  {report.token_count} tokens"
     )
-    # Verdict: did the prompt cache bite this turn? Sum over LLM nodes that
-    # reported usage. This is the whole point of the instrumentation.
     total_input = sum(n.input_tokens for n in report.nodes if n.input_tokens is not None)
     total_cached = sum(n.cache_read for n in report.nodes if n.cache_read is not None)
     if total_input:
@@ -215,8 +171,6 @@ def main() -> None:
 
     settings = get_settings()
 
-    # Warm the expensive graph build OUTSIDE the timed section (unrelated to
-    # per-turn latency): embeddings probe, vector store, checkpointer/store.
     print("Building graph (warm-up, not timed)…")
     get_agent()
 
@@ -243,8 +197,6 @@ def main() -> None:
         )
 
     if len(totals) > 1:
-        # `delivered` first: it is the number the customer feels. The internal
-        # first-token time follows as the diagnostic that explains part of it.
         print()
         _summary("delivered (what the customer waits)", totals)
         if len(ttfts) > 1:

@@ -1,23 +1,21 @@
-"""The starter's acceptance corpora, loaded as DATA (`data/eval/*.jsonl`).
+"""The acceptance corpora, loaded as DATA (`data/eval/*.jsonl`).
 
-Three JSONL files came with the training starter. They are the closest thing the
-briefs have to a cahier des charges — criteria written as data rather than prose —
-so this project executes them instead of paraphrasing them:
+Three JSONL files hold the acceptance criteria as data rather than prose, so this
+project executes them instead of paraphrasing them:
 
-    guardrail_cases.jsonl  (35)  -> chantier 2, driven by tests/test_moderation.py
-    memory_cases.jsonl     (12)  -> chantier 1, driven by tests/test_memory_cases.py
-    quality_cases.jsonl     (8)  -> chantier 3, driven by tests/test_quality_cases.py
+    guardrail_cases.jsonl  (35)  -> driven by tests/test_moderation.py
+    memory_cases.jsonl     (12)  -> driven by tests/test_memory_cases.py
+    quality_cases.jsonl     (8)  -> driven by tests/test_quality_cases.py
 
-They are copied VERBATIM (byte-identical to the starter): a diff against the
-source stays meaningful, and nobody can quietly soften a criterion by editing the
-expectation instead of the code. Everything this project decides ON TOP of them —
-accepted paraphrases, deviations under test — lives here in code, where it is
-reviewable, never inside the corpus.
+They are copied VERBATIM, so a diff against the source stays meaningful and nobody can
+quietly soften a criterion by editing the expectation instead of the code. Everything
+decided ON TOP of them — accepted paraphrases, deviations under test — lives here in
+code, never inside the corpus.
 
 `load_quality_cases()` maps its rows into the same `{inputs, outputs}` shape as
-`EVAL_CASES` (`dataset.py`), so the corpus goes through the same evaluators and
-the same two runners. The other two loaders return their rows untouched: they are
-unit-level specs about the memory layer and the guardrails, not agent runs.
+`EVAL_CASES`, so the corpus goes through the same evaluators and the same two runners.
+The other two loaders return their rows untouched: they are unit-level specs about the
+memory layer and the guardrails, not agent runs.
 """
 
 from __future__ import annotations
@@ -28,18 +26,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-# The three files, named once. Order is fixed because `corpus_fingerprint()`
-# hashes them in sequence: a set would make the fingerprint depend on iteration
-# order and two identical checkouts could disagree.
 CORPUS_NAMES = ("guardrail_cases", "memory_cases", "quality_cases")
 
 # --- Where the corpora live -------------------------------------------------
-#
-# Resolved by walking UP from this file rather than from the cwd or a Settings
-# field, because these files are repo material, not runtime configuration: they
-# are consumed by pytest and by `make eval`, never by the served agent, and they
-# are deliberately absent from the container image (unlike `data/kb-velmo`, which
-# the agent needs at runtime).
 _CORPUS_DIRNAME = Path("data") / "eval"
 
 
@@ -67,16 +56,13 @@ def load_corpus(name: str) -> list[dict[str, Any]]:
 def corpus_fingerprint() -> str:
     """A short hash of the three corpora, as they are on disk right now.
 
-    This exists because of the single easiest way to draw a false conclusion from
-    an evaluation: comparing two scores that did not answer the same questions.
-    A note is only comparable against another note computed over the SAME cases,
-    so the fingerprint travels inside `current_version()` (`eval/mlops.py`) and a
-    baseline recorded under a different fingerprint is refused rather than
-    silently compared.
+    The easiest way to draw a false conclusion from an evaluation is to compare two
+    scores that did not answer the same questions. The fingerprint travels inside
+    `current_version()`, and a baseline recorded under a different fingerprint is
+    refused rather than silently compared.
 
-    Hashed as raw BYTES, in a fixed order: the corpora are byte-identical copies
-    of the starter's files, so anything that changes them at all — including a
-    line ending or a re-ordered row — must change the fingerprint.
+    Hashed as raw BYTES in a fixed order, so anything that changes the corpora at all —
+    a line ending, a re-ordered row — changes the fingerprint.
     """
     digest = hashlib.sha256()
     for name in CORPUS_NAMES:
@@ -84,20 +70,8 @@ def corpus_fingerprint() -> str:
     return digest.hexdigest()[:12]
 
 
-# --- Chantier 2: the guardrail corpus ---------------------------------------
+# --- The guardrail corpus ---------------------------------------------------
 
-# Categories the starter expects blocked that this project deliberately does NOT
-# block. It lives HERE, with the other decisions taken on top of the corpora,
-# because three consumers now need the same list: the assertions
-# (`tests/test_moderation.py`), the scorer (`eval/offline.py`), and the report
-# that has to state the deviation out loud (`eval/mlops.py`). A second
-# hand-written copy would let the scorer and the tests disagree about what
-# "correct" means, and the score would be the one that lies.
-#
-# The argument, in short: an honest "the FAQ does not cover that" serves the
-# customer better than a hard block on an adjacent business question. The full
-# version — including the part that is NOT settled, the two advice cases the
-# brief names explicitly — is in `tests/test_moderation.py` and ROADMAP §12-D.
 DELIBERATELY_NOT_BLOCKED = {"out_of_scope"}
 
 
@@ -106,7 +80,7 @@ def load_guardrail_cases() -> list[dict[str, Any]]:
     return load_corpus("guardrail_cases")
 
 
-# --- Chantier 1: the memory corpus ------------------------------------------
+# --- The memory corpus ------------------------------------------------------
 
 
 def load_memory_cases(tag: str | None = None) -> list[dict[str, Any]]:
@@ -130,46 +104,13 @@ def memory_assistant_turns(case: dict[str, Any]) -> list[str]:
     return [turn["content"] for turn in case["turns"] if turn["role"] == "assistant"]
 
 
-# --- Chantier 3: the quality corpus -----------------------------------------
+# --- The quality corpus -----------------------------------------------------
 
-# The corpus states each expectation as ONE token. Most are FACTS — a price
-# (`6,90`), a window (`14 jours`), a carrier (`Colissimo`) — and any correct answer
-# contains them whatever the phrasing. Two are NOTATIONS of a fact, and a correct
-# answer legitimately expands them:
-#
-#   `prepared`  is the BACKEND's English status word. `suivi-commande.md`
-#               ENUMERATES the French status vocabulary of the domain ("payée,
-#               préparée, expédiée, livrée, annulée…"), and the model maps onto it
-#               — which is better behaviour than echoing an English enum at a
-#               French customer.
-#   `J+2`       is trade notation. `delais-livraison.md` itself glosses it as
-#               "(environ 2 jours ouvrés)", so a model relaying the FAQ in prose
-#               writes the gloss.
-#
-# Both alternative sets are therefore grounded in `data/kb-velmo`, not invented to
-# make a red test green, and neither can be satisfied by a WRONG answer.
-#
-# ⚠️ MEASURED FLAKINESS, and the reason this list must stop growing. Across two
-# consecutive live runs the same case came back as "en préparation" then "est
-# préparée" — the FACT never wavered, only its surface. Substring scoring of
-# free-form prose is unstable by construction; it is the `honest_refusal` disease
-# (`f404775`, and the flake recorded in ROADMAP §Phase 9). Two of seven
-# expectations needing an entry is the measured argument for a SEMANTIC JUDGE
-# (chantier 3), not for a longer list. A red on these two is a coin toss to
-# re-run, not a regression to investigate.
 ACCEPTED_PARAPHRASES: dict[str, tuple[str, ...]] = {
-    # "prepare" covers the participle forms ("préparée", "préparé") after fold();
-    # "preparation" is the noun, which does NOT contain "prepare".
     "prepared": ("prepared", "prepare", "preparation"),
     "j+2": ("j+2", "2 jours ouvres", "deux jours ouvres"),
 }
 
-# The one case this project cannot answer, and why. The business port
-# (`actions/backend.py`) exposes order lookup, ticket creation and ticket
-# listing — there is no stock/availability capability, so `q-stock` has nothing
-# to read. Named here rather than dropped, and pinned by a structural test
-# (`test_quality_cases.py`), so adding availability later FAILS that test and
-# forces this case back into the run instead of leaving it forgotten.
 UNSUPPORTED_QUALITY_CASES = {"q-stock"}
 
 

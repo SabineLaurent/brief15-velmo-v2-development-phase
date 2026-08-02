@@ -1,22 +1,18 @@
 """A `SupportBackend` adapter backed by SQL (the business double, on disk).
 
-This is the second adapter behind the `actions/` port, and the point of the port:
-`InMemorySupportBackend` and this class are interchangeable, and neither the
-tools nor the graph know which one they are talking to. Swapping them is one
-`.env` variable (`SUPPORT_BACKEND`), exactly like swapping an LLM provider.
+The second adapter behind the `actions/` port, and the point of the port: neither the
+tools nor the graph know which one they are talking to, and swapping them is one `.env`
+variable (`SUPPORT_BACKEND`), exactly like swapping an LLM provider.
 
-What it buys over the in-memory adapter: the shop survives a restart, and it
-holds a *realistic* dataset (14 orders across 10 customers, shipments, returns,
-refunds) instead of three hand-written rows. Tickets opened during a
-conversation are still there tomorrow.
+Over the in-memory adapter it buys durability and a realistic dataset (14 orders across
+10 customers, shipments, returns, refunds) instead of three hand-written rows.
 
-⚠️ It is a **double**, not a system of record. In production we unplug it and
-call the merchant's API — see `database/README.md`. That is why it lives under
-`database/shop/` (gitignored runtime state) and why it is safe to drop and
-reseed at will (`make seed ARGS=--reset`).
+It is a DOUBLE, not a system of record: in production we unplug it and call the
+merchant's API. Hence its home under `database/shop/` (gitignored runtime state) and the
+freedom to drop and reseed it at will.
 
-The port maps onto two tables, not one: an order's carrier and tracking number
-live in `shipments`, so `get_order_status` outer-joins the two.
+The port maps onto two tables, not one: an order's carrier and tracking number live in
+`shipments`, so `get_order_status` outer-joins the two.
 """
 
 from __future__ import annotations
@@ -39,10 +35,6 @@ logger = logging.getLogger(__name__)
 class SqlSupportBackend:
     """A `SupportBackend` reading and writing the SQL business double."""
 
-    # Read by `build_action_tools` to keep the tool docstring's example honest:
-    # this adapter's order ids look like `O-2024-0103`, not the in-memory
-    # adapter's `CMD-1001`. Feeding the model the wrong shape makes it invent
-    # ids in that shape when the customer has not given one.
     order_id_example = "O-2024-0103"
 
     def __init__(self, sessions: sessionmaker) -> None:
@@ -85,8 +77,6 @@ class SqlSupportBackend:
                 .where(OrderRow.id == normalised, OrderRow.customer_id == user_id)
             ).first()
         if row is None:
-            # Unknown and not-yours are the same answer on purpose: telling them
-            # apart would let a caller enumerate valid order ids.
             return None
         order, shipment = row
         return OrderStatus(
@@ -95,8 +85,6 @@ class SqlSupportBackend:
             status=order.status.value,
             carrier=shipment.carrier if shipment else None,
             tracking_number=shipment.tracking_number if shipment else None,
-            # Once delivered, the ACTUAL date is the useful one; before that, the
-            # estimate is all we have.
             estimated_delivery=(
                 (shipment.actual_delivery or shipment.estimated_delivery) if shipment else None
             ),
@@ -139,16 +127,13 @@ class SqlSupportBackend:
     def _ensure_customer(session: Session, user_id: str) -> None:
         """Create a placeholder customer row if `user_id` is unknown.
 
-        `tickets.customer_id` is a foreign key, so an unknown customer would fail
-        the insert on Postgres (and silently dangle on SQLite, which does not
-        enforce foreign keys unless asked — the worse of the two outcomes).
+        `tickets.customer_id` is a foreign key, so an unknown customer would fail the
+        insert on Postgres and silently dangle on SQLite — the worse of the two.
 
-        This leniency is a property of the DOUBLE, and deliberately not of the
-        port: a real ticketing system owns customer creation and would reject an
-        unknown id. Here `user_id` comes from the runtime context and may be any
-        string (`demo-user`, a test id), so refusing would break the demo for a
-        data-integrity rule we are only simulating. Logged at INFO because a
-        placeholder appearing in production would mean the double was still
+        The leniency is a property of the DOUBLE, deliberately not of the port: a real
+        ticketing system owns customer creation and would reject an unknown id. Here
+        `user_id` comes from the runtime context and may be any string. Logged at INFO,
+        because a placeholder appearing in production would mean the double was still
         plugged in.
         """
         if session.get(Customer, user_id) is not None:
@@ -157,7 +142,6 @@ class SqlSupportBackend:
         session.add(
             Customer(
                 id=user_id,
-                # Unique constraint on email, so derive it from the id.
                 email=f"{user_id}@placeholder.invalid",
                 full_name=user_id,
             )

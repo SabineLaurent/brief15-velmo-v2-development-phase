@@ -13,9 +13,6 @@ from langchain_core.embeddings import Embeddings
 from support_agent.config import Settings, get_settings
 from support_agent.llm._extras import provider_package_required
 
-# Same idea as the chat model factory: map friendly names to LangChain providers.
-# Same obligation too — a name here needs its extra in `pyproject.toml`, since
-# `init_embeddings` imports the integration package to honour it.
 _PROVIDER_ALIASES: dict[str, str] = {
     "mistral": "mistralai",
     "openai": "openai",
@@ -28,10 +25,6 @@ def get_embeddings(settings: Settings | None = None) -> Embeddings:
     settings = settings or get_settings()
     provider = settings.embeddings_provider.lower()
 
-    # OpenAI-compatible endpoint (Azure OpenAI API v1, vLLM, a third party...):
-    # same rail as the chat factory's `openai_compatible` branch — just point
-    # base_url at it. Reuses the chat model's endpoint + key, so embeddings live
-    # on the same Azure resource. `embeddings_model` is the deployment name.
     if provider == "openai_compatible":
         from langchain_openai import OpenAIEmbeddings
 
@@ -41,10 +34,6 @@ def get_embeddings(settings: Settings | None = None) -> Embeddings:
             api_key=settings.llm_inference_api_key,
         )
 
-    # First-class hosted providers: delegate to init_embeddings, which
-    # auto-discovers each provider's credentials from standard env vars. Guarded
-    # like the chat factory — this call imports the provider's integration package,
-    # so a provider whose extra is missing must fail by naming that extra.
     provider_id = _PROVIDER_ALIASES.get(provider, provider)
     with provider_package_required(provider):
         return init_embeddings(f"{provider_id}:{settings.embeddings_model}")

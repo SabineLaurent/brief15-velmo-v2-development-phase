@@ -1,4 +1,4 @@
-"""Prompt-injection detection (Phase 12-A, input guardrails).
+"""Prompt-injection detection (input guardrails).
 
 Same agnostic shape as PII: `InjectionDetector` is a **port**, the baseline is a
 list of known jailbreak / instruction-override phrasings (English + French, the
@@ -16,13 +16,10 @@ from typing import Protocol
 class InjectionDetector(Protocol):
     """Port: decide whether a piece of text looks like a prompt-injection attempt."""
 
-    def scan(self, text: str) -> bool: ...  # True = suspicious
+    def scan(self, text: str) -> bool: ...
 
 
-# Known injection / jailbreak phrasings. Compiled case-insensitively. Kept broad
-# but simple; the point is to catch the obvious attempts, not to be exhaustive.
 _DEFAULT_INJECTION_PATTERNS: tuple[str, ...] = (
-    # English
     r"ignore (?:all |the |your )?(?:previous |above |prior )?(?:instructions|rules)",
     r"disregard (?:all |the |your )?(?:previous )?(?:instructions|rules)",
     r"forget (?:all |everything|your )?(?:previous )?(?:instructions|rules)",
@@ -35,18 +32,12 @@ _DEFAULT_INJECTION_PATTERNS: tuple[str, ...] = (
     r"\bDAN\b",
     r"new instructions\s*:",
     r"override (?:your )?(?:instructions|rules|safety|guardrails)",
-    # French (demo language)
     r"ignore[sz]?\b.{0,20}\b(?:instructions|consignes|r[eè]gles)",
     r"oublie[sz]?\b.{0,20}\b(?:instructions|consignes|r[eè]gles)",
     r"(?:montre|affiche|r[ée]v[èe]le|donne)[sz]?(?:-moi)?\b.{0,20}\b(?:syst[èe]me\s+)?prompt",
     r"tu es maintenant\b",
     r"fais comme si\b",
     r"mode d[ée]veloppeur",
-    # Secret / configuration EXFILTRATION. Same family as the above (make the
-    # agent reveal what it was not built to reveal) and the same response, so it
-    # lives behind the same port rather than in a fourth detector. `secrets.py`
-    # is the OUTPUT side of this pair: it catches a key on the way out, this
-    # catches the request on the way in — defence in depth, both directions.
     r"(?:donne|montre|affiche|r[ée]v[èe]le|liste)[sz]?(?:-moi)?\b.{0,40}\b"
     r"(?:cl[ée]s?\s+api|api[_\s-]?keys?|token|mots?\s+de\s+passe|password|"
     r"variables?\s+d['’]environnement|env\s+vars?|secrets?|credentials?)",

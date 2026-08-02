@@ -26,7 +26,6 @@ def _load_faq_documents(knowledge_dir: Path) -> list[Document]:
     documents: list[Document] = []
     for path in sorted(knowledge_dir.glob("*.md")):
         text = path.read_text(encoding="utf-8")
-        # `source` metadata lets the agent cite where an answer comes from.
         documents.append(Document(page_content=text, metadata={"source": path.name}))
     return documents
 

@@ -1,8 +1,7 @@
-"""Phase 12-A guardrails unit tests: input validation, injection, PII masking.
+"""Guardrails unit tests: input validation, injection, PII masking.
 
 Pure UNIT tests, like `test_robustness.py`: the guardrails are deterministic
 (regex/rules), so these run everywhere with no `.env` and no network. We assert:
-
   1. PII masking — sensitive spans are rewritten, order ids are left alone.
   2. Injection — known jailbreak phrasings are flagged, benign text is not.
   3. Validation — empty and over-long inputs are refused.
@@ -168,9 +167,6 @@ def test_output_replaces_system_prompt_leak() -> None:
 
 
 # --- Owned-domain allowlist (the shop's OWN contact addresses) --------------
-# The counter-example the suite was missing: redacting every email on the way out
-# silently destroys the answer of `contact-pro.md` and `retractation-rgpd.md`,
-# whose whole point IS publishing an address.
 
 
 def _out_guard_owned():
@@ -201,7 +197,7 @@ def test_output_allowlist_covers_subdomains() -> None:
     assert "sav@support.velmo.example" in decision.sanitized_text
 
 
-# --- Tool guard (Phase 12-C: side effects & persistence) --------------------
+# --- Tool guard (side effects & persistence) -------------------------------
 
 
 def _tool_guard(max_chars: int = 2000, limit: int = 5, window: float = 3600.0):
@@ -212,8 +208,7 @@ def test_rate_limiter_blocks_after_limit() -> None:
     limiter = RateLimiter(max_calls=2, window_seconds=3600.0)
     assert limiter.allow("user-a") is True
     assert limiter.allow("user-a") is True
-    assert limiter.allow("user-a") is False  # third call over the limit
-    # A different key is tracked independently.
+    assert limiter.allow("user-a") is False
     assert limiter.allow("user-b") is True
 
 

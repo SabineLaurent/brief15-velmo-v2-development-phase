@@ -23,10 +23,7 @@ from support_agent.actions.sql.sampledata import DEMO_CUSTOMER_ID, seed
 from support_agent.actions.sql.schema import Base, Customer
 from support_agent.actions.sql.seed import main as seed_main
 
-# A second customer, used for the cross-customer isolation checks.
 OTHER_CUSTOMER_ID = "C-sophie-martin"
-# Orders from the reference dataset: one shipped (has a shipment row), one
-# prepared (has none — the outer join must still return it).
 SHIPPED_ORDER = "O-2024-0103"
 PREPARED_ORDER = "O-2024-0101"
 OTHER_CUSTOMER_ORDER = "O-2024-0110"
@@ -57,9 +54,6 @@ def backend(sessions: sessionmaker) -> SqlSupportBackend:
 
 
 def test_satisfies_the_support_backend_port(backend: SqlSupportBackend) -> None:
-    # `SupportBackend` is runtime_checkable, so this checks the methods exist.
-    # It is a smoke test, not a signature check — the behavioural parity tests
-    # below are what actually keep the two adapters aligned.
     assert isinstance(backend, SupportBackend)
 
 
@@ -78,7 +72,6 @@ def test_both_adapters_agree_on_the_shape_of_an_answer(
     mem_order = InMemorySupportBackend().get_order_status("CMD-1001", "demo-user")
     assert sql_order is not None and mem_order is not None
     assert type(sql_order) is type(mem_order)
-    # `status` must be a plain string, not the SQLAlchemy Enum member.
     assert type(sql_order.status) is str
     assert sql_order.status == "shipped"
 
@@ -104,9 +97,6 @@ def test_refuses_another_customers_order(backend: SqlSupportBackend) -> None:
     unknown = backend.get_order_status("O-9999-9999", DEMO_CUSTOMER_ID)
     assert foreign is None
     assert unknown is None
-    # ...and the order really does exist, for its actual owner. Without this the
-    # test above would also pass against a backend that returns None for
-    # everything.
     assert backend.get_order_status(OTHER_CUSTOMER_ORDER, OTHER_CUSTOMER_ID) is not None
 
 
@@ -133,7 +123,7 @@ def test_delivered_order_reports_the_actual_delivery_date(
     order = backend.get_order_status("O-2024-0105", DEMO_CUSTOMER_ID)
     assert order is not None
     assert order.status == "delivered"
-    assert order.estimated_delivery == "2024-04-21"  # actual, not the 04-20 estimate
+    assert order.estimated_delivery == "2024-04-21"
 
 
 # --- Tickets ---------------------------------------------------------------
@@ -183,10 +173,9 @@ def test_seeded_tickets_use_the_content_derived_id(
     assert tickets, "the reference dataset must seed a past ticket for the demo customer"
     seeded = tickets[0]
     assert seeded.ticket_id == _ticket_id(seeded.user_id, seeded.subject, seeded.body)
-    # And re-creating it returns the SAME ticket rather than a second one.
     again = backend.create_ticket(seeded.user_id, seeded.subject, seeded.body)
     assert again.ticket_id == seeded.ticket_id
-    assert again.status == "resolved"  # the seeded status, not a fresh "open"
+    assert again.status == "resolved"
 
 
 def test_ticket_for_an_unknown_customer_gets_a_placeholder(
@@ -218,8 +207,6 @@ def test_seed_cli_populates_then_refuses_to_double_seed(tmp_path) -> None:
         first_count = len(session.scalars(select(Customer)).all())
     assert first_count == 10
 
-    # Running it again must not duplicate anything (it is the command a
-    # newcomer runs twice because they are not sure it worked the first time).
     assert seed_main(["--db-path", str(db)]) == 0
     with factory() as session:
         assert len(session.scalars(select(Customer)).all()) == first_count
@@ -282,11 +269,10 @@ def test_get_backend_honours_the_config_switch(monkeypatch, tmp_path) -> None:
     use("sqlite")
     assert isinstance(backend_module.get_backend(), SqlSupportBackend)
 
-    use("postgres")  # plausible-looking typo: it is the OTHER switch's value
+    use("postgres")
     with pytest.raises(ValueError, match="Unknown SUPPORT_BACKEND"):
         backend_module.get_backend()
 
-    # Leave the process-wide caches clean for the rest of the suite.
     monkeypatch.delenv("SUPPORT_BACKEND", raising=False)
     monkeypatch.delenv("SHOP_DB_PATH", raising=False)
     get_settings.cache_clear()

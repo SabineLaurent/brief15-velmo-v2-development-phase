@@ -1,7 +1,7 @@
 [project]
-# Distribution name with a hyphen, import name with an underscore (see
-# docs/anatomie-package-workspace.md). "chainlit" is in the name on purpose:
-# this member is ONE client implementation, replaceable without touching the brain.
+# Distribution name with a hyphen, import name with an underscore. "chainlit" is
+# in the name on purpose: this member is ONE client implementation, replaceable
+# without touching the brain.
 name = "client-chainlit"
 version = "0.1.0"
 description = "Chainlit demo shell (scope B, niveau 1) — voir l'agent parler"
@@ -10,18 +10,16 @@ requires-python = ">=3.11,<3.14"
 dependencies = [
     # The demo shell: a chat UI in the browser with zero front-end code.
     "chainlit>=2.11.1",
-    # ⭐ Deployment step 4: the ONLY way this package reaches the agent.
-    # `support-agent` used to be listed here and is now GONE — the client talks to
-    # a URL, not to a Python object. That deletion is the point: it makes the
-    # decoupling a fact of the dependency graph, not a promise in a comment.
-    # ⚠️ Nuance: the SHARED workspace `.venv` still contains `support_agent` (the
-    # root dev group installs it for the tests), so a stray `import support_agent`
-    # would still run on your machine. What catches it is the client's IMAGE, built
-    # from this closure alone — the drift fails at build time, not in production.
+    # The ONLY way this package reaches the agent. `support-agent` is
+    # deliberately NOT a dependency: the client talks to a URL, not to a Python
+    # object, which makes the decoupling a fact of the dependency graph.
+    # ⚠️ The SHARED workspace `.venv` still contains `support_agent` (the root dev
+    # group installs it for the tests), so a stray import would still run locally.
+    # What catches it is the client's IMAGE, built from this closure alone.
     "httpx>=0.28.1",
     # SSE is a small protocol with sharp edges (keep-alive comments, multi-line
-    # `data:`, `\n\n` framing). ~9 KB of dependency, already in the shared lock,
-    # versus a parser we would get subtly wrong. See `agent_client.py`.
+    # `data:`, `\n\n` framing): ~9 KB of dependency versus a parser we would get
+    # subtly wrong.
     "httpx-sse>=0.4.3",
 ]
 

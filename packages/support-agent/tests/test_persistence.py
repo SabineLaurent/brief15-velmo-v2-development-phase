@@ -1,15 +1,12 @@
 """Tests for the persistence backend switch (`PERSISTENCE_BACKEND`).
 
-Why these exist: the whole promise of `memory/` is that changing where state
-lives is a `.env` change, not a code change. Deployment step 3 wired the
-`postgres` branch, which had raised `NotImplementedError` since it was written —
-so the branch that had never run is exactly the one that needs assertions.
+The whole promise of `memory/` is that changing where state lives is a `.env` change,
+not a code change — and the `postgres` branch had raised `NotImplementedError` since it
+was written, so the branch that had never run is exactly the one that needs assertions.
 
-Pure UNIT tests: no database is started here. What is checked is the DECISION
-(which backend, with which config, failing how), not the storage engine, which
-is LangGraph's code and is verified live with `make docker-up` instead. That
-split is deliberate — a test suite that needs a Postgres to run is a test suite
-that stops being run.
+Pure UNIT tests: no database is started. What is checked is the DECISION (which backend,
+with which config, failing how), not the storage engine, which is LangGraph's code. A
+test suite that needs a Postgres to run is a test suite that stops being run.
 """
 
 from __future__ import annotations
@@ -57,7 +54,7 @@ def test_unknown_backend_is_rejected_by_name(monkeypatch: pytest.MonkeyPatch) ->
     that one accepts and the other refuses would mean a half-configured process.
     """
     _forbid_embeddings(monkeypatch)
-    settings = _settings(persistence_backend="postgress")  # typo on purpose
+    settings = _settings(persistence_backend="postgress")
 
     with pytest.raises(ValueError, match="postgress"):
         get_checkpointer(settings)
@@ -78,15 +75,13 @@ def test_postgres_without_database_url_fails_before_connecting(
 ) -> None:
     """The actionable error is the feature.
 
-    A missing connection string discovered inside a customer request is the same
-    bug found at the worst moment. Both factories must refuse at boot, and the
-    message must name the variable AND show a valid value.
+    A missing connection string discovered inside a customer request is the same bug
+    found at the worst moment. Both factories must refuse at boot, and the message must
+    name the variable AND show a valid value.
 
-    `_forbid_embeddings` is what makes the test's own name true. Without it, the
-    assertion held for the wrong reason: `get_store` probed the embeddings model
-    FIRST, so the check was only reachable from a machine that already had a
-    provider key — it passed on the developer's laptop at the price of a real
-    network call, and could not be reached at all on the CI runner.
+    `_forbid_embeddings` is what makes the test's own name true: without it, `get_store`
+    probed the embeddings model FIRST, so the check was only reachable from a machine
+    that already had a provider key.
     """
     _forbid_embeddings(monkeypatch)
     settings = _settings(persistence_backend="postgres", database_url=None)

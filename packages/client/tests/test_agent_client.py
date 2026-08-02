@@ -1,18 +1,15 @@
 """Contract tests for the network seam (`agent_client.stream_reply`).
 
-Deployment step 4 moved the seam onto the network, which means the FRONT now has
-failure modes the in-process call never had: connection refused, a 401, a stream
-cut in half. What this file asserts is the promise the front depends on and can no
-longer take for granted:
+Moving the seam onto the network gave the front failure modes the in-process call never
+had. What is asserted here is the promise it can no longer take for granted:
 
-  - the SSE events the agent sends become plain reply chunks;
-  - the caller's key and the customer's identity travel on the wire, separately;
-  - unknown event types are ignored (so phase B1.5 cannot break this client);
-  - EVERY failure path still delivers exactly ONE non-empty chunk.
+    - the SSE events the agent sends become plain reply chunks;
+    - the caller's key and the customer's identity travel separately;
+    - unknown event types are ignored, so new ones cannot break this client;
+    - EVERY failure path still delivers exactly ONE non-empty chunk.
 
-No agent, no graph, no socket: `httpx.MockTransport` answers every request, so
-these run offline and in milliseconds. `asyncio.run` rather than pytest-asyncio,
-matching `test_api_seam.py` — one fewer dev dependency.
+No agent, no graph, no socket: `httpx.MockTransport` answers every request, so these run
+offline and in milliseconds.
 """
 
 from __future__ import annotations
@@ -92,9 +89,6 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_API_URL", "http://agent-api:8000")
 
 
-# ─── The happy path ──────────────────────────────────────────────────────────
-
-
 def test_chunk_events_become_reply_text(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_transport(
         monkeypatch,
@@ -104,7 +98,7 @@ def test_chunk_events_become_reply_text(monkeypatch: pytest.MonkeyPatch) -> None
 
 
 def test_several_chunks_are_yielded_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Today the server sends one chunk; phase B1.5 will send several.
+    """Today the server sends one chunk; it may send several later.
 
     The client must already be right for that day, otherwise "it is a stream" is
     just a comment.
@@ -136,9 +130,6 @@ def test_unknown_event_types_are_ignored(monkeypatch: pytest.MonkeyPatch) -> Non
         ),
     )
     assert _collect() == ["Nos délais sont de 48 h."]
-
-
-# ─── What travels on the wire ────────────────────────────────────────────────
 
 
 def test_identity_and_thread_travel_in_the_body(
@@ -182,9 +173,6 @@ def test_no_key_configured_sends_no_header(monkeypatch: pytest.MonkeyPatch) -> N
     _collect()
 
     assert "x-api-key" not in seen[0].headers
-
-
-# ─── Failure paths: one non-empty chunk, always ──────────────────────────────
 
 
 def test_error_event_is_shown_to_the_customer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,9 +245,6 @@ def test_every_path_yields_exactly_one_non_empty_chunk(
 
     assert len(chunks) >= 1
     assert all(chunk.strip() for chunk in chunks)
-
-
-# ─── The architectural invariant, made executable ────────────────────────────
 
 
 def test_the_client_does_not_depend_on_the_brain() -> None:

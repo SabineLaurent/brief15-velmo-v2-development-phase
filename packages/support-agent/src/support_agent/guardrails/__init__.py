@@ -1,10 +1,7 @@
-"""Security guardrails (Phase 12): keep malicious/sensitive input out and
-unsafe/leaky output away from the customer.
+"""Security guardrails: keep malicious input out, and leaky output away.
 
-Same agnostic spirit as the rest of the project: each detector is a **port**
-(`Protocol`) with a baseline adapter, swappable without touching the graph.
-
-Phase 12-A (this file's current scope) covers the INPUT side:
+Same agnostic spirit as the rest of the project: each detector is a port (`Protocol`)
+with a baseline adapter, swappable without touching the graph.
 
     InputGuard  ->  validation (length/empty) + prompt-injection + PII masking
 

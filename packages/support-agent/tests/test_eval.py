@@ -1,4 +1,4 @@
-"""Local non-regression gate (Phase 9): replay the eval cases through pytest.
+"""Local non-regression gate: replay the eval cases through pytest.
 
 Same cases and same evaluators as the LangSmith run (`support_agent.eval`), but
 asserted locally so a broken behaviour fails `make test`. These are INTEGRATION
@@ -20,8 +20,6 @@ from support_agent.eval.evaluators import ALL_EVALUATORS
 from support_agent.eval.run import make_target
 from support_agent.graph import build_support_graph
 
-# Which env var holds the credential, per provider. `openai_compatible` and any
-# unknown provider fall back to the generic endpoint key.
 _PROVIDER_KEY_ENV = {
     "mistral": "MISTRAL_API_KEY",
     "groq": "GROQ_API_KEY",
@@ -47,10 +45,6 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture(scope="module")
 def eval_graph():
     """The REAL graph, built once, in evaluation mode."""
-    # Same reason as `eval/run.py`: this suite drives the real graph against the
-    # real provider, so with learning on, `make check` itself would keep feeding
-    # episodic memory from its own fixtures. It did, once — that is how the leak
-    # was found (see docs/memoire.md).
     return build_support_graph(learn_from_turns=False)
 
 
@@ -79,7 +73,7 @@ def test_eval_case(target, case: dict) -> None:
     for evaluator in ALL_EVALUATORS:
         feedback = evaluator(case["inputs"], outputs, reference)
         if feedback is None:
-            continue  # this metric does not apply to this case
+            continue
         assert feedback["score"], (
             f"[{case['id']}] {feedback['key']} failed — "
             f"route={outputs['route']!r} answer={outputs['answer']!r:.120} "

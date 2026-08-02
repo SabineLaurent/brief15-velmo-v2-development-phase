@@ -1,16 +1,12 @@
-"""Business action tools (Phase 8): tools that DO something, not just read.
+"""Business action tools: tools that DO something, not just read.
 
-Until now every tool was read-only (search the FAQ, recall a memory). These are
-**action** tools: `get_order_status` looks a customer's order up in the business
-backend, and `create_ticket` opens a real support ticket (a side effect).
+`get_order_status` looks a customer's order up in the business backend, and
+`create_ticket` opens a real support ticket (a side effect).
 
-Two design rules that come with actions:
-
-- They go through the `SupportBackend` port (see `backend.py`), never a concrete
-  system — that is what keeps the agent agnostic to the business project.
-- The customer identity (`user_id`) for `create_ticket` comes from the runtime
-  context, NOT from the LLM, so the model cannot open a ticket in someone else's
-  name. Same isolation principle as the long-term memory tools.
+Two rules come with actions. They go through the `SupportBackend` port, never a concrete
+system, which is what keeps the agent agnostic to the business project. And the customer
+identity (`user_id`) comes from the runtime context, NOT from the LLM, so the model
+cannot open a ticket in someone else's name.
 """
 
 from __future__ import annotations
@@ -28,10 +24,6 @@ from support_agent.memory import AgentContext
 
 logger = logging.getLogger(__name__)
 
-# Prefix of the ticket opened when the AGENT decides a human is needed. Kept
-# distinct from the router's fast-path escalation so the two are tellable apart
-# in the backlog: one is "the bot tried and could not", the other is "this never
-# should have waited".
 HANDOFF_SUBJECT_PREFIX = "Handoff (agent-requested): "
 
 
@@ -55,10 +47,6 @@ def _format_tickets(tickets: list[Ticket]) -> str:
     return "\n".join(lines)
 
 
-# Shape of an order id when the adapter does not declare its own. An adapter
-# overrides it with an `order_id_example` attribute (see `SqlSupportBackend`).
-# This is prompt-visible text, not cosmetics: shown the wrong shape, the model
-# invents ids in that shape when the customer has not supplied one.
 DEFAULT_ORDER_ID_EXAMPLE = "CMD-1001"
 
 
@@ -69,13 +57,10 @@ def build_action_tools(
 
     Args:
         backend: The `SupportBackend` implementation the tools act through.
-        tool_guard: Optional Phase 12-C hardening for the write tools (field
+        tool_guard: Optional hardening for the write tools (field
             validation, PII masking before persistence, rate limiting). `None`
             disables it — same behavior as before guardrails existed.
     """
-    # Duck-typed, NOT part of the `SupportBackend` Protocol: how order ids are
-    # spelled is a presentation hint, and widening the port for it would force
-    # every future adapter to supply one.
     order_id_example = getattr(backend, "order_id_example", DEFAULT_ORDER_ID_EXAMPLE)
 
     @tool
@@ -87,13 +72,9 @@ def build_action_tools(
         customer has not given an order id, ask them for it before calling this
         tool — never guess one.
         """
-        # user_id comes from the trusted runtime context: the backend only
-        # returns the order if it belongs to THIS customer (never from the LLM).
         user_id = runtime.context.user_id
         order = backend.get_order_status(order_id, user_id)
         if order is None:
-            # Same message whether the order is unknown or owned by someone else
-            # (do not reveal that a foreign order id exists).
             return (
                 f"No order '{order_id}' found on this customer's account. "
                 f"Double-check the order id with them (it looks like "
@@ -113,23 +94,19 @@ def build_action_tools(
         and put the customer's request and any useful context in `body`. Confirm
         the ticket number back to the customer.
         """
-        # user_id comes from the trusted runtime context, never from the model.
         user_id = runtime.context.user_id
 
-        # Phase 12-C hardening on this side-effecting, persisting tool.
         if tool_guard is not None:
             error = tool_guard.validate_field(
                 subject, field_name="subject"
             ) or tool_guard.validate_field(body, field_name="body")
             if error is not None:
                 return error
-            # Anti-abuse: cap how many tickets one customer can open in a window.
             if not tool_guard.allow_action(user_id):
                 return (
                     "Too many tickets were opened recently for this customer. "
                     "Please try again later, or ask for a human agent if urgent."
                 )
-            # Never persist raw PII (e.g. a full card number) in a ticket.
             subject = tool_guard.sanitize(subject)
             body = tool_guard.sanitize(body)
 
@@ -149,7 +126,6 @@ def build_action_tools(
         instead of treating it as brand new. Takes no argument — the customer is
         identified from the trusted runtime context.
         """
-        # user_id comes from the trusted runtime context, never from the model.
         user_id = runtime.context.user_id
         tickets = backend.list_tickets(user_id)
         if not tickets:
@@ -177,7 +153,6 @@ def build_action_tools(
         `summary`: what the customer wants AND what you already tried, so the
         advisor does not have to reconstruct the case from scratch.
         """
-        # user_id comes from the trusted runtime context, never from the model.
         user_id = runtime.context.user_id
 
         if tool_guard is not None:
@@ -203,7 +178,6 @@ def build_action_tools(
                         ]
                     }
                 )
-            # Never persist raw PII in a case the advisor will read.
             reason = tool_guard.sanitize(reason)
             summary = tool_guard.sanitize(summary)
 
@@ -216,9 +190,6 @@ def build_action_tools(
             ticket.ticket_id,
             reason,
         )
-        # `handled_by_human` mutes the bot from the NEXT turn on (the entry edge
-        # reads it). The current turn still finishes normally, so the model can
-        # tell the customer what just happened — with the case number.
         return Command(
             update={
                 "handled_by_human": True,
@@ -233,8 +204,6 @@ def build_action_tools(
             }
         )
 
-    # Append the id shape to the LLM-facing description rather than baking it into
-    # the docstring: the docstring is shared by every adapter, the example is not.
     get_order_status.description += (
         f" Order ids on this backend look like '{order_id_example}'."
     )

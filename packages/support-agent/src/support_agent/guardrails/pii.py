@@ -1,13 +1,11 @@
-"""PII detection & masking (Phase 12-A, input guardrails).
+"""PII detection & masking (input guardrails).
 
-Agnostic by design: `PIIDetector` is a **port** (a `Protocol`). The baseline
-adapter here is pure-regex — zero dependency, zero extra LLM call — and can be
-swapped for Presidio or an LLM-based detector without touching the graph, exactly
-like `SupportBackend` (`actions/`) and the LLM factory.
+Agnostic by design: `PIIDetector` is a port. The baseline adapter here is pure-regex —
+zero dependency, zero extra LLM call — and can be swapped for Presidio or an LLM-based
+detector without touching the graph, exactly like `SupportBackend` and the LLM factory.
 
-Deterministic-first: regex is cheap and predictable. It WILL miss exotic formats
-and may over-match — that is an accepted trade-off for a first line of defense.
-A smarter detector goes behind the same port when needed.
+Deterministic-first: regex is cheap and predictable. It WILL miss exotic formats and may
+over-match, an accepted trade-off for a first line of defence.
 """
 
 from __future__ import annotations
@@ -17,10 +15,6 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-# What to do with a detected entity:
-#   redact -> replace with a "[REDACTED_<ENTITY>]" placeholder (safest)
-#   mask   -> keep the shape but hide the middle (e.g. "j***@***")
-#   block  -> refuse the whole turn (for things that must never be sent at all)
 PIIStrategy = Literal["redact", "mask", "block"]
 
 
@@ -40,24 +34,13 @@ class PIIDetector(Protocol):
     def scan(self, text: str) -> list[PIIMatch]: ...
 
 
-# Baseline patterns. Deliberately conservative and ORDER MATTERS: the most
-# specific/structured entities come first so that, on overlap, they win over the
-# greedy `phone` pattern (see `apply_pii_policy`). We would rather miss an exotic
-# format (add a better detector behind the port) than mangle an order id.
 _DEFAULT_PATTERNS: dict[str, re.Pattern[str]] = {
-    # 12–20 digits grouped in 4s (covers most card numbers). No Luhn check here —
-    # that is a refinement for a real detector behind the port.
     "credit_card": re.compile(r"\b\d{4}(?:[ -]?\d{4}){2,4}\b"),
-    # IBAN: 2-letter country code + 2 check digits + grouped alphanumerics.
     "iban": re.compile(r"\b[A-Z]{2}\d{2}(?:[ ]?[A-Za-z0-9]{2,4}){3,8}\b"),
     "email": re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"),
-    # 9–15 digits with optional separators and an optional leading '+'. The
-    # lookarounds keep it from biting into alphanumerics like 'CMD-1001'.
     "phone": re.compile(r"(?<!\w)\+?\d(?:[ .\-]?\d){8,14}(?!\w)"),
 }
 
-# Default policy: mask everything by placeholder. Card numbers are the most
-# sensitive, but even an email is worth keeping out of the model and the store.
 DEFAULT_POLICY: dict[str, PIIStrategy] = {
     "credit_card": "redact",
     "iban": "redact",
@@ -70,9 +53,9 @@ DEFAULT_POLICY: dict[str, PIIStrategy] = {
 class PIIResult:
     """Outcome of applying a PII policy to a text."""
 
-    text: str  # sanitized text (identical to the input if nothing was changed)
-    entities: list[str]  # distinct entity types found (for logging / tracing)
-    blocked: bool  # True if a 'block'-strategy entity was present
+    text: str
+    entities: list[str]
+    blocked: bool
 
 
 class CompositeDetector:
@@ -95,13 +78,11 @@ class CompositeDetector:
 class DomainAllowlistDetector:
     """Decorator: drop `email` matches that belong to one of OUR OWN domains.
 
-    A correct rule applied without knowing its own context is still wrong: the
-    shop's contact addresses ARE the answer of two FAQ entries, so redacting them
-    on the way out breaks the reply it was meant to protect. This decorator is
-    what teaches the guard which addresses are its own.
+    The shop's contact addresses ARE the answer of two FAQ entries, so redacting them on
+    the way out breaks the very reply the guard was meant to protect.
 
-    Deliberately used on the OUTPUT side only: on the input side we still redact
-    every address, because there the goal is not to store or forward one.
+    Used on the OUTPUT side only: on the input side every address is still redacted,
+    because there the goal is not to store or forward one.
     """
 
     def __init__(
@@ -113,8 +94,6 @@ class DomainAllowlistDetector:
     ) -> None:
         self._detector = detector
         self._entity = entity
-        # Accept "velmo.example", " @Velmo.Example " or "" indifferently: this
-        # comes from config, and a stray space must not silently disable the rule.
         self._allowed = {
             d.strip().lower().lstrip("@") for d in allowed_domains if d.strip()
         }
@@ -129,8 +108,6 @@ class DomainAllowlistDetector:
         if match.entity != self._entity:
             return False
         domain = match.value.rpartition("@")[2].lower()
-        # Sub-domains count as ours (`support.velmo.example`), a look-alike does
-        # not (`velmo.example.attacker.com` fails both tests).
         return any(
             domain == allowed or domain.endswith(f".{allowed}")
             for allowed in self._allowed
@@ -174,24 +151,20 @@ def apply_pii_policy(
     if not matches:
         return PIIResult(text, [], False)
 
-    # Priority by policy order; sort by position then priority, then greedily keep
-    # non-overlapping spans (the earlier/higher-priority match wins a conflict).
     priority = {entity: i for i, entity in enumerate(policy)}
     matches.sort(key=lambda m: (m.start, priority.get(m.entity, len(policy))))
     accepted: list[PIIMatch] = []
     last_end = -1
     for m in matches:
-        if m.start < last_end:  # overlaps an already-accepted span
+        if m.start < last_end:
             continue
         accepted.append(m)
         last_end = m.end
 
-    # A single 'block'-strategy entity vetoes the whole turn.
     if any(policy.get(m.entity) == "block" for m in accepted):
         found = sorted({m.entity for m in accepted})
         return PIIResult(text, found, True)
 
-    # Rebuild the sanitized string span by span.
     out: list[str] = []
     cursor = 0
     for m in accepted:
@@ -199,7 +172,7 @@ def apply_pii_policy(
         strategy = policy.get(m.entity, "redact")
         if strategy == "mask":
             out.append(_mask(m.value))
-        else:  # redact (default)
+        else:
             out.append(f"[REDACTED_{m.entity.upper()}]")
         cursor = m.end
     out.append(text[cursor:])

@@ -1,26 +1,20 @@
 """R1 and R2 of the memory spec, asserted against this project's real seams.
 
-These two requirements were implemented and reasoned about, but nothing locked
-them down. The gap surfaced by comparing our suite to the acceptance tests that
-came with the training starter (`docs/brief/tests-reference/test_memory.py`):
-they cover R1/R2/R3/R5, ours covered R3/R5/R6. So R1 and R2 were the two the
-spec asks for and no test held.
-
     R1  ->  hold a 30-turn conversation
     R2  ->  remember durable facts from one SESSION to the next, days later
 
-They are ported rather than adapted, because the mechanism differs. In the
-starter, both are one class (`MemoryManager`) and R1 is a semantic lookup. Here
-they are two different mechanisms on purpose, and asserting R1 through a semantic
-search would test the wrong one:
+They are asserted against two different mechanisms on purpose, because that is how they
+are implemented here:
 
-    R1  ->  the CHECKPOINTER, keyed by thread_id  (nothing is dropped, no search)
+    R1  ->  the CHECKPOINTER, keyed by thread_id  (nothing dropped, no search)
     R2  ->  the STORE,        keyed by user_id    (durable, semantic)
 
+Asserting R1 through a semantic search would test the wrong one.
+
 Offline by construction: no provider, no server, no API key. The embeddings are a
-deterministic bag-of-words, and the durable store is a SQLite file in `tmp_path` —
-so this suite keeps running on a laptop with no credentials, which is the only
-kind of suite that keeps being run.
+deterministic bag-of-words and the durable store is a SQLite file in `tmp_path`, so this
+suite keeps running on a laptop with no credentials — which is the only kind of suite
+that keeps being run.
 """
 
 from __future__ import annotations
@@ -50,8 +44,6 @@ class _FakeEmbeddings(Embeddings):
     def _one(text: str) -> list[float]:
         lowered = text.lower()
         vector = [float(lowered.count(word)) for word in _VOCAB]
-        # A zero vector has no direction: cosine similarity would be NaN and the
-        # ranking would depend on float luck. Neutral means equidistant.
         return vector if any(vector) else [1.0] * len(_VOCAB)
 
 
@@ -108,7 +100,6 @@ def test_the_first_turn_is_still_there_after_30_turns() -> None:
         )
 
     history = graph.get_state(config).values["messages"]
-    # 31 turns, each contributing the customer message + the agent reply.
     assert len(history) == 62
     assert "O-2024-0101" in history[0].content
 
@@ -207,7 +198,6 @@ def test_a_new_session_recalls_by_MEANING_not_by_keyword(tmp_path, monkeypatch) 
     store.put(namespace, "f1", {"text": "Sa pointure est L"})
     store.put(namespace, "f2", {"text": "Son adresse est 12 rue des Lilas"})
 
-    # Nothing here repeats the stored phrasing.
     best = store.search(namespace, query="quelle taille porte-t-il", limit=1)
 
     assert best and best[0].key == "f1"

@@ -1,18 +1,15 @@
 """The operator's door onto agent memory: inspect (R6) and erase (R5).
 
-    make memory ARGS='--user-id alice'                      # audit dump
+    make memory ARGS='--user-id alice'                       # audit dump
     make memory ARGS='--user-id alice --forget "order id"'   # targeted, dry run
     make memory ARGS='--user-id alice --erase --write'       # GDPR art. 17
 
-Read-only by default, for the same reason `consolidate` is: the first thing you
-want from an erasure tool is to see what it is ABOUT to erase. `--write` is what
-makes it act.
+Read-only by default: the first thing you want from an erasure tool is to see what it is
+about to erase.
 
-**Why this is a separate module from `privacy.py`.** The logic lives in
-`privacy.py`, which the agent's `forget_memory` tool imports — so `privacy` is
-loaded as part of the package on every run. A module that is BOTH imported by the
-package and executed with `python -m` gets initialised twice, and Python warns
-about it. Keeping the `__main__` in a leaf nobody imports avoids that entirely.
+Separate from `privacy.py` because that module is imported by the agent's
+`forget_memory` tool. A module that is both imported and run with `python -m` gets
+initialised twice, and Python warns about it.
 """
 
 from __future__ import annotations
@@ -55,7 +52,6 @@ def main() -> None:
     store = get_store(settings)
     user_id: str = args.user_id
 
-    # R6 first, and unconditionally: you cannot judge a deletion you have not seen.
     records = list_user_memories(store, user_id)
     print(f"\n=== {len(records)} memories stored for user={user_id!r} ===")
     for record in records:
@@ -84,8 +80,6 @@ def main() -> None:
 
     if args.forget or args.erase:
         if not targets:
-            # Said plainly, because "0 deleted" and "deletion failed" must never
-            # look the same to whoever runs this during a GDPR request.
             print("Nothing matched — nothing deleted.")
         elif not args.write:
             print("\n[DRY RUN] re-run with --write to delete the above.")

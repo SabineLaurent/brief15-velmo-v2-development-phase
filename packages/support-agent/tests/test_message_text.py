@@ -1,23 +1,21 @@
-"""Finding Q2 of the 2026-07-19 audit: a message's text is `.text`, not `.content`.
+"""A message's text is `.text`, never `.content`.
 
-`BaseMessage.content` is provider-native. For most providers it is a `str`; for
-others it is a LIST OF CONTENT BLOCKS (`[{"type": "text", "text": "..."}]`).
-`BaseMessage.text` is LangChain's normalisation of that difference — it returns
-the string in both cases — and it is the whole reason this project can claim to
-be provider-agnostic while reading model output all over the place.
+`BaseMessage.content` is provider-native: a `str` for most providers, a LIST OF CONTENT
+BLOCKS for others. `BaseMessage.text` is LangChain's normalisation of that difference,
+and it is what lets this project read model output all over the place while claiming to
+be provider-agnostic.
 
-Reading `.content` broke in two distinct ways, and the second is the nastier one:
+Reading `.content` broke in two ways, the second being the nastier:
 
     AttributeError   `.lower()` / `fold()` on a list — the eval gate went down
-    SILENT GARBAGE   `str(.content)` did not crash, it stringified the list. The
-                     guards then scanned a Python repr instead of the sentence,
-                     and the compaction prompt was fed one.
+    SILENT GARBAGE   `str(.content)` stringified the list, so the guards scanned
+                     a Python repr instead of the sentence
 
-So a test that only checked "it does not crash" would have passed on the broken
-version. These tests check the TEXT that comes out.
+A test that only checked "it does not crash" would have passed on the broken version, so
+these check the TEXT that comes out.
 
-Offline: no provider, no key, no network. Content blocks are constructed by hand,
-which is exactly what a blocks-returning provider hands us.
+Offline: content blocks are constructed by hand, which is exactly what a blocks-
+returning provider hands us.
 """
 
 from __future__ import annotations
@@ -53,27 +51,16 @@ _SOURCE_ROOT = Path(__file__).resolve().parents[1] / "src" / "support_agent"
 def test_no_module_reads_dot_content() -> None:
     """The invariant, executable: nothing in the package reads `.content`.
 
-    A comment saying "use .text" is advice; this is a gate. Q2 existed because
-    the same reasonable-looking mistake was made in ten places over several
-    phases and nothing was watching. Now an eleventh fails here.
+    A comment saying "use .text" is advice; this is a gate. The same reasonable-looking
+    mistake was made in ten places over several phases with nothing watching.
 
-    Read through the **AST**, not with a regex over lines, and that is not
-    fussiness: the first version of this test matched its own explanatory
-    comments — every `# use .text, not .content` counted as a violation. A
-    line-based check is forced to choose between false positives and stripping
-    comments and docstrings by hand, i.e. re-implementing a parser badly. `ast`
-    sees attribute ACCESS and nothing else, so `content=` keywords (constructing
-    a message) and `.content_blocks` (a different attribute) are correctly
-    invisible to it.
+    Read through the AST, not with a regex over lines: the first version matched its own
+    explanatory comments. A line-based check has to choose between false positives and
+    re-implementing a parser badly, whereas `ast` sees attribute ACCESS only, so
+    `content=` keywords and `.content_blocks` are correctly invisible to it.
 
-    That first version also proved the point in the other direction: a shell
-    `grep` run over the same tree just before had reported the code clean, and
-    this test found a real leftover in `eval/offline.py`. Which is the argument
-    for having it at all.
-
-    If a future feature genuinely needs the provider-native shape — inspecting an
-    image block, say — the honest move is `.content_blocks`, or an explicit
-    exemption added here with its reason.
+    A future feature that genuinely needs the provider-native shape should use
+    `.content_blocks`, or add an explicit exemption here with its reason.
     """
     offenders: list[str] = []
     for path in sorted(_SOURCE_ROOT.rglob("*.py")):
@@ -97,7 +84,6 @@ def test_langchain_still_normalises_blocks_for_us() -> None:
     assert AIMessage(content="plain").text == "plain"
     assert AIMessage(content=blocks("Bonjour Sabine")).text == "Bonjour Sabine"
     assert AIMessage(content=[]).text == ""
-    # A non-text block must not leak into the text, and must not break it.
     mixed = AIMessage(content=[{"type": "image_url", "image_url": {"url": "x"}}, {"type": "text", "text": "ok"}])
     assert mixed.text == "ok"
 
@@ -176,7 +162,7 @@ def test_the_output_guard_redacts_a_secret_from_a_blocks_reply() -> None:
     sent = guard_output(state)["messages"][0].content  # type: ignore[arg-type]
 
     assert "Velmo2024" not in sent
-    assert "mot de passe" in sent  # the sentence is still legible
+    assert "mot de passe" in sent
 
 
 def test_a_clean_blocks_reply_is_not_rewritten() -> None:
@@ -213,4 +199,4 @@ def test_the_evaluators_receive_a_string_from_blocks_content(message, expected: 
     provider difference into a dead non-regression gate.
     """
     assert message.text == expected
-    assert message.text.lower() == expected.lower()  # the call that used to raise
+    assert message.text.lower() == expected.lower()

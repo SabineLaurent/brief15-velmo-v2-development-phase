@@ -1,14 +1,12 @@
-"""Phase 10 robustness unit tests: provider fallback + graceful degradation.
+"""Provider fallback and graceful degradation.
 
-Unlike `test_eval.py` (integration, needs real provider credentials), these are
-pure UNIT tests: they inject fake chat models — one that always fails (a provider
-that is "down"), one that always answers — so they run everywhere, with no `.env`
-and no network. We assert two guarantees:
+Pure UNIT tests: they inject fake chat models — one that always fails, one that always
+answers — so they run everywhere, with no `.env` and no network.
 
-  1. Fallback — when the primary provider raises, the node transparently falls
-     over to the secondary and the customer still gets a real answer.
-  2. Graceful degradation — when EVERY provider is down, the node does not crash
-     the turn; it returns the polite `GRACEFUL_ERROR_MESSAGE` instead.
+    1. Fallback — when the primary provider raises, the node transparently falls
+       over to the secondary and the customer still gets a real answer.
+    2. Graceful degradation — when EVERY provider is down, the node returns the
+       polite `GRACEFUL_ERROR_MESSAGE` instead of crashing the turn.
 """
 
 from __future__ import annotations

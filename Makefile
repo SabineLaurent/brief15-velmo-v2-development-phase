@@ -1,21 +1,11 @@
 # Makefile — porte d'entrée unique des commandes du projet.
-# Tape `make` (ou `make help`) pour voir toutes les cibles, groupées par usage.
-#
-# Deux conventions dans ce fichier :
-#   · `##  <texte>` après une cible  → la ligne d'aide de cette cible
-#   · `##@ <texte>` sur sa propre ligne → un titre de section dans `make help`
-# Ajouter une cible sans sa ligne `##` la rend invisible dans l'aide : c'est
-# volontaire (une cible interne n'a pas à être annoncée), mais ce n'est jamais
-# un oubli acceptable pour une cible destinée à l'utilisatrice.
+# `##  <texte>` après une cible = sa ligne d'aide ; `##@ <texte>` = un titre de
+# section dans `make help`.
 
 .DEFAULT_GOAL := help
 
-# Toutes les commandes Python passent par uv (env reproductible, un seul .venv
-# partagé par les membres du workspace).
 UV := uv
 
-# ⚠️ Tenir cette liste alignée sur les cibles réelles. Une cible absente d'ici
-# cesse de tourner le jour où un fichier du même nom apparaît à la racine.
 .PHONY: help \
         setup install \
         run serve ui \
@@ -41,7 +31,7 @@ setup: install ## Installe les deps ET crée le .env s'il manque
 install: ## Installe/synchronise les dépendances (uv sync)
 	$(UV) sync
 
-##@ Boutique de démo — une DOUBLURE jetable du SI marchand (database/README.md)
+##@ Boutique de démo — une DOUBLURE jetable du SI marchand
 
 seed: ## Peuple la boutique SQL (idempotent ; ARGS=--reset pour tout reconstruire)
 	$(UV) run python -m support_agent.actions.sql.seed $(ARGS)
@@ -51,7 +41,7 @@ seed: ## Peuple la boutique SQL (idempotent ; ARGS=--reset pour tout reconstruir
 run: ## Lance l'agent de support en CLI interactif
 	$(UV) run python -m support_agent.agent
 
-serve: ## Expose l'agent en HTTP (API SSE sur :8000, cf. docs/plan-deploiement-2026-07-25.md)
+serve: ## Expose l'agent en HTTP (API SSE sur :8000)
 	$(UV) run --extra server uvicorn support_agent.server:app --reload --port 8000
 
 ui: ## Lance l'UI Chainlit sur :8001 (dev local ; la version conteneur est sur :8101)
@@ -71,19 +61,6 @@ format: ## Formate le code (ruff)
 
 check: lint test ## Contrôle qualité complet (lint + tests)
 
-# Pourquoi cette cible est ici, dans la section HORS LIGNE, et pas dans « Mesure » :
-# par défaut elle ne note que les deux dimensions DÉTERMINISTES (mémoire,
-# garde-fous) — aucun appel LLM, aucune clé, aucun réseau. C'est précisément ce
-# qui la rend utilisable comme porte de CI. `ARGS=--live` ajoute la dimension
-# QUALITÉ et franchit alors la frontière : ça appelle un vrai modèle et ça coûte
-# des tokens. Le seuil et la baseline : TODO_priorities.md §Chantier 7.
-#
-# ⭐ La dimension MÉMOIRE est notée une fois PAR MOTEUR de persistance. SQLite
-# toujours ; Postgres aussi si `EVAL_DATABASE_URL` en désigne un (chantier 8) —
-# R3 est l'isolation entre clients, et la requête de similarité qui pourrait
-# ramener la ligne du voisin est celle du store, pas la nôtre. Sans base, le
-# rapport DIT que Postgres n'a pas été exercé ; `ARGS=--require-postgres` refuse
-# ce cas (c'est ce que la CI passe).
 score: ## Note l'agent, écrit le rapport, BLOQUE sous le seuil (ARGS=--live|--degraded|--update-baseline|--require-postgres)
 	$(UV) run python -m support_agent.eval.mlops $(ARGS)
 
@@ -92,7 +69,7 @@ score: ## Note l'agent, écrit le rapport, BLOQUE sous le seuil (ARGS=--live|--d
 eval: ## Évalue l'agent sur LangSmith (dataset + evaluators)
 	$(UV) run python -m support_agent.eval.run
 
-latency: ## Mesure le TTFT + la durée par nœud (ARGS='[question] [--runs N]' ; cf. docs/latence.md)
+latency: ## Mesure le TTFT + la durée par nœud (ARGS='[question] [--runs N]')
 	$(UV) run python -m support_agent.latency $(ARGS)
 
 ##@ Mémoire — tâches de maintenance, hors du tour client ; À BLANC par défaut (--write pour écrire)
@@ -105,14 +82,8 @@ memory: ## Inspecte / efface la mémoire d'un client (R5-R6) — ARGS='--user-id
 
 ##@ Docker — ports 81xx (disjoints du dev local en 80xx, pour ne pas confondre les deux piles)
 
-# L'ARCHITECTURE cible du build. Vide = celle de la machine, ce qu'on veut en
-# local (rapide, et c'est la seule qui s'exécute sans émulation). La CI passe
-# `PLATFORM=linux/amd64` : c'est ce qu'exécute App Service Linux, alors que la
-# machine de dev est arm64 — une image arm64 poussée sur Azure ne démarre pas,
-# et l'erreur arrive au déploiement, pas au build. Sur un runner amd64 le
-# drapeau est un no-op ; il n'en est pas décoratif pour autant, c'est lui qui
-# rend l'exigence EXPLICITE le jour où le runner change (GitHub en propose
-# désormais en arm64).
+# Architecture cible du build. Vide = celle de la machine ; `PLATFORM=linux/amd64`
+# pour une cible Linux amd64.
 PLATFORM ?=
 DOCKER_PLATFORM := $(if $(PLATFORM),--platform $(PLATFORM),)
 
@@ -121,10 +92,6 @@ docker-build: ## Construit les images (agent + client ; ARGS ignoré, PLATFORM=l
 	docker build $(DOCKER_PLATFORM) -f packages/client/Dockerfile -t client-chainlit:dev .
 
 docker-smoke: docker-build ## Construit PUIS vérifie les deux images (découplage + démarrage réel)
-	@# `--no-project` : le script est en stdlib PURE et pilote `docker`. Il ne doit
-	@# pas installer — encore moins importer — l'environnement qu'il vérifie, sinon
-	@# un vert dirait « ça marche sur cette machine » au lieu de « ça marche dans
-	@# l'image ». Effet de bord utile : la CI n'a pas de `uv sync` à faire pour ça.
 	$(UV) run --no-project python scripts/docker_smoke.py
 
 docker-up: ## Démarre la pile conteneurisée en arrière-plan (construit si besoin)

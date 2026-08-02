@@ -1,16 +1,15 @@
-"""Tests for episodic memory (Phase 14): the store side, offline.
+"""Tests for episodic memory: the store side, offline.
 
-What is worth asserting here is not "LangGraph can store a dict" — that is
-LangGraph's job. It is the four decisions that are OURS, and that a future edit
-could quietly undo:
+What is worth asserting is not that LangGraph can store a dict, but the four decisions
+that are OURS:
 
     1. an episode is retrieved by SITUATION, not by past answer;
     2. a cold or broken store changes the prompt by exactly zero bytes;
     3. an episode is PII-masked before it can be shown to another customer;
     4. a turn writes ONE row per thread and pays NO embedding call.
 
-The embeddings are faked with a deterministic bag-of-words so the semantic
-search really runs (no network, no API key, no flakiness).
+The embeddings are faked with a deterministic bag-of-words so the semantic search really
+runs (no network, no API key, no flakiness).
 """
 
 from __future__ import annotations
@@ -34,7 +33,6 @@ from support_agent.memory.episodic import (
     save_episode,
 )
 
-# A three-word "vocabulary" is enough to make similarity meaningful and readable.
 _VOCAB = ("delivery", "refund", "invoice")
 
 
@@ -44,8 +42,6 @@ def _fake_embed(texts: list[str]) -> list[list[float]]:
     for text in texts:
         lowered = text.lower()
         vector = [float(lowered.count(word)) for word in _VOCAB]
-        # A zero vector has no direction, so cosine similarity would be NaN and
-        # the ranking would depend on float luck. Neutral means equidistant.
         vectors.append(vector if any(vector) else [1.0, 1.0, 1.0])
     return vectors
 
@@ -88,7 +84,6 @@ def test_a_weak_match_is_dropped_by_the_relevance_floor() -> None:
     save_episode(store, _episode("invoice"))
 
     assert recall_episodes(store, query="delivery", limit=2, min_score=0.35) == []
-    # Same query, no floor: the search happily returns the irrelevant case.
     assert len(recall_episodes(store, query="delivery", limit=2)) == 1
 
 
@@ -186,7 +181,7 @@ def test_candidate_is_one_row_per_thread() -> None:
 
     rows = store.search(CANDIDATES_NAMESPACE, limit=10)
     assert len(rows) == 1
-    assert rows[0].value["resolved"] is False  # the LAST turn wins
+    assert rows[0].value["resolved"] is False
 
 
 def test_recording_a_candidate_never_embeds() -> None:

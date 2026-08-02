@@ -1,14 +1,12 @@
-"""Escalation: the case goes to a human, the conversation stays alive (C1).
+"""Escalation: the case goes to a human, the conversation stays alive.
 
-Pure UNIT tests — no `.env`, no network, no LLM. The router is replaced by a stub
-that always chooses `escalate`, which is exactly what the real router does on
-"je veux parler à quelqu'un"; everything downstream of it is the real code.
+Pure UNIT tests — no `.env`, no network, no LLM. The router is replaced by a stub that
+always chooses `escalate`; everything downstream of it is real code.
 
-The test that matters is `test_the_thread_survives_an_escalation`: the defect it
-guards against is invisible to any single-turn test, because turn 1 looked
-perfect. The old `escalate` called `interrupt()`, LangGraph then resumed that
-pending task ahead of anything else, and EVERY later message on the thread got
-the same "an advisor is taking over" sentence, forever, with no error anywhere.
+`test_the_thread_survives_an_escalation` is the one that matters: the defect it guards
+against is invisible to any single-turn test. The old `escalate` called `interrupt()`,
+LangGraph resumed that pending task ahead of anything else, and EVERY later message on
+the thread got the same handoff sentence, forever, with no error anywhere.
 """
 
 from __future__ import annotations
@@ -75,19 +73,14 @@ def test_the_thread_survives_an_escalation(backend) -> None:
     graph = _graph(backend)
 
     first = _say(graph, "je veux parler à un humain")
-    # No pause: the turn completed and produced a reply of its own.
     assert not first.get("__interrupt__")
     assert first["handled_by_human"] is True
 
     second = _say(graph, "finalement, quels sont vos délais de livraison ?")
 
-    # The thread is ALIVE: the message was recorded and answered...
     assert not second.get("__interrupt__")
     assert second["messages"][-1].content == HUMAN_TAKEOVER_MESSAGE
-    # ...and it is a DIFFERENT reply from the escalation one — the old bug served
-    # the very same sentence to every subsequent message.
     assert second["messages"][-1].content != first["messages"][-1].content
-    # The customer's own words are kept, ready for whoever picks the case up.
     assert any(
         "délais de livraison" in str(m.content) for m in second["messages"]
     )
@@ -99,7 +92,6 @@ def test_the_bot_stops_answering_once_a_human_owns_the_case(backend) -> None:
     _say(graph, "je veux un conseiller")
 
     assert entry_route({"handled_by_human": True}) == "human_takeover"
-    # A blocked input still wins over the takeover: an attacker gets no reply.
     assert entry_route({"handled_by_human": True, "input_blocked": True}) == END
     assert entry_route({}) == "router"
 
@@ -127,9 +119,6 @@ def test_a_repeated_escalation_cannot_open_a_second_ticket(backend) -> None:
 
 
 # --- The way back out of a takeover -----------------------------------------
-# A handoff is a judgement, and judgements are wrong sometimes. Since the flag
-# mutes the bot on this thread for good, a mistaken one would confiscate the
-# conversation — which is the opposite of an agent meant to spare human effort.
 
 
 def test_the_customer_can_take_the_bot_back(backend) -> None:
@@ -140,7 +129,6 @@ def test_the_customer_can_take_the_bot_back(backend) -> None:
     assert released["handled_by_human"] is False
     assert released["messages"][-1].content == TAKEOVER_RELEASED_MESSAGE
 
-    # ...and the very next message reaches the router again.
     assert entry_route(released) == "router"
 
 

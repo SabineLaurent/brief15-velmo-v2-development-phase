@@ -70,11 +70,10 @@ def _products() -> list[Product]:
 
 
 def _variants() -> list[ProductVariant]:
-    # (id, product_ref, size, price, stock) — stock souvent 1, parfois 0 (épuisé).
     rows = [
         ("v-mu-1999-treble-M", "mu-1999-treble", SZ.M, 220, 1),
         ("v-mu-1999-treble-L", "mu-1999-treble", SZ.L, 220, 1),
-        ("v-om-1993-M", "om-1993", SZ.M, 180, 0),  # épuisé (test no-fabulation)
+        ("v-om-1993-M", "om-1993", SZ.M, 180, 0),
         ("v-om-1993-L", "om-1993", SZ.L, 180, 1),
         ("v-brazil-1970-M", "brazil-1970", SZ.M, 300, 1),
         ("v-brazil-1970-L", "brazil-1970", SZ.L, 300, 0),
@@ -102,7 +101,6 @@ def _addr(city: str, zip_: str) -> dict:
 
 
 def _orders() -> list[Order]:
-    # (id, customer, status, total, address)
     rows = [
         ("O-2024-0101", "C-marc-dubois", OS.prepared, 250, _addr("Lyon", "69003")),
         ("O-2024-0103", "C-marc-dubois", OS.shipped, 220, _addr("Lyon", "69003")),
@@ -214,5 +212,5 @@ def seed(session) -> None:
         _escalations(),
     ):
         session.add_all(batch)
-        session.flush()  # force l'INSERT du lot avant le suivant (respecte l'ordre des FK)
+        session.flush()
     session.commit()

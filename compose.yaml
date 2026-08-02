@@ -1,46 +1,23 @@
-# Pile locale de l'agent — déploiement étape 2.
-# Plan d'ensemble : docs/plan-deploiement-2026-07-25.md
+# Pile locale de l'agent : `client` → `agent-api` → `postgres`.
 #
 #   make docker-up      # construit si besoin, puis démarre en arrière-plan
 #   make docker-logs    # suit les logs
 #   make docker-down    # arrête (garde le volume)
 #
-# Trois briques : `client` → `agent-api` → `postgres`. Chacune ne connaît que la
-# suivante, et seulement par son NOM DE SERVICE (DNS interne de Compose).
-#
-#   navigateur ──:8101──► client ──http://agent-api:8000──► agent-api ──► postgres
-#                          (UI)         (la couture, en HTTP)    (cerveau)  (état)
-#
-# ⚠️ Les ports publiés sont volontairement DIFFÉRENTS de ceux du dev local
-# (`make serve` :8000 · `make ui` :8001). Pourquoi : Docker publie sur `0.0.0.0`
-# et uvicorn écoute sur `127.0.0.1` — DEUX ADRESSES différentes, donc aucun
-# `Errno 48`, et c'est la plus spécifique qui reçoit la connexion. La collision ne
-# se voit PAS : on croit tester sa pile locale et on interroge le conteneur.
-# (Deux process sur la MÊME adresse, eux, échouent bien franchement.)
-# Vécu le 2026-07-25, un test entier invalidé. Ici, l'URL dit qui répond :
+# Les ports publiés sont volontairement différents de ceux du dev local
+# (`make serve` :8000 · `make ui` :8001) :
 #   dev local  → agent :8000  · UI :8001
 #   conteneurs → agent :8100  · UI :8101
-# Rien ne change À L'INTÉRIEUR : les deux services écoutent toujours sur 8000, et
-# le client appelle toujours `http://agent-api:8000`. Seule bouge la fenêtre côté
-# hôte — c'est exactement ce que veut dire la notation `hôte:conteneur`.
 
 services:
-  # La base unique de l'agent (étape 3). UN Postgres porte les DEUX horizons de
-  # mémoire — court terme (thread_id) et long terme (user_id) — séparés par
-  # SCHÉMA, pas par serveur, et la recherche sémantique tourne dedans via
-  # pgvector. Le pourquoi : docs/architecture-cible-2026-07-25.md §3.
   postgres:
-    # L'image officielle `postgres` n'a PAS pgvector. Celle-ci, c'est la même
-    # plus l'extension — sans quoi le store long terme échoue au `setup()`.
+    # L'image officielle `postgres` n'a pas pgvector ; celle-ci l'embarque.
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: agent
       POSTGRES_PASSWORD: agent
       POSTGRES_DB: agent
     healthcheck:
-      # `pg_isready` répond OK dès que le serveur accepte des connexions. C'est
-      # ce que `depends_on: service_healthy` attend ci-dessous : sans ça, l'agent
-      # démarre en parallèle, gagne la course, et plante au premier `setup()`.
       test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
       interval: 2s
       timeout: 3s
@@ -48,9 +25,8 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
-    # Pas de `ports:` — la base n'est PAS exposée à l'hôte. `agent-api` l'atteint
-    # par le réseau interne de Compose, sous son nom de service (`postgres`).
-    # Décommente pour l'inspecter depuis l'hôte avec psql :
+    # Pas de `ports:` — la base n'est pas exposée à l'hôte. Pour l'inspecter
+    # avec psql, décommenter :
     #   ports: ["5432:5432"]
 
   agent-api:
@@ -59,114 +35,51 @@ services:
       dockerfile: packages/support-agent/Dockerfile
     image: support-agent:dev
 
-    # Les secrets viennent du .env de l'hôte au RUNTIME (jamais dans l'image,
-    # cf. .dockerignore). Sur Azure, ce bloc est remplacé par les secrets
-    # d'application du Container App — le conteneur, lui, ne change pas.
     env_file:
       - .env
 
+    # `env_file` écrase les ENV de l'image ; ce bloc a la priorité la plus haute
+    # et rétablit ce que le conteneur exige.
     environment:
-      # ⚠️ Piège subtil : `env_file` ÉCRASE les ENV de l'image. Le .env de l'hôte
-      # contient `KNOWLEDGE_DIR=./data/kb-velmo` (relatif au cwd de la machine),
-      # ce qui n'a aucun sens ici. Ce bloc `environment` a la priorité la plus
-      # haute : il rétablit les chemins absolus de l'image.
       KNOWLEDGE_DIR: /app/data/kb-velmo
-      # Étape 3 : l'état ne vit plus dans un fichier du conteneur mais dans le
-      # service `postgres`. `postgres` ci-dessous est le NOM DU SERVICE, résolu
-      # par le DNS interne de Compose — pas localhost : deux conteneurs, deux
-      # piles réseau. Sur Azure, seule cette URL change (+ ?sslmode=require).
       PERSISTENCE_BACKEND: postgres
       DATABASE_URL: postgres://agent:agent@postgres:5432/agent
       DATABASE_SCHEMA: agent_state
-      # 🔒 Le conteneur exige TOUJOURS la clé de service, quoi que dise le .env.
-      # C'est ce qui rend le découpage structurel plutôt que disciplinaire :
-      #   hors Docker → tu peux mettre API_ALLOW_UNAUTHENTICATED=true dans ton
-      #     .env, l'auth cesse d'être du bruit pendant que tu codes une feature ;
-      #   en conteneur → cette ligne écrase le .env, donc la pile « proche de la
-      #     prod » ne peut pas devenir une porte ouverte par confort local.
-      # Sans elle, `env_file: .env` propagerait le `true` ici — et on croirait
-      # tester une pile authentifiée. Le drapeau appartient au SERVEUR : un client
-      # ne décide jamais s'il doit s'authentifier, il présente ou il ne présente pas.
+      # Le conteneur exige toujours la clé de service, quoi que dise le .env.
       API_ALLOW_UNAUTHENTICATED: "false"
-      # Non lus tant que le backend est `postgres`, mais laissés corrects : le
-      # .env de l'hôte les porte en relatif (`./database/…`), ce qui n'a aucun
-      # sens ici. Repasser à `sqlite` pour comparer doit rester sans piège —
-      # il faut alors remonter le volume `agent-state` sur /app/database.
       WORKING_MEMORY_DB_PATH: /app/database/working_memory/checkpoints.db
       AGENT_MEMORY_DB_PATH: /app/database/agent_memory/memories.db
-      # 🏪 La DOUBLURE métier reste en RAM dans le conteneur, quoi que dise le
-      # .env de l'hôte — même raison que KNOWLEDGE_DIR ci-dessus, avec une
-      # conséquence plus brutale. Un `SUPPORT_BACKEND=sqlite` hérité de l'hôte
-      # ferait chercher /app/database/shop/shop.db, qui n'est ni dans l'image ni
-      # monté : SQLite créerait un fichier VIDE, l'adaptateur refuserait de
-      # démarrer sur une boutique sans données (c'est son rôle), et comme le
-      # graphe est construit dans le LIFESPAN, uvicorn n'ouvrirait jamais son
-      # port. Sur Azure ça se lit « container didn't respond to HTTP pings ».
-      # Ce n'est pas une régression subie : c'est le statut correct d'une
-      # doublure. La pile Docker existe pour éprouver Postgres et la mémoire —
-      # pas pour rendre durable la base qu'on DÉBRANCHE en production.
       SUPPORT_BACKEND: memory
 
     depends_on:
       postgres:
-        # `service_started` ne suffirait pas : le conteneur démarre bien avant
-        # que Postgres accepte des connexions. On attend le healthcheck.
         condition: service_healthy
 
     ports:
-      # hôte:conteneur — l'agent écoute sur 8000 DANS le conteneur, publié sur
-      # 8100 côté hôte pour ne pas entrer en collision avec `make serve` (:8000).
       - "8100:8000"
 
     restart: unless-stopped
 
-  # L'UI de démo (étape 4). Elle n'importe plus le cerveau : elle l'APPELLE.
-  # Regarde ce que ce bloc NE contient pas — ni clé LLM, ni URL de base, ni
-  # `KNOWLEDGE_DIR`. Un client n'a aucune raison de connaître ces choses, et
-  # jusqu'à l'étape 3 il les connaissait toutes parce qu'il partageait le process.
   client:
     build:
       context: .
       dockerfile: packages/client/Dockerfile
     image: client-chainlit:dev
 
-    # Pas d'`env_file: .env` ici, VOLONTAIREMENT. Le .env porte les secrets du
-    # cerveau (clés LLM, mot de passe Postgres) ; les injecter dans le client les
-    # exposerait dans un conteneur qui sert des pages web à un navigateur, sans
-    # aucun usage. Le client reçoit exactement deux variables :
+    # Pas d'`env_file` ici : le client n'a besoin d'aucun secret du cerveau.
     environment:
-      # Le nom du SERVICE, pas localhost : deux conteneurs = deux piles réseau.
-      # C'est la seule chose que le client sait de l'agent. Sur Azure, cette URL
-      # devient l'ingress HTTPS du Container App — et c'est le seul changement.
       AGENT_API_URL: http://agent-api:8000
-      # La clé de SERVICE que le client PRÉSENTE (« ai-je le droit d'appeler cet
-      # agent ? ») — à ne pas confondre avec `user_id`, qui dit DE QUI on parle.
-      # Interpolée depuis le .env de l'hôte par Compose lui-même : le fichier
-      # n'entre pas dans le conteneur, seule cette valeur en sort. Vide = aucun
-      # en-tête envoyé, ce qui ne marche que si l'agent tourne en mode ouvert.
       AGENT_API_KEY: ${API_KEY:-}
 
     depends_on:
       agent-api:
-        # `service_healthy` s'appuie sur le HEALTHCHECK de l'image de l'agent, qui
-        # couvre son warm-up (~4,4 s en conteneur). Sans ça, la première question
-        # posée dans l'UI partirait vers un service encore en train d'indexer.
         condition: service_healthy
 
     ports:
-      # Dans le conteneur, Chainlit écoute sur 8000 comme l'agent — ils ne se
-      # gênent pas, ce sont deux piles réseau distinctes. Côté hôte, il faut bien
-      # deux numéros : l'UI conteneurisée s'ouvre sur http://localhost:8101.
       - "8101:8000"
 
     restart: unless-stopped
 
 volumes:
-  # L'état durable vit dans un volume NOMMÉ, pas dans le conteneur : c'est ce qui
-  # fait survivre conversations et souvenirs à un `docker compose down`. Un
-  # système de fichiers de conteneur est éphémère, un volume ne l'est pas.
-  # Depuis l'étape 3, c'est Postgres qui porte l'état — d'où le volume attaché à
-  # LUI. `agent-state` (les fichiers SQLite de l'étape 2) reste déclaré : le
-  # supprimer effacerait l'historique d'avant la bascule.
   postgres-data:
   agent-state:

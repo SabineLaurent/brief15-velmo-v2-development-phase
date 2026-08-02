@@ -15,16 +15,13 @@ from pathlib import Path
 def open_sqlite_connection(path: str) -> sqlite3.Connection:
     """Open (creating parent dirs) a SQLite connection usable across threads.
 
-    Two settings matter:
+    `check_same_thread=False`: LangGraph may touch the saver or the store from a
+    different thread than the one that opened the connection (concurrent evaluation, a
+    web server request pool).
 
-    - `check_same_thread=False`: LangGraph may touch the saver / store from a
-      different thread than the one that opened the connection (concurrent
-      evaluation, a web server request pool).
-    - `isolation_level=None` (autocommit): the LangGraph SQLite backends issue
-      their OWN explicit `BEGIN` transactions. Python's `sqlite3` default opens
-      an implicit transaction before DML, which then collides with that explicit
-      `BEGIN` ("cannot start a transaction within a transaction"). Autocommit mode
-      hands transaction control to the backend, which is exactly what it expects.
+    `isolation_level=None` (autocommit): the LangGraph SQLite backends issue their OWN
+    explicit `BEGIN`, which collides with the implicit transaction Python's `sqlite3`
+    opens before DML ("cannot start a transaction within a transaction").
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(path, check_same_thread=False, isolation_level=None)

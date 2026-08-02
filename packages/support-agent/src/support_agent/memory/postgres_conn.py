@@ -1,24 +1,16 @@
 """Shared Postgres connection pool for the durable memory backends.
 
-The Postgres counterpart of `sqlite_conn.py`, with three differences that are
-worth knowing rather than discovering in production:
+A pool, not a single connection: the HTTP server answers requests from a thread pool and
+the store's TTL sweeper runs on its own thread, so one connection would serialize all of
+them behind a lock.
 
-1. **A pool, not a single connection.** The HTTP server answers requests from a
-   thread pool (`api.py` bridges sync -> async with `asyncio.to_thread`), and the
-   store's TTL sweeper runs on its own thread too. A single connection would
-   serialize all of them behind one lock. LangGraph accepts either, so we hand it
-   a pool and let concurrent turns actually be concurrent.
+One pool for BOTH memory horizons. SQLite uses two files so each is readable and
+deletable on its own; Postgres keeps working memory and agent memory in the same
+database, separated by schema.
 
-2. **One pool for BOTH memory horizons.** SQLite uses two files so each is
-   readable and deletable on its own; Postgres keeps working memory and agent
-   memory in the same database, separated by schema. Sharing the pool is what
-   makes that one database instead of two clients pretending.
-
-3. **Two connection options are mandatory, not stylistic.** `autocommit=True`
-   (otherwise `setup()` never commits its `CREATE TABLE`) and
-   `row_factory=dict_row` (the LangGraph backends read rows by name, so tuple
-   rows fail with `TypeError: tuple indices must be integers`). Both are called
-   out explicitly in the langgraph-checkpoint-postgres README.
+Two connection options are mandatory, not stylistic: `autocommit=True` (otherwise
+`setup()` never commits its `CREATE TABLE`) and `row_factory=dict_row` (the LangGraph
+backends read rows by name).
 """
 
 from __future__ import annotations
@@ -32,12 +24,6 @@ from psycopg_pool import ConnectionPool
 
 logger = logging.getLogger(__name__)
 
-# How long to wait for the database on startup. A container stack boots its
-# services in parallel, so the agent routinely wins the race against Postgres.
-# Waiting here turns the classic first-deployment crash into a few seconds of
-# patience. Compose's `depends_on: service_healthy` already covers the common
-# case; this is the belt to that pair of braces (and it is what protects a
-# managed database that briefly refuses connections during failover).
 _CONNECT_TIMEOUT_S = 30.0
 
 
@@ -45,9 +31,9 @@ _CONNECT_TIMEOUT_S = 30.0
 def get_postgres_pool(url: str, schema: str) -> ConnectionPool:
     """Return the process-wide connection pool, opening it on first use.
 
-    Cached on its arguments so the checkpointer and the store share one pool.
-    The schema (and the pgvector extension) are created if missing, so a blank
-    database becomes a working one without a manual migration step.
+    Cached on its arguments so the checkpointer and the store share one pool. The schema
+    and the pgvector extension are created if missing, so a blank database becomes a
+    working one without a manual migration step.
 
     Args:
         url: Postgres connection string (`postgres://user:pass@host:5432/db`).
@@ -55,14 +41,10 @@ def get_postgres_pool(url: str, schema: str) -> ConnectionPool:
     """
     pool = ConnectionPool(
         url,
-        # Applied to every connection the pool creates, including replacements
-        # for ones dropped by a restart or an idle timeout.
         kwargs={"autocommit": True, "row_factory": dict_row},
         configure=lambda conn: _configure_connection(conn, schema),
         min_size=1,
         max_size=10,
-        # Opening in the constructor is deprecated in psycopg_pool; we open
-        # explicitly below so the wait (and its failure) is ours to control.
         open=False,
     )
     _prepare_database(pool, url, schema)
@@ -74,9 +56,6 @@ def _prepare_database(pool: ConnectionPool, url: str, schema: str) -> None:
     pool.open(wait=True, timeout=_CONNECT_TIMEOUT_S)
 
     with pool.connection() as conn:
-        # `configure` already created the schema for this connection; what is
-        # left is the vector extension, which the long-term store needs for
-        # semantic search over memories.
         conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
 
     logger.info("Postgres memory backend ready (schema=%s)", schema)

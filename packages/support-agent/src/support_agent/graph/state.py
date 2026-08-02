@@ -1,4 +1,4 @@
-"""The graph state: the data that flows through the nodes (Phase 6).
+"""The graph state: the data that flows through the nodes.
 
 `MessagesState` already gives us a `messages` channel with the right reducer
 (new messages are appended, not overwritten). We only add `route`: the decision
@@ -11,8 +11,6 @@ from typing import Literal
 
 from langgraph.graph import MessagesState
 
-# The three branches the router can choose. Kept as a type alias so the router,
-# the state and the conditional edge all agree on the exact same set of values.
 Route = Literal["answer", "support", "escalate"]
 
 
@@ -20,18 +18,6 @@ class SupportState(MessagesState):
     """Conversation state: the message history + the last routing decision."""
 
     route: Route
-    # Set by the `guard_input` node (Phase 12-A): True when the entry guard
-    # refused the message, so the entry conditional edge short-circuits to END.
     input_blocked: bool
-    # Set by `escalate`: a human now owns this case, so the bot must stop
-    # answering on this thread. This is what support platforms call an "agent
-    # takeover", and the word matters: the conversation is NOT paused, it is
-    # REASSIGNED. The customer keeps writing into the same thread; the bot simply
-    # stays quiet instead of blocking the graph (see docs/escalade.md).
     handled_by_human: bool
-    # Set by the `compact` node (R4): a running summary of the turns that no
-    # longer fit verbatim. It lives in the STATE rather than inside `messages`
-    # because it is not something anyone said — attributing it to the customer or
-    # to the agent would corrupt the transcript that `consolidate.py` and the
-    # audit surface both read. Empty on every conversation short enough to fit.
     summary: str

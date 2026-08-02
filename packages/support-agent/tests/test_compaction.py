@@ -1,16 +1,15 @@
 """Tests for context-window compaction (R4).
 
-The five decisions that are OURS here, and that a future edit could quietly undo:
+The five decisions that are OURS here, and that a future edit could undo:
 
     1. below the threshold NOTHING happens — R1 keeps 30 messages verbatim;
     2. the cut NEVER separates a tool call from its results (a provider 400);
     3. an empty summary changes the prompt by exactly ZERO bytes;
-    4. a failed summarization keeps the FULL history — we never drop turns we
-       failed to summarize;
+    4. a failed summarization keeps the FULL history;
     5. compaction replaces the history rather than appending to it.
 
-No network and no API key: the summarizing model is a stub, because what is under
-test is the bookkeeping around the call, not the call.
+No network and no API key: the summarizing model is a stub, because what is under test
+is the bookkeeping around the call, not the call.
 """
 
 from __future__ import annotations
@@ -101,15 +100,12 @@ def test_the_cut_never_orphans_a_tool_result():
         AIMessage(content="You have 14 days.", id="final"),
     ]
     assert len(messages) == 31
-    # Sanity: the naive boundary really is the tool result, so this test would
-    # fail if `_safe_cut` were removed.
     assert isinstance(messages[len(messages) - 2], ToolMessage)
 
     plan = plan_compaction(messages, threshold=30, keep_last=2)
 
     assert not isinstance(plan.keep[0], ToolMessage)
-    assert plan.keep[0].id == "call"  # walked back to the requesting AIMessage
-    # And the summarized block does not end on a dangling tool request either.
+    assert plan.keep[0].id == "call"
     assert plan.summarize[-1].id != "call"
 
 
@@ -168,7 +164,6 @@ def test_the_node_replaces_the_history_and_stores_the_summary():
     update = node({"messages": _chat(31), "summary": ""})
 
     assert update["summary"] == "Customer wants a refund on order 12345."
-    # REMOVE_ALL_MESSAGES first, then the kept tail: a REPLACE, not an append.
     assert isinstance(update["messages"][0], RemoveMessage)
     assert update["messages"][0].id == REMOVE_ALL_MESSAGES
     assert len(update["messages"]) == 11
@@ -228,9 +223,6 @@ def test_the_entry_path_map_can_redirect_router_to_compact():
     builder = StateGraph(dict)
     builder.add_node("compact", compact)
     builder.add_node("router", router)
-    # The real `path_map` declares three destinations, so the graph must offer all
-    # three — which is itself worth knowing: this test uses the production map, not
-    # a lookalike.
     builder.add_node("human_takeover", lambda _s: {})
     builder.add_edge("human_takeover", END)
     builder.add_conditional_edges(START, lambda _s: "router", _entry_paths("compact"))

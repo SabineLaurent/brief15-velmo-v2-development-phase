@@ -1,16 +1,13 @@
-"""The graph nodes (Phase 6): each node is one explicit step of the agent.
-
-We deliberately "open the hood" of the prebuilt `create_agent` here:
+"""The graph nodes: each node is one explicit step of the agent.
 
     router   -> classifies the user's intent into one branch
     answer   -> small talk / greetings: a plain LLM reply, no tools
     model    -> the SUPPORT branch: LLM bound with tools (FAQ + memory)
     tools    -> executes the tool calls (ToolNode), then loops back to `model`
-    escalate -> files the case, mutes the bot, hands off to a human (Phase 7)
+    escalate -> files the case, mutes the bot, hands off to a human
 
-Each node is a small function `(state) -> state update`. Making them explicit is
-the whole point: the routing and the ReAct loop become objects we can read, draw
-and trace in LangSmith, instead of being hidden inside a prebuilt agent.
+Each node is a small function `(state) -> state update`, which keeps the routing and the
+ReAct loop readable, drawable and traceable in LangSmith.
 """
 
 from __future__ import annotations
@@ -48,58 +45,39 @@ from support_agent.memory.episodic import (
 
 logger = logging.getLogger(__name__)
 
-# Last-resort reply shown to the customer when an LLM call fails for good (all
-# retries AND provider fallbacks exhausted). It is the ONE hard-coded user-facing
-# string: with the LLM down we cannot localize it, so we keep it short and in the
-# demo's language (French FAQ). Swap it for a localized/config value in real prod.
 GRACEFUL_ERROR_MESSAGE = (
     "Désolé, je rencontre un problème technique momentané et ne peux pas traiter "
     "votre demande à l'instant. Merci de réessayer dans quelques instants ; si le "
     "problème persiste, un conseiller humain prendra le relais."
 )
 
-# Safety net in the seam (`api.py`): shown if the graph ever comes back PAUSED on
-# an `interrupt()`. No node interrupts today — `escalate` hands off asynchronously
-# (see below) — but the seam's invariant "every path delivers exactly one non-empty
-# chunk" must survive the day a human-approval gate reintroduces one.
 ESCALATION_PENDING_MESSAGE = (
     "Je transmets votre demande à un conseiller humain. Merci de patienter un "
     "instant : il prend le relais dans cette conversation."
 )
 
-# Delivered by `escalate` itself, once the case is filed and a human is on it.
 ESCALATION_HANDOFF_MESSAGE = (
     "J'ai transmis votre demande à un conseiller humain (dossier {ticket_id}). "
     "Il vous répondra dès que possible. Vous pouvez continuer à écrire ici : vos "
     "messages seront joints à ce dossier."
 )
 
-# Delivered on every later turn of a thread a human has taken over. No LLM call:
-# the bot is muted, not thinking. It always states the way back — a handoff is a
-# judgement call, and a wrong one must not confiscate the thread for good.
 HUMAN_TAKEOVER_MESSAGE = (
     "Votre demande est entre les mains d'un conseiller humain. Votre message a "
     "bien été enregistré et lui sera transmis. Si vous avez une autre question "
     "en attendant, répondez « reprendre » et je me remets à votre disposition."
 )
 
-# Confirms the customer took the way back out of the takeover.
 TAKEOVER_RELEASED_MESSAGE = (
     "C'est noté, je reprends la main. Votre dossier reste ouvert auprès du "
     "conseiller. Que puis-je faire pour vous ?"
 )
 
-# The way out, matched deterministically: zero LLM call, zero cost, no way for a
-# classifier to be "creative" about whether the customer really asked. Baseline
-# on purpose — swap in an intent classifier later without touching the node.
 _TAKEOVER_RELEASE_PATTERN = re.compile(
     r"\b(reprendre|reprends|autre question|nouvelle demande|laisse tomber)\b",
     re.IGNORECASE,
 )
 
-# Subject of the ticket opened by an escalation. Stable on purpose: the backend
-# derives the ticket id from its content, so re-running the node with the same
-# customer message cannot open a second ticket.
 ESCALATION_TICKET_SUBJECT = "Handoff to a human advisor"
 
 
@@ -120,7 +98,7 @@ def _with_fallbacks(
     )
 
 
-# --- Input guard (Phase 12-A: the first thing raw customer text hits) ------
+# --- Input guard (the first thing raw customer text hits) ------------------
 
 
 def make_guard_input(guard: InputGuard) -> Callable[[SupportState], dict]:
@@ -142,22 +120,11 @@ def make_guard_input(guard: InputGuard) -> Callable[[SupportState], dict]:
         if last_human is None:
             return {"input_blocked": False}
 
-        # `.text` and not `str(.content)`: on a provider that returns content
-        # BLOCKS the old form handed the moderator a Python repr, so every regex
-        # was scanning `[{'type': 'text', 'text': "..."}]` instead of the
-        # sentence. It did not raise — a guard that silently scans the wrong
-        # string is the worst shape this bug can take.
-        #
-        # ⚠️ Assumed and narrow: masking below replaces the message with a plain
-        # string, so a multimodal message would lose its non-text blocks. That is
-        # the SAFE direction (the guard cannot scan an image, so dropping it is
-        # fail-closed) and today no path sends one.
         decision = guard.check(last_human.text)
 
         if decision.blocked:
             logger.warning("Input guard blocked a message: reason=%s", decision.reason)
             messages: list = []
-            # Drop the offending message so it does not reach the LLM later.
             if last_human.id is not None:
                 messages.append(RemoveMessage(id=last_human.id))
             messages.append(AIMessage(content=decision.user_message or GRACEFUL_ERROR_MESSAGE))
@@ -168,7 +135,6 @@ def make_guard_input(guard: InputGuard) -> Callable[[SupportState], dict]:
             logger.info(
                 "Input guard masked PII: %s", ", ".join(decision.pii_entities)
             )
-        # Overwrite the message in place only if masking actually changed it.
         if decision.sanitized_text != last_human.text and last_human.id is not None:
             updates["messages"] = [
                 HumanMessage(content=decision.sanitized_text, id=last_human.id)
@@ -230,9 +196,6 @@ def make_router(
     model: BaseChatModel, fallbacks: Sequence[BaseChatModel] = ()
 ) -> Callable[[SupportState], dict]:
     """Build the router node: an LLM classification that writes `route` to state."""
-    # Structured output => the LLM must return a valid `RouteDecision`, so we get
-    # a clean enum value instead of parsing free text. Fallbacks are composed at
-    # the leaf (each model gets the SAME structured-output binding, then we chain).
     classifier = _with_fallbacks(
         model.with_structured_output(RouteDecision),
         [m.with_structured_output(RouteDecision) for m in fallbacks],
@@ -244,9 +207,6 @@ def make_router(
             decision: RouteDecision = classifier.invoke(messages)
             return {"route": decision.route}
         except Exception:
-            # Classification is unavailable (LLM down, or unparsable output). Fail
-            # safe to the lightest branch: `answer` will emit a graceful reply if
-            # the LLM is truly down, rather than crashing the whole turn.
             logger.exception("Router classification failed; defaulting to 'answer'.")
             return {"route": "answer"}
 
@@ -274,9 +234,6 @@ def make_answer(
     chain = _with_fallbacks(model, list(fallbacks))
 
     def answer(state: SupportState) -> dict:
-        # R4: on a compacted conversation the early turns are gone from
-        # `messages`; the summary carries them. Appended AFTER the stable prompt,
-        # like the episodic block, to keep the cache prefix intact.
         system_prompt = ANSWER_SYSTEM_PROMPT + format_summary(state.get("summary") or "")
         messages = [SystemMessage(system_prompt), *state["messages"]]
         try:
@@ -338,27 +295,19 @@ def make_support_model(
 ) -> Callable[[SupportState], dict]:
     """Build the support node: the LLM step of the ReAct loop (LLM + tools).
 
-    This node decides whether to answer or to call a tool. The `tools` node runs
-    the calls, then loops back here — that back-and-forth IS the ReAct loop we
-    were getting for free from `create_agent`, now made explicit.
+    Decides whether to answer or to call a tool; the `tools` node runs the calls, then
+    loops back here.
 
-    Runs entirely on the STRONG model. We measured a per-pass cascade (fast model
-    for the tool-decision pass) and it did NOT help TTFT on our Azure deployment —
-    the small model was even slower on the tool-bound decision call, because the
-    cost is the round-trip + long prompt, not the model size. Only the `router`
-    keeps the fast model. See `docs/latence.md`.
+    Runs entirely on the STRONG model. A per-pass cascade (fast model for the tool-
+    decision pass) was measured and did not help TTFT: the cost is the round-trip plus
+    the long prompt, not the model size. Only the router keeps the fast model.
 
-    Episodic memory (Phase 14) is injected HERE rather than offered as a tool,
-    unlike `search_memories`. The two are not the same kind of knowledge:
-    recalling a customer's facts is a decision the model can make (it knows when
-    the customer refers to something past), but recalling "a case like this one"
-    is not — a model that is floundering does not know it should ask for help,
-    which is precisely when a worked example is worth most. So the lookup is
-    unconditional on this branch, and it costs one embedding call, not an LLM
-    round trip. `None` disables it and restores the exact previous behaviour.
+    Episodic memory is injected HERE rather than offered as a tool, unlike
+    `search_memories`. A model that is floundering does not know it should ask for a
+    worked example, which is precisely when one is worth most — so the lookup is
+    unconditional on this branch, and it costs one embedding call rather than an LLM
+    round trip. `None` disables it.
     """
-    # Each model (primary + fallbacks) gets the SAME tools bound, then we chain
-    # them: if the primary provider is down, the fallback answers with tools too.
     model_with_tools = _with_fallbacks(
         model.bind_tools(tools),
         [m.bind_tools(tools) for m in fallbacks],
@@ -366,13 +315,8 @@ def make_support_model(
 
     def support_model(state: SupportState) -> dict:
         system_prompt = SUPPORT_SYSTEM_PROMPT
-        # R4: the compacted early turns. First of the two appended blocks so the
-        # order of the suffix stays stable across turns.
         system_prompt += format_summary(state.get("summary") or "")
         if episodic is not None:
-            # Appended AFTER the stable prompt, never before: this block changes
-            # on every turn, and a variable PREFIX invalidates the provider's
-            # prompt cache each time (see docs/prompt-caching.md).
             system_prompt += episodic.block_for(state["messages"])
         messages = [SystemMessage(system_prompt), *state["messages"]]
         try:
@@ -397,29 +341,19 @@ class EpisodicRecall:
         self._store = store
         self._limit = limit
         self._min_score = min_score
-        # Memo of the last rendered block, keyed by the message it was built for.
         self._memo_key: str | None = None
         self._memo_block: str = ""
 
     def block_for(self, messages: Sequence[object]) -> str:
-        """The few-shot block for the current situation, or "" if there is none.
+        """The few-shot block for the current situation, or empty if there is none.
 
-        The query is the customer's LAST message, not the whole thread: we are
-        matching "what is being asked right now" against "what was happening
-        then". Embedding the full history would drown that signal in small talk.
+        The query is the customer's LAST message, not the whole thread: embedding the
+        full history would drown "what is being asked right now" in small talk.
 
-        **Computed once per customer message, not once per model call.** This node
-        is the LLM step of a ReAct LOOP, so it runs again after every tool result —
-        and the customer's last message has not changed in between. Without the
-        memo below, a turn with one tool call embedded the exact same text twice
-        (measured: 2 of the 3 embedding round trips in a turn were this one call,
-        repeated), and a turn chaining two tools paid it three times. Same input,
-        same output, billed per pass.
-
-        Keyed by message ID rather than text: IDs are unique per message, so the
-        memo self-invalidates on the next turn without a TTL, and a customer
-        repeating themselves word for word still gets a fresh lookup against a
-        pool that may have grown since.
+        Computed once per customer message, not once per model call. This node is the
+        LLM step of a ReAct LOOP, so it runs again after every tool result on input that
+        has not changed. Keyed by message ID rather than text, so the memo self-
+        invalidates on the next turn without a TTL.
         """
         last_human = next(
             (m for m in reversed(messages) if isinstance(m, HumanMessage)), None
@@ -427,11 +361,6 @@ class EpisodicRecall:
         if last_human is None:
             return ""
 
-        # Size-1 memo: the repeated calls we are killing are CONSECUTIVE (one
-        # ReAct loop). Under concurrent turns two conversations can evict each
-        # other, which costs a recomputation — never a wrong block, since the key
-        # must match. Degrading to the previous behaviour is an acceptable worst
-        # case; serving another customer's block would not be.
         key = last_human.id
         if key is not None and self._memo_key == key:
             return self._memo_block
@@ -458,27 +387,15 @@ def make_escalate(
 ) -> Callable[[SupportState, Runtime[AgentContext]], dict]:
     """Build the handoff node: file the case, mute the bot, END THE TURN.
 
-    This node used to call `interrupt()` and leave the graph paused until someone
-    resumed it. That was wrong for two reasons, one fatal:
+    It deliberately does not call `interrupt()`. LangGraph resumes the pending task
+    before anything else, so every later message re-entered this node and interrupted
+    again: the conversation was dead, silently, with no operator console to unblock it.
+    And `interrupt()` means "I must not proceed without a human decision", whereas a
+    handoff has nothing to hold back — its right home is an approval gate before an
+    irreversible action.
 
-    - Fatal: LangGraph resumes the PENDING TASK before anything else, so every
-      later message on the thread re-entered this node and interrupted again. The
-      router was never re-evaluated: the conversation was dead, silently, and no
-      log said so. Nothing could unblock it because no operator console exists.
-    - Conceptual: `interrupt()` means "I must not proceed without a human
-      decision". In a handoff the agent is not about to DO anything — it is
-      passing the case on. There is nothing to hold back.
-
-    What production support platforms do instead: the conversation is a row with a
-    status and an assignee, and escalating REASSIGNS it (bot -> human queue). The
-    customer is never blocked; the bot is muted; a human is notified. That is what
-    this node now does, with the ticket as the durable, listable case object.
-
-    `interrupt()` is not deleted from the project, it is relocated: its right home
-    is an approval gate before an IRREVERSIBLE action (refund, cancellation).
-
-    Idempotent: the ticket id is derived from its content, so re-executing the
-    node with the same customer message cannot open a second ticket.
+    Idempotent: the ticket id is derived from its content, so re-executing the node on
+    the same customer message cannot open a second ticket.
     """
 
     def escalate(state: SupportState, runtime: Runtime[AgentContext]) -> dict:
@@ -492,15 +409,11 @@ def make_escalate(
             "",
         )
         if tool_guard is not None:
-            # Same hygiene as the ticket TOOL: never persist raw PII in a case,
-            # even though `guard_input` already masked the message in place.
             body = tool_guard.sanitize(body)
 
         ticket = backend.create_ticket(
             user_id=user_id, subject=ESCALATION_TICKET_SUBJECT, body=body
         )
-        # Traceable by design: an escalation is a business event, not a silent
-        # branch. This is the line that was missing when the thread died.
         logger.info(
             "Escalated to a human: user=%s ticket=%s", user_id, ticket.ticket_id
         )
@@ -521,19 +434,13 @@ def make_escalate(
 def human_takeover(state: SupportState) -> dict:
     """Acknowledge a message on a thread a human already owns. No LLM call.
 
-    The bot is muted, not thinking: answering here would mean talking over the
-    advisor on their own case. The message itself is kept — it is already in
-    `messages`, hence in the checkpointer, hence readable by whoever picks the
-    case up.
+    Answering here would mean talking over the advisor on their own case. The message is
+    kept in `messages`, hence in the checkpointer, for whoever picks the case up.
 
-    This flag is also what makes a handoff self-limiting: once set, the router is
-    never reached again on this thread, so a customer repeating "I want a human"
-    cannot stack cases.
-
-    But a handoff is a JUDGEMENT, and judgements are wrong sometimes. Muting the
-    bot for good on a mistaken one would confiscate the thread — so the node
-    offers a deterministic way back. Releasing does NOT close the case: the
-    advisor still owns it, the bot merely resumes answering everything else.
+    The flag also makes a handoff self-limiting: the router is never reached again on
+    this thread, so a customer repeating "I want a human" cannot stack cases. A
+    deterministic way back exists, because a handoff is a judgement and judgements are
+    sometimes wrong; releasing does not close the case.
     """
     last_user_message = next(
         (m.text for m in reversed(state["messages"]) if isinstance(m, HumanMessage)),
@@ -548,7 +455,7 @@ def human_takeover(state: SupportState) -> dict:
     return {"messages": [AIMessage(content=HUMAN_TAKEOVER_MESSAGE)]}
 
 
-# --- Output guard (Phase 12-B: the last check before the reply leaves) ------
+# --- Output guard (the last check before the reply leaves) -----------------
 
 
 def make_guard_output(guard: OutputGuard) -> Callable[[SupportState], dict]:
@@ -565,11 +472,9 @@ def make_guard_output(guard: OutputGuard) -> Callable[[SupportState], dict]:
         if not isinstance(last, AIMessage) or last.id is None:
             return {}
 
-        # Same reason as `guard_input`: on a blocks provider, `str(.content)`
-        # made the leak/PII detectors scan a Python repr instead of the reply.
         decision = guard.check(last.text)
         if not decision.replaced and decision.sanitized_text == last.text:
-            return {}  # nothing to change
+            return {}
 
         if decision.replaced:
             logger.warning("Output guard replaced a reply leaking the system prompt.")
@@ -582,44 +487,30 @@ def make_guard_output(guard: OutputGuard) -> Callable[[SupportState], dict]:
     return guard_output
 
 
-# --- Close turn (Phase 14: the write side of episodic memory) ---------------
+# --- Close turn (the write side of episodic memory) ------------------------
 
 
 def make_close_turn(store: BaseStore) -> Callable[[SupportState, RunnableConfig], dict]:
     """Build the last node of every answering path: flag the thread for learning.
 
-    This is the CHEAP half of episodic memory, and the split is the whole design.
-    Distilling a case costs an LLM call, so doing it here would add a third
-    sequential hop to a turn that already takes ~5 s (`docs/latence.md`), and it
-    would distil a fragment: mid-conversation, the outcome is not known yet.
-    What this node writes instead is a marker — one upsert, no embedding, no
-    model — that `memory/consolidate.py` picks up later, once the thread is quiet.
+    The cheap half of episodic memory: one upsert, no embedding, no model. Distilling
+    costs an LLM call, so it runs offline (`memory/consolidate.py`) — doing it here
+    would add a sequential hop to the turn and would distil a fragment whose outcome is
+    not known yet.
 
-    Two filters, both of which decide what the agent is ALLOWED to learn:
-
-    - Only the `support` branch produces candidates. "Bonjour" is not a case, and
-      an episode distilled from small talk would burn prompt space forever.
-    - `resolved` is False as soon as a human owns the thread. An episodic memory
-      that stores its own failures poisons the pool it draws few-shot examples
-      from — the escalation flag is the outcome signal we already have, and it is
-      the same one the deflection rate is measured on.
-
-    The takeover path is recorded rather than skipped ON PURPOSE: a thread that
-    started as support and ended with a handoff already has a candidate row, and
-    this is what flips it to unresolved so consolidation discards it.
+    Two filters decide what the agent is allowed to learn: only the `support` branch
+    produces candidates, and `resolved` is False as soon as a human owns the thread, so
+    the few-shot pool is not poisoned by its own failures. The takeover path is recorded
+    rather than skipped, which is what flips an existing candidate to unresolved.
     """
 
     def close_turn(state: SupportState, config: RunnableConfig) -> dict:
         handled_by_human = bool(state.get("handled_by_human"))
-        # `route` persists in the checkpoint, so on a takeover turn it still holds
-        # the PREVIOUS turn's value — hence the handoff check comes first.
         if not handled_by_human and state.get("route") != "support":
             return {}
 
         thread_id = config.get("configurable", {}).get("thread_id")
         if not thread_id:
-            # No thread id means no conversation to come back to (a bare
-            # `invoke` in a test). Nothing to learn from, nothing to log loudly.
             return {}
 
         record_candidate(

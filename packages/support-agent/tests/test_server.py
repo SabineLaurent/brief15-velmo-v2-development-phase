@@ -1,13 +1,12 @@
 """Tests for the HTTP door (`server.py`) — transport, not agent behaviour.
 
-The agent's thinking is tested elsewhere (`test_api_seam.py` for the seam's
-contract, `test_guardrails.py`, `test_robustness.py`). Here we assert only what
-the web layer owes its callers:
+The agent's thinking is tested elsewhere. Here we assert only what the web layer owes
+its callers:
 
-  - it refuses to boot wide open (fail-closed authentication);
-  - it rejects a caller without the service key;
-  - it emits well-formed SSE, terminated by a `done` event;
-  - an error travels INSIDE the stream, because the status code is long gone.
+    - it refuses to boot wide open (fail-closed authentication);
+    - it rejects a caller without the service key;
+    - it emits well-formed SSE, terminated by a `done` event;
+    - an error travels INSIDE the stream, because the status code is long gone.
 
 The seam is faked throughout: no graph is built, so these run offline.
 """
@@ -36,20 +35,16 @@ def _sse_events(body: str) -> list[dict]:
 
 
 def _use_settings(monkeypatch: pytest.MonkeyPatch, **overrides: object) -> None:
-    """Force the settings the server sees, ignoring the developer's `.env` entirely.
+    """Force the settings the server sees, ignoring the developer's `.env`.
 
-    Environment variables are NOT enough here, and the reason is worth knowing:
-    `config.py` calls `load_dotenv()` at import time, which copies `.env` into
-    `os.environ`. So `monkeypatch.delenv("API_KEY")` does not make the key absent
-    — `.env` already put it there. A test that relied on env vars alone would
-    pass or fail depending on whether the developer had run `make serve` once.
+    Environment variables are not enough: `config.py` calls `load_dotenv()` at import
+    time, so `monkeypatch.delenv("API_KEY")` does not make the key absent. Passing the
+    fields as constructor kwargs wins over both `.env` and the environment, which is the
+    only way to assert "no key configured" for real.
 
-    Passing the fields as constructor kwargs wins over both `.env` and the
-    environment, which is the only way to assert "no key configured" for real.
-
-    Two injection points are needed because the server reads settings two ways:
-    the lifespan calls `get_settings()` directly, while the routes receive it
-    through `Depends`, which resolves the ORIGINAL function object.
+    Two injection points are needed because the server reads settings two ways: the
+    lifespan calls `get_settings()` directly, while the routes receive it through
+    `Depends`, which resolves the ORIGINAL function object.
     """
     settings = Settings(_env_file=None, **overrides)  # type: ignore[call-arg]
     monkeypatch.setattr(server, "get_settings", lambda: settings)

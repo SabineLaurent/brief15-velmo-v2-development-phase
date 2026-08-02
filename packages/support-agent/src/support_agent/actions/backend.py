@@ -1,15 +1,13 @@
-"""The business backend port (Phase 8): where actions actually happen.
+"""The business backend port: where actions actually happen.
 
-Same philosophy as the LLM factory: the agent must stay **agnostic to the
-business project**, not only to the LLM provider. So the action tools never talk
-to a concrete order database or ticketing system directly. They talk to a
-`SupportBackend` — a small interface (a "port") that a real project implements
-with an adapter (REST API, SQL, an internal SDK...).
+Same philosophy as the LLM factory: the agent stays agnostic to the business project,
+not only to the LLM provider. The action tools never talk to a concrete order database
+or ticketing system — they talk to a `SupportBackend`, a small interface a real project
+implements with an adapter (REST API, SQL, an internal SDK).
 
-For the tutorial we ship one adapter: `InMemorySupportBackend`, a fake backend
-with seeded orders and an in-memory ticket list. Plugging in a real system means
-writing another adapter that satisfies the same `Protocol` — no change to the
-tools or the graph, exactly like swapping an LLM provider via `.env`.
+`InMemorySupportBackend` is the zero-setup adapter, with seeded orders and an in-memory
+ticket list. Plugging in a real system means writing another adapter that satisfies the
+same `Protocol`.
 """
 
 from __future__ import annotations
@@ -26,11 +24,11 @@ class OrderStatus:
     """The status of a customer order, as returned by the backend."""
 
     order_id: str
-    owner_id: str  # the user_id this order belongs to (for authorization)
-    status: str  # e.g. "shipped", "processing", "delivered", "cancelled"
+    owner_id: str
+    status: str
     carrier: str | None = None
     tracking_number: str | None = None
-    estimated_delivery: str | None = None  # ISO date, kept as a string for the demo
+    estimated_delivery: str | None = None
 
 
 @dataclass(frozen=True)
@@ -106,17 +104,12 @@ class InMemorySupportBackend:
             self.tickets = _seed_tickets()
 
     def get_order_status(self, order_id: str, user_id: str) -> OrderStatus | None:
-        # Normalise so "cmd-1001", "CMD-1001" and stray spaces all match.
         order = self.orders.get(order_id.strip().upper())
-        # Ownership check: never reveal an order that belongs to someone else.
         if order is None or order.owner_id != user_id:
             return None
         return order
 
     def create_ticket(self, user_id: str, subject: str, body: str) -> Ticket:
-        # Deterministic id from the request content => idempotent: a retry with
-        # the same (user_id, subject, body) yields the same id, so we return the
-        # existing ticket instead of opening a duplicate.
         ticket_id = _ticket_id(user_id, subject, body)
         for existing in self.tickets:
             if existing.ticket_id == ticket_id:
@@ -128,7 +121,6 @@ class InMemorySupportBackend:
         return ticket
 
     def list_tickets(self, user_id: str) -> list[Ticket]:
-        # Ownership scoping, like every other method: only this user's tickets.
         return [t for t in self.tickets if t.user_id == user_id]
 
 
@@ -196,9 +188,6 @@ def _seed_ticket(user_id: str, subject: str, body: str, status: str) -> Ticket:
     )
 
 
-# One shared backend per process, like `get_store()` for memory, and built FROM
-# CONFIG rather than hardcoded — that is what makes the port real: two adapters
-# exist, and `.env` picks one without the tools or the graph changing.
 _BACKEND: SupportBackend | None = None
 
 
@@ -212,8 +201,6 @@ def get_backend() -> SupportBackend:
     if _BACKEND is not None:
         return _BACKEND
 
-    # Imported here to avoid a circular import at module scope: `config` is
-    # cheap, but the SQL adapter imports THIS module for `_ticket_id`.
     from support_agent.config import get_settings
 
     choice = get_settings().support_backend.strip().lower()
@@ -224,9 +211,6 @@ def get_backend() -> SupportBackend:
 
         _BACKEND = SqlSupportBackend.from_path(get_settings().shop_db_path)
     else:
-        # Unknown value = configuration error, not a silent fallback: falling back
-        # to the demo adapter would look like it worked and quietly serve three
-        # fake orders in production.
         raise ValueError(
             f"Unknown SUPPORT_BACKEND '{choice}'. Expected 'memory' or 'sqlite'."
         )

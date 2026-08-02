@@ -1,13 +1,12 @@
 """Relational schema (SQLAlchemy 2) and session factories for the business double.
 
-This is the *merchant's* system, doubled locally: customers, catalogue, orders,
-shipments, returns, refunds, tickets. In production we do NOT own it — we unplug
-this double and call the merchant's API instead (see `database/README.md`). Here
-it lives in a SQLite file so the demo has durable, realistic data.
+The merchant's system, doubled locally: customers, catalogue, orders, shipments,
+returns, refunds, tickets. In production we do NOT own it — we unplug this double and
+call the merchant's API instead.
 
-Ids are human-readable strings (`O-2024-0103`, `C-marc-dubois`, `mu-1999-treble`)
-to make debugging easy. Types are portable: Postgres in production, SQLite on
-disk in development, SQLite in-memory for tests.
+Ids are human-readable strings (`O-2024-0103`, `C-marc-dubois`) to make debugging easy.
+Types are portable: Postgres in production, SQLite on disk in development, SQLite in-
+memory for tests.
 """
 
 from __future__ import annotations

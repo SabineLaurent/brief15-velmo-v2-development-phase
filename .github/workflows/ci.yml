@@ -1,76 +1,35 @@
 # CI — la garde du dépôt : ce qui doit rester vrai à chaque push.
 #
-# Chantier 3quater de TODO_priorities.md. Deux jobs, deux questions :
-#   · `check`  — CI-1, LA GARDE : le code fait-il ce qu'on a écrit ?
-#   · `images` — CI-2 : l'artefact qu'on déploiera démarre-t-il, en amd64 ?
+#   · `check`  — le code fait-il ce qu'on a écrit ?
+#   · `images` — l'artefact qu'on déploiera démarre-t-il, en amd64 ?
 #
-# ⚠️ Correction du 2026-07-31 : ce fichier annonçait que TOUTE la moitié
-# « image » attendait l'étape 5 et son ACR. C'était une confusion entre
-# CONSTRUIRE et PUBLIER. Construire en amd64 et vérifier ce qu'on a construit ne
-# demande ni registre ni secret — seul le PUSH sur l'ACR en demande. La moitié
-# vérifiable a donc été faite tout de suite ; la publication (CI-3) reste à
-# l'étape 5. Détail : docs/plan-deploiement-2026-07-25.md, étape 5.
-#
-# 📌 Règle à tenir quand ce second workflow arrivera : la GARDE tourne partout
-# (toute branche), la PUBLICATION ne tourne que sur `main`. Vérifier est gratuit
-# et doit être omniprésent ; pousser une image sur le registre de prod est un
-# effet de bord, et il n'a rien à faire depuis une branche de feature.
-#
-# ⭐ Ce que cette CI garde : la mécanique DÉTERMINISTE — factory LLM, guardrails,
-# couture, serveur HTTP, persistance. C'est-à-dire tout ce qui doit se comporter
-# pareil à chaque exécution.
-#
-# ⚠️ Ce qu'elle ne garde PAS, volontairement : la QUALITÉ des réponses du modèle.
-# Les 7 cas de test_eval.py se skippent d'eux-mêmes faute de credentials sur le
-# runner (`_has_llm_credentials`), et c'est le bon comportement : ce sont des
-# évaluations non déterministes — un même cas peut passer puis échouer sans qu'une
-# ligne bouge (« flaky », cf. docs/glossaire.md). Leur place est dans LangSmith via
-# `make eval`, où on lit des TAUX, pas dans une gate binaire. Y brancher une clé LLM
-# en secret GitHub importerait cette instabilité dans la garde — et le premier
-# réflexe appris serait « c'est encore lui, relance », ce qui tue la CI.
-#
-# ⭐ `make score` (chantier 3, MLOps) OBÉIT À CETTE MÊME DOCTRINE, il ne l'assouplit
-# pas. Il note l'agent et refuse la livraison sous le seuil — mais par DÉFAUT il ne
-# note que les deux dimensions déterministes (mémoire 12/12, garde-fous 35/35),
-# calculées sans LLM ni réseau. La dimension QUALITÉ reste hors de la garde : elle
-# a besoin de `--live`, donc d'une clé, donc elle appartient au second étage.
-# C'est ce qui permet de satisfaire les deux demandes du brief à la fois —
-# « blocage sous le seuil » ET « sans bloquer pour du bruit » (reco_expert.md:25).
-# Détail des six décisions : TODO_priorities.md §Chantier 7.
+# Ce que cette CI garde : la mécanique DÉTERMINISTE (factory LLM, garde-fous,
+# couture, serveur HTTP, persistance). Ce qu'elle ne garde pas, volontairement :
+# la QUALITÉ des réponses du modèle. Les cas de `test_eval.py` se skippent faute
+# de credentials sur le runner, et c'est le bon comportement — des évaluations non
+# déterministes n'ont pas leur place dans une gate binaire. `make score` obéit à
+# la même doctrine : par défaut il ne note que les dimensions déterministes,
+# calculées sans LLM ni réseau.
 
 name: CI
 
-# Le modèle de branches du projet : `feature` → `dev` → `main`.
-#   feature  la branche de travail en cours
-#   dev      l'intégration : on y fusionne la feature dès qu'elle est prête
-#   main     la mise en production
-#
-# La garde doit donc mordre AUX DEUX ENDROITS, et pour deux raisons distinctes.
 on:
-  # 1) Sur TOUTES les branches, feature comprise. C'est le retour le plus utile :
-  #    il arrive pendant que tu écris, pas au moment de fusionner. Une CI qui ne
-  #    parle qu'au merge découvre les problèmes quand ils coûtent le plus cher.
+  # Sur toutes les branches : le retour arrive pendant qu'on écrit, pas au merge.
   push:
     branches: ["**"]
 
-  # 2) Sur les PR visant `dev` et `main` — et ce n'est PAS un doublon du point 1.
-  #    Un push teste TA branche telle quelle. Une PR teste le RÉSULTAT DE LA
-  #    FUSION (GitHub construit un merge commit head+base). Si `dev` a avancé
-  #    pendant que tu travaillais, la fusion peut casser alors que les deux
-  #    branches sont vertes séparément — un conflit sémantique, invisible à git.
-  #    C'est exactement le risque du point de passage feature → dev.
+  # Sur les PR visant `dev` et `main` — pas un doublon : un push teste la branche
+  # telle quelle, une PR teste le RÉSULTAT DE LA FUSION. Si la base a avancé, la
+  # fusion peut casser alors que les deux branches sont vertes séparément.
   pull_request:
     branches: [dev, main]
 
-# Un seul run utile par branche : un nouveau push annule celui encore en cours.
-# Sans ça, trois commits rapprochés font tourner trois fois la même vérification,
-# et c'est le dernier qui compte de toute façon.
+# Un seul run utile par branche : un nouveau push annule celui en cours.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Moindre privilège : ce workflow LIT le dépôt et n'écrit rien. Sans ce bloc, le
-# token fourni au job peut être bien plus permissif selon les réglages du compte.
+# Moindre privilège : ce workflow lit le dépôt et n'écrit rien.
 permissions:
   contents: read
 
@@ -80,27 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # ⭐ Un Postgres JETABLE, le temps du job — chantier 8 de TODO_priorities.md.
+    # Un Postgres jetable, le temps du job : la dimension MÉMOIRE doit être notée
+    # sur le moteur de production, pas seulement sur SQLite. R3 est l'isolation
+    # entre clients, et la requête de similarité qui pourrait ramener la ligne du
+    # voisin appartient au store (sqlite-vec ⇄ pgvector), pas à nous.
     #
-    # Le problème qu'il règle : la dimension MÉMOIRE était notée sur SQLite, et
-    # seulement là. « Mémoire 12/12 » était donc vrai — sur le mauvais moteur. Or
-    # R3, c'est l'ISOLATION ENTRE CLIENTS, une propriété de sécurité. Ce qui sépare
-    # deux clients, `memories_namespace(user_id)`, est à nous et commun aux deux
-    # moteurs ; mais la REQUÊTE DE SIMILARITÉ qui pourrait ramener la ligne du
-    # voisin appartient au store — sqlite-vec d'un côté, pgvector de l'autre. La
-    # moitié non partagée n'était vérifiée nulle part automatiquement : une fois à
-    # la main, à l'étape 3 du déploiement, et plus jamais depuis.
-    #
-    # ⚠️ `pgvector/pgvector`, PAS `postgres` : l'image officielle n'embarque pas
-    # l'extension `vector`, et le store long terme ne peut pas s'en passer. Même
-    # image que `compose.yaml`, pour que la CI et la pile locale exercent le même
-    # moteur — deux versions différentes, et le vert de l'une ne dit plus rien de
-    # l'autre.
-    #
-    # Le `options` n'est pas décoratif : sans healthcheck, GitHub démarre les
-    # steps dès que le CONTENEUR tourne, pas quand Postgres accepte les
-    # connexions. C'est le piège classique — un premier test qui échoue sur un
-    # « connection refused » d'une base qui sera prête 2 secondes plus tard.
+    # `pgvector/pgvector`, pas `postgres` : l'image officielle n'embarque pas
+    # l'extension `vector`. Même image que `compose.yaml`. Le healthcheck n'est
+    # pas décoratif — sans lui, les steps démarrent dès que le conteneur tourne,
+    # pas quand Postgres accepte les connexions.
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -116,132 +63,84 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-    # La base que l'ÉVALUATION peut noter. Volontairement PAS `DATABASE_URL` :
-    # celle-là configure l'application, et un `make score` qui créerait — et
-    # SUPPRIMERAIT — des schémas dans la base configurée d'une développeuse serait
-    # un piège. Ce nom-ci veut dire « oui, note aussi sur ce Postgres-là »
-    # (`eval/offline.py`, `EVAL_DATABASE_URL_ENV`).
+    # Volontairement PAS `DATABASE_URL` : celle-là configure l'application, et un
+    # `make score` qui créerait — et supprimerait — des schémas dans la base
+    # configurée d'une développeuse serait un piège.
     env:
       EVAL_DATABASE_URL: postgres://agent:agent@localhost:5432/agent
 
     steps:
-      # 📌 Chaque action est référencée COMME SA PROPRE DOC le prescrit, et les deux
-      # ne prescrivent pas la même chose. Ce n'est pas une incohérence, c'est le
-      # résultat d'une panne : le premier run de cette CI a échoué sur
-      # `setup-uv@v9` — « unable to find version v9 ». La release v9.0.0 existe
-      # bel et bien ; c'est le TAG MAJEUR MOBILE `v9` qui n'était pas publié.
-      # Leçon : l'existence d'une release ne garantit pas celle du tag court.
-      #
-      #   · actions/checkout  → tag `v7`, exactement l'exemple de son README
-      #     (action first-party, tags majeurs mobiles maintenus).
-      #   · astral-sh/setup-uv → SHA complet + version en commentaire, ce que son
-      #     README fait dans TOUS ses exemples. Un SHA est immuable : il ne peut
-      #     ni disparaître ni être repointé par son auteur.
-      #
-      # ⚠️ Contrepartie du SHA, à assumer : aucune mise à jour automatique. Le
-      # commentaire de version est donc obligatoire — sans lui, plus personne ne
-      # sait à quoi ce SHA correspond. (v9.0.0 de setup-uv est sorti ; on bumpera
-      # quand sa doc l'aura adopté, pas avant de pouvoir le vérifier.)
+      # Chaque action est référencée comme sa propre doc le prescrit :
+      #   · actions/checkout   → tag majeur mobile, maintenu.
+      #   · astral-sh/setup-uv → SHA complet + version en commentaire. Un SHA est
+      #     immuable, mais il n'y a plus de mise à jour automatique — d'où le
+      #     commentaire de version, obligatoire.
       - uses: actions/checkout@v7
 
       - name: Installer uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
-          # La version CIBLE du projet (CLAUDE.md), pas « celle du runner ». Le
-          # runner en embarque plusieurs ; laisser le hasard choisir reviendrait à
-          # tester une version que personne ne fait tourner.
+          # La version cible du projet, pas « celle du runner ».
           python-version: "3.12"
-          # Cache de uv, invalidé par le lockfile : les dépendances ne se
-          # retéléchargent que quand elles changent vraiment.
           enable-cache: true
           cache-dependency-glob: uv.lock
 
-      # `--locked` ÉCHOUE si uv.lock n'est plus cohérent avec les pyproject.toml.
-      # C'est un contrôle à part entière, pas une précaution : en local, `uv run`
-      # re-résout en silence, donc un `uv add` non commité passe inaperçu — et
-      # casserait le build de l'image, où `uv sync --frozen` n'a pas ce luxe.
-      # Rien d'autre n'est ajouté ici : la CI installe EXACTEMENT ce que
-      # `make install` installe sur ta machine.
+      # `--locked` échoue si uv.lock n'est plus cohérent avec les pyproject.toml.
+      # En local `uv run` re-résout en silence, donc un `uv add` non commité
+      # passerait inaperçu — et casserait le build de l'image, où
+      # `uv sync --frozen` n'a pas ce luxe.
       - name: Installer les dépendances (verrouillées)
         run: uv sync --locked
 
-      # Porte d'entrée unique (CLAUDE.md) : la CI lance exactement la commande que
-      # tu lances en local. Si les deux divergent, le vert de la CI ne veut plus
-      # rien dire pour toi — et ton vert local ne veut plus rien dire pour elle.
+      # Porte d'entrée unique : la CI lance exactement la commande qu'on lance en
+      # local. Si les deux divergent, aucun des deux verts ne veut plus rien dire.
       - name: make check (ruff + pytest)
         run: make check
 
-      # La porte de QUALITÉ, après la porte de MÉCANIQUE — et dans cet ordre, parce
-      # qu'un test cassé doit se lire comme un test cassé, pas comme une note qui
-      # chute. `make check` dit « le code fait ce qu'on a écrit » ; `make score` dit
-      # « et il le fait assez bien pour être livré ».
+      # La porte de QUALITÉ après celle de MÉCANIQUE, dans cet ordre : un test
+      # cassé doit se lire comme un test cassé, pas comme une note qui chute.
       #
-      # Sort en 1 si un plancher dur est franchi (une dimension déterministe qui
-      # n'est pas parfaite) ou si une dimension régresse de plus d'un cas contre
-      # `data/eval-baseline.json`. Le rapport part sous `database/` (gitignoré) :
-      # c'est une sortie de run, pas une source.
-      #
-      # ⭐ `--require-postgres` : la quatrième porte, et la seule qui ne regarde pas
-      # un CHIFFRE. Les trois autres lisent une note — or une note ne peut pas
-      # s'apercevoir qu'elle a été calculée sur la moitié des moteurs. Sans ce
-      # drapeau, un service `postgres` qui n'aurait pas démarré (ou un
-      # `EVAL_DATABASE_URL` mal orthographié) donnerait un 12/12 vert qui couvre
-      # deux fois moins qu'il n'en a l'air. En local, sans base, `make score` reste
-      # utilisable : il note SQLite et le rapport DIT que Postgres n'a pas tourné.
+      # `--require-postgres` est la seule porte qui ne regarde pas un chiffre :
+      # une note ne peut pas s'apercevoir qu'elle a été calculée sur la moitié des
+      # moteurs. Sans ce drapeau, un service `postgres` qui n'aurait pas démarré
+      # donnerait un 12/12 vert couvrant deux fois moins qu'il n'en a l'air.
       - name: make score (note + seuil bloquant, Postgres exigé)
         run: make score ARGS=--require-postgres
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # CI-2 — les IMAGES : elles se construisent en amd64, et elles tiennent leurs
-  # promesses. (TODO_priorities.md §Chantier 3quater.)
-  # ───────────────────────────────────────────────────────────────────────────
   images:
     name: images (amd64) — découplage + démarrage
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
-    # ⭐ PAS de `needs: check`, et c'est un choix. Les deux jobs répondent à deux
-    # questions indépendantes — « le code fait-il ce qu'on a écrit ? » et
-    # « l'artefact qu'on déploie démarre-t-il ? » — et aucune n'est un prérequis
-    # de l'autre. Les enchaîner ne ferait qu'ajouter l'attente de la première à
-    # la réponse de la seconde, alors qu'un test rouge et une image cassée se
-    # corrigent de toute façon séparément.
+    # Pas de `needs: check` : les deux jobs répondent à deux questions
+    # indépendantes, et aucune n'est un prérequis de l'autre.
 
     steps:
       - uses: actions/checkout@v7
 
       # Le script est en stdlib pure et `make docker-smoke` l'invoque en
-      # `--no-project` : uv sert d'interpréteur, il n'y a AUCUN `uv sync` ici.
-      # Ce job n'installe pas le projet — il ne teste que ce qui est dans les
-      # images, ce qui est précisément son intérêt.
+      # `--no-project` : aucun `uv sync` ici. Ce job ne teste que ce qui est dans
+      # les images, ce qui est précisément son intérêt.
       - name: Installer uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           python-version: "3.12"
 
-      # ⭐ POURQUOI ce job existe, et pourquoi il ne peut pas se faire en local :
-      # la machine de dev est **arm64**, App Service Linux exécute du
-      # **linux/amd64**. Une image arm64 poussée sur Azure ne démarre pas, et
-      # l'échec arrive au DÉPLOIEMENT, pas au build — au pire endroit possible.
-      # Ici le runner EST amd64 : `--platform` y est un no-op, et c'est très bien.
-      # Ce qui compte est que le build et le démarrage aient lieu sur la vraie
-      # architecture cible. Le drapeau rend l'exigence explicite le jour où le
-      # runner change (GitHub propose désormais de l'arm64).
+      # Ce job ne peut pas se faire en local : la machine de dev est arm64, la
+      # cible exécute du linux/amd64, et une image arm64 échoue au DÉPLOIEMENT,
+      # pas au build. Le runner étant amd64, `--platform` y est un no-op — mais il
+      # rend l'exigence explicite le jour où le runner change.
       #
-      # ⚠️ Aucun cache de build (pas de `cache-from: type=gha`) : l'utiliser
-      # imposerait `docker buildx build --cache-…`, donc une commande DIFFÉRENTE
-      # de celle du Makefile — et le jour où les deux divergent, le vert de la CI
-      # ne dit plus rien de `make docker-smoke` en local. On paie quelques minutes
-      # pour garder une porte d'entrée unique (CLAUDE.md).
+      # Aucun cache de build : l'utiliser imposerait une commande différente de
+      # celle du Makefile, et le vert de la CI ne dirait plus rien de
+      # `make docker-smoke` en local.
       #
-      # Ce que le script assère ensuite, et que personne ne vérifiait plus depuis
-      # l'étape 4 du déploiement (à la main, une fois) :
-      #   1. l'image du client ne contient NI `support_agent`, NI `langchain`,
-      #      NI `langchain_core`, NI `langgraph` — la preuve du découplage ;
+      # Ce que le script assère :
+      #   1. l'image du client ne contient ni `support_agent`, ni `langchain`,
+      #      ni `langchain_core`, ni `langgraph` — la preuve du découplage ;
       #   2. l'image de l'agent démarre pour de vrai : elle refuse de servir sans
       #      clé (fail-closed), s'échauffe, et `/health` + `/ready` répondent.
       # Aucun secret : l'unique dépendance réseau du démarrage (les embeddings)
-      # est servie par un stub local. C'est ce qui permet à cette garde de tourner
-      # sur chaque branche, comme le reste de la CI.
+      # est servie par un stub local.
       - name: make docker-smoke (build amd64 + vérification des deux images)
         run: make docker-smoke PLATFORM=linux/amd64

@@ -1,18 +1,14 @@
 """Short-term (conversation) memory: the checkpointer factory.
 
-A *checkpointer* persists the agent's state after every step, keyed by
-`thread_id`. Replaying the same `thread_id` continues the same conversation —
-that is what "the agent remembers the discussion" concretely means.
+A *checkpointer* persists the agent's state after every step, keyed by `thread_id`.
+Replaying the same `thread_id` continues the same conversation.
 
-The backend is a config choice (`PERSISTENCE_BACKEND`), same agnostic idea as
-the LLM factory:
+The backend is a config choice (`PERSISTENCE_BACKEND`), same agnostic idea as the LLM
+factory — switching is a `.env` change, not a code change:
 
-    "memory"  ->  InMemorySaver: fast, zero-setup, but lost when the process exits
-    "sqlite"  ->  SqliteSaver:   durable on disk, survives a restart
-
+    "memory"   ->  InMemorySaver: zero-setup, lost when the process exits
+    "sqlite"   ->  SqliteSaver:   durable on disk, survives a restart
     "postgres" ->  PostgresSaver: durable on a server, the deployment target
-
-Switching backend is a `.env` change, not a code change.
 """
 
 from __future__ import annotations
@@ -41,9 +37,6 @@ def get_checkpointer(settings: Settings | None = None) -> BaseCheckpointSaver:
     if backend == "sqlite":
         from langgraph.checkpoint.sqlite import SqliteSaver
 
-        # We own the connection (kept open for the process lifetime), so we build
-        # the saver directly instead of using the `from_conn_string` context
-        # manager. `setup()` creates the checkpoint tables on first use.
         saver = SqliteSaver(open_sqlite_connection(settings.working_memory_db_path))
         saver.setup()
         return saver
@@ -51,16 +44,12 @@ def get_checkpointer(settings: Settings | None = None) -> BaseCheckpointSaver:
     if backend == "postgres":
         from langgraph.checkpoint.postgres import PostgresSaver
 
-        # Same shape as the SQLite branch, and that is the whole point: the
-        # graph never learns which one it got. `from_conn_string` is a context
-        # manager (it closes the connection on exit), so — exactly as in SQLite —
-        # we own the connection instead, here a pool shared with the store.
         pool = get_postgres_pool(
             require_database_url(settings.database_url),
             settings.database_schema,
         )
         saver = PostgresSaver(pool)
-        saver.setup()  # creates the checkpoint tables on first use
+        saver.setup()
         return saver
 
     raise ValueError(

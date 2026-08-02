@@ -1,6 +1,6 @@
 """Agentic long-term memory: tools the agent calls to remember its users.
 
-Same philosophy as agentic RAG (Phase 4): the model DECIDES when to act. Here it
+Same philosophy as agentic RAG: the model DECIDES when to act. Here it
 decides when a fact is worth storing for the long run, and when to recall past
 facts to stay consistent from one session to the next.
 
@@ -23,8 +23,6 @@ from support_agent.memory.privacy import forget_user_memories
 
 logger = logging.getLogger(__name__)
 
-# Shared with `privacy.py` so the tools and the audit/erasure surface can never
-# read different namespaces (see `memories_namespace`).
 _namespace = memories_namespace
 
 
@@ -33,21 +31,17 @@ def build_memory_tools(
 ) -> list[BaseTool]:
     """Build the long-term memory tools: save, search, and FORGET.
 
-    The third one is what makes the right to be forgotten (R5) reachable from the
-    conversation itself — "oublie mon numéro de commande" is a customer request,
-    not a back-office ticket, so the agent must be able to honour it in the turn.
-    The operator-side surface (audit dump, full art. 17 erasure) lives in
+    The third one makes the right to be forgotten (R5) reachable from the conversation
+    itself; the operator-side surface (audit dump, full art. 17 erasure) lives in
     `memory/privacy.py`.
 
     Args:
-        tool_guard: Optional Phase 12-C hardening applied to `save_memory` before
-            it PERSISTS (field validation + PII masking, so raw PII is never
-            written to the durable store). `None` disables it.
+        tool_guard: Optional hardening applied to `save_memory` before it PERSISTS
+            (field validation + PII masking, so raw PII is never written to the
+            durable store). `None` disables it.
         forget_min_score: the similarity a stored fact must reach before
-            `forget_memory` may delete it. The default mirrors `forget_min_score`
-            in `config.py`; the graph passes the configured value. It is a knob
-            because cosine similarity is not comparable across embedding models —
-            the measurement behind the default is recorded in `config.py`.
+            `forget_memory` may delete it. A knob rather than a constant, because
+            cosine similarity is not comparable across embedding models.
     """
 
     @tool
@@ -62,14 +56,12 @@ def build_memory_tools(
         store = runtime.store
         user_id = runtime.context.user_id
 
-        # Phase 12-C: validate and strip PII BEFORE persisting to the durable store.
         if tool_guard is not None:
             error = tool_guard.validate_field(text, field_name="memory")
             if error is not None:
                 return error
             text = tool_guard.sanitize(text)
 
-        # Random key: each memory is a new entry, we never overwrite blindly.
         store.put(_namespace(user_id), str(uuid.uuid4()), {"text": text})
         return f"Saved memory: {text}"
 
@@ -110,8 +102,6 @@ def build_memory_tools(
                 store, user_id, what, min_score=forget_min_score
             )
         except RuntimeError as error:
-            # `forget_user_memories` raises when a row survived its deletion. The
-            # customer must NOT be told their data is gone in that case.
             logger.exception("Unverified deletion for user=%s", user_id)
             return (
                 "I could not confirm the deletion, so I will not claim it worked. "
@@ -124,8 +114,6 @@ def build_memory_tools(
                 "Tell the customer you hold no such information rather than "
                 "confirming a deletion."
             )
-        # Echo the deleted text back so the model can be specific with the
-        # customer — this is the conversational half of R5's "verifiable".
         lines = "\n".join(f"- {record.text}" for record in deleted)
         return f"Deleted {len(deleted)} memory(ies), verified gone:\n{lines}"
 

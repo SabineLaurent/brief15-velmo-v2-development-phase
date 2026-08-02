@@ -1,14 +1,13 @@
-"""Business actions layer (Phase 8): tools that DO something.
+"""Business actions layer: tools that DO something.
 
     backend -> the `SupportBackend` port + the in-memory demo adapter
     sql/    -> the SQL business double (schema + seed + `SqlSupportBackend`)
     tools   -> get_order_status / create_ticket, acting through the backend
 
-The point of the port is agnosticism to the business project: swap the adapter
-to plug the agent into a real order service or ticketing system, without
-touching the tools or the graph. `SUPPORT_BACKEND` in `.env` picks which adapter
-`get_backend()` returns — the two shipped here prove the port is real rather
-than decorative.
+The point of the port is agnosticism to the business project: swap the adapter to plug
+the agent into a real order service or ticketing system, without touching the tools or
+the graph. `SUPPORT_BACKEND` picks which adapter `get_backend()` returns — the two
+shipped here prove the port is real rather than decorative.
 """
 
 from support_agent.actions.backend import (

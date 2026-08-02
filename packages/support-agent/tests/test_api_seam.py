@@ -1,17 +1,15 @@
 """Contract tests for the API seam (`api.stream_reply`).
 
-Why these exist at all: commit 519f254 fixed two real customer-visible bugs (the
-output guard was bypassed in streaming, and escalation delivered an EMPTY bubble)
-and established the invariant that HOLDS both fixes in place:
+They hold the invariant that keeps two customer-visible bugs fixed — the output guard
+being bypassed in streaming, and escalation delivering an empty bubble:
 
     every path yields EXACTLY ONE non-empty chunk
 
-...and it shipped with zero assertions. The rule lived only in prose, so the next
-refactor could quietly undo it. These tests are that rule, executable.
+The rule shipped in prose only, so the next refactor could quietly undo it.
 
-Pure UNIT tests, like `test_robustness.py`: the graph is replaced by a fake whose
-`invoke` returns a crafted terminal state. No credentials, no network, no vector
-store — we are testing the SEAM's reading of the state, not the agent's thinking.
+Pure UNIT tests: the graph is replaced by a fake whose `invoke` returns a crafted
+terminal state. We are testing the seam's reading of the state, not the agent's
+thinking.
 """
 
 from __future__ import annotations
@@ -55,8 +53,6 @@ def _collect(result: dict | Exception) -> list[str]:
     original = api.get_agent
     api.get_agent = lambda: _FakeAgent(result)  # type: ignore[assignment]
     try:
-        # `asyncio.run` rather than pytest-asyncio: one fewer dev dependency, and
-        # the seam's contract is about what it yields, not about the loop.
         return asyncio.run(_run())
     finally:
         api.get_agent = original  # type: ignore[assignment]

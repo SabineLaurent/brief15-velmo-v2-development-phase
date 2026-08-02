@@ -1,31 +1,23 @@
 """The OFFLINE half of the evaluation: run the acceptance corpora with no LLM.
 
-Chantier 3 needs two different things from the same corpora, and this module is
-what keeps them honest about each other:
+Two kinds of consumer need the same corpora, and this module is what keeps them honest
+about each other:
 
-    tests/test_moderation.py       ASSERT  — rich diagnostics, one case per test
-    tests/test_memory_cases.py     ASSERT  — three ways of looking at a deletion
-    eval/mlops.py                  COUNT   — pass/fail per case, aggregated
+    tests/test_moderation.py     ASSERT  — rich diagnostics, one case per test
+    tests/test_memory_cases.py   ASSERT  — three ways of looking at a deletion
+    eval/mlops.py                COUNT   — pass/fail per case, aggregated
 
-The tests are the SPEC: they say what "correct" means, case by case, and they
-fail with enough context to debug. The scorer here is a COUNTER: it must never
-raise, it turns each case into a boolean, and `mlops.py` averages the booleans
-into a dimension score. Two consumers, one implementation of the plumbing —
-otherwise the fake embeddings, the 30-turn padding and the deletion floor would
-exist twice and could drift apart, and a drifting scorer reports a number that no
-test defends.
-
-The divergence risk is closed from the other end too: `tests/test_mlops.py`
-asserts that both deterministic dimensions score a PERFECT 12/12 and 35/35, and
-`mlops.HARD_FLOORS` blocks delivery below that. So if a predicate here ever stops
-matching what the assertions mean, the score drops and CI goes red — it cannot
-quietly report a pass.
+The tests are the SPEC: they say what "correct" means, case by case. The scorer here is
+a COUNTER that must never raise. One implementation of the plumbing, otherwise the fake
+embeddings, the 30-turn padding and the deletion floor would exist twice and could drift
+apart — and a drifting scorer reports a number no test defends. `tests/test_mlops.py`
+closes the risk from the other end by asserting both deterministic dimensions score
+perfectly.
 
 Everything here is offline BY CONSTRUCTION: no provider, no key, no network. The
-embeddings are a deterministic bag-of-words over the corpus's own vocabulary, and
-the durable engines are a temporary directory of SQLite files plus — when one is
-offered — a real Postgres (see `MemoryEngine`). That is what makes this the half
-that can gate a CI run (see `docs/ci.md`).
+embeddings are a deterministic bag-of-words over the corpus's own vocabulary, and the
+durable engines are a temporary directory of SQLite files plus — when one is offered — a
+real Postgres.
 """
 
 from __future__ import annotations
@@ -66,24 +58,12 @@ from support_agent.memory.short_term import get_checkpointer
 
 logger = logging.getLogger(__name__)
 
-# Every (url, schema) this harness has caused a Postgres pool to be opened for.
-# Needed because `lru_cache` exposes no keys, and `close_eval_pools` has to know
-# what to hand back to itself in order to close it.
 _opened_postgres_pools: set[tuple[str, str]] = set()
 
-# R1's own number: the requirement is "hold a 30-turn conversation", and the
-# corpus's scripted conversations are 2-3 turns long. Replaying them alone would
-# assert that a graph can hold a list, so every R1 case is padded past this.
 R1_MIN_TURNS = 30
 
-# The floor for the destructive R5 path. Passed explicitly, never defaulted: the
-# production value is calibrated per embeddings model (`forget_min_score` in
-# config.py), so inheriting it would make the score move for reasons unrelated to
-# the code under test.
 FORGET_FLOOR = 0.5
 
-# Vocabulary for the fake embeddings, taken from the corpus's own wording. Kept
-# small and readable so a failure is diagnosable by eye.
 VOCAB = (
     "taille",
     "clubs",
@@ -110,8 +90,6 @@ class FakeEmbeddings(Embeddings):
     def _one(text: str) -> list[float]:
         lowered = text.lower()
         vector = [float(lowered.count(word)) for word in VOCAB]
-        # A zero vector has no direction: cosine similarity would be NaN and the
-        # ranking would depend on float luck. Neutral means equidistant.
         return vector if any(vector) else [1.0] * len(VOCAB)
 
 
@@ -144,40 +122,12 @@ def _fake_embeddings() -> Iterator[None]:
 
 
 # --- The engines the durable half of the corpus is scored against -------------
-#
-# WHY THIS IS NOT ONE HARD-CODED BACKEND. Until this existed, the memory
-# dimension was computed with `persistence_backend="sqlite"`, full stop. So
-# "mémoire 12/12" was true — ON SQLITE. Production is a single Postgres with
-# pgvector (`docs/architecture-cible-2026-07-25.md`), and R3 is not a convenience
-# feature: it is the ISOLATION BETWEEN CUSTOMERS, a security property. What keeps
-# two customers apart is `memories_namespace(user_id)` — our code, shared by both
-# engines — but the SIMILARITY QUERY that could hand back somebody else's row
-# belongs to the store (sqlite-vec here, pgvector there). That half was exercised
-# once, by hand, at step 3 of the deployment, and by nothing since.
-#
-# So an engine is a `PERSISTENCE_BACKEND` value plus wherever its data goes, and
-# the corpus is scored once PER ENGINE. Chantier 8 of `TODO_priorities.md`.
 
 SQLITE = "sqlite"
 POSTGRES = "postgres"
 
-# The opt-in for the Postgres pass. Read from the environment DIRECTLY, and
-# deliberately NOT a `Settings` field, for two reasons that both matter:
-#
-#   * `offline_settings` exists so that a score never depends on the developer's
-#     `.env` (see its docstring). A field would put the scorer's own input back
-#     on exactly that path.
-#   * The application never connects to "the evaluation database". Reusing
-#     `DATABASE_URL` would mean `make score` creating — and DROPPING — schemas in
-#     whatever database a developer happens to have configured. A separate name
-#     makes the Postgres pass something you ASK for.
 EVAL_DATABASE_URL_ENV = "EVAL_DATABASE_URL"
 
-# The schemas this harness owns, and may therefore destroy. The prefix IS the
-# safety argument: `purge_eval_schemas` deletes by `LIKE '<prefix>%'`, so it can
-# only ever reach namespaces it created itself. Two prefixes because the scorer
-# and the test suite must not share a slot — `make check` and `make score` are
-# separate processes and nothing orders them.
 SCORE_SCHEMA_PREFIX = "eval_score_"
 TEST_SCHEMA_PREFIX = "eval_test_"
 
@@ -191,15 +141,14 @@ def eval_postgres_url() -> str | None:
 class MemoryEngine:
     """One durable backend, handing out one isolated SLOT per corpus case.
 
-    A slot is "the storage this case gets to itself": a pair of SQLite files, or
-    a Postgres schema. Sharing storage between cases would let one case's facts
-    satisfy another's recall — and R3, whose entire job is to prove that does NOT
-    happen, would then pass by accident.
+    A slot is the storage a case gets to itself: a pair of SQLite files, or a Postgres
+    schema. Sharing storage between cases would let one case's facts satisfy another's
+    recall, and R3 — whose entire job is to prove that does NOT happen — would then pass
+    by accident.
 
-    Both factories (`get_store`, `get_checkpointer`) are the REAL ones: the
-    backend switch, the index config and `setup()` are the code under test. Only
-    the embeddings are faked, because the alternative is a network call and a
-    credential.
+    Both factories are the REAL ones: the backend switch, the index config and `setup()`
+    are the code under test. Only the embeddings are faked, because the alternative is a
+    network call and a credential.
     """
 
     backend: str
@@ -263,62 +212,26 @@ class MemoryEngine:
 def purge_eval_schemas(url: str, prefix: str) -> None:
     """RESET the schemas this harness owns, and make pgvector reachable from them.
 
-    Two jobs. The order matters, and so does the fact that job 1 **re-creates**
-    what it drops — both details were paid for in measured bugs.
+    Reset, not merely drop, and the re-creation is the load-bearing half.
+    `get_postgres_pool` is `lru_cache`d, so a second call for the same schema is a cache
+    hit and nothing recreates it. A bare `DROP` therefore left every cached pool
+    pointing at a schema that no longer existed — and Postgres silently ignores a
+    missing entry in `search_path`, so the next `setup()` created its tables in
+    `public`. Two `run_eval()` calls in one process then collapsed every slot into
+    `public` and still scored full marks: the per-case isolation was gone and nothing
+    said so.
 
-    1. **Reset, not merely drop.** A score has to be reproducible. SQLite gets
-       that for free (a fresh temporary directory per run); Postgres is a server
-       that remembers, so a corpus that lost a case — or an embeddings model of a
-       different width — would leave rows and a `vector(N)` column behind, and the
-       next run would fail, or worse pass, for reasons unrelated to the code.
-
-       The schema is then created again immediately, and that is what makes this
-       function safe to call MORE THAN ONCE in a process. `get_postgres_pool` is
-       `lru_cache`d: a second call for the same schema is a CACHE HIT, so
-       `configure` never re-runs and nothing recreates the schema. A bare `DROP`
-       therefore left every cached pool pointing at a schema that no longer
-       existed — and Postgres **silently ignores** a missing entry in
-       `search_path`, so the next `setup()` created its tables in `public`
-       instead. Measured on 2026-07-30: two `run_eval()` calls in one process
-       (exactly what `tests/test_mlops.py` does through its two fixtures)
-       collapsed all eleven slots into `public`, and the corpus still scored
-       24/24 — the per-case isolation was gone and nothing said so. The corpus
-       passed only because `memories_namespace(user_id)` was carrying the
-       isolation on its own, which is precisely the "passing for the wrong
-       reason" this chantier exists to stop.
-
-    2. **THEN make `vector` resolvable.** `CREATE EXTENSION IF NOT EXISTS` matches
-       by NAME across the whole database, so it is a no-op when the extension
-       already sits in someone else's schema — and it does **not** relocate it.
-       Two ways that bites: `get_postgres_pool` creates the extension with
-       `search_path` already pointing at its own schema (so an application that
-       booted first parks pgvector in `DATABASE_SCHEMA`), or job 1 just dropped
-       the schema that held it. Either way the eval schemas then die at `setup()`
-       with `type "vector" does not exist` — measured, with `EVAL_DATABASE_URL`
-       aimed at a database the app had already initialised.
-
-       `public` is on the `search_path` of EVERY backend here
-       (`postgres_conn._configure_connection`), so moving the extension there
-       makes it resolvable for us *and* for the application — never less.
+    Then make `vector` resolvable. `CREATE EXTENSION IF NOT EXISTS` matches by NAME
+    across the whole database, so it is a no-op when the extension already sits in
+    someone else's schema, and it does not relocate it — after which the eval schemas
+    die at `setup()` with `type "vector" does not exist`. `public` is on the
+    `search_path` of every backend here, so moving the extension there makes it
+    resolvable for us and for the application alike.
     """
-    # Local import: hand-written DDL belongs to this path only — everything else
-    # goes through the shared pool in `memory/postgres_conn.py`.
     import psycopg
     from psycopg import sql
 
     with psycopg.connect(url, autocommit=True) as conn:
-        # `pg_namespace`, not `information_schema.schemata`: the latter only shows
-        # schemas the current role OWNS, so a run under a different user would see
-        # an empty list and report "nothing stale" about schemas that are very much
-        # still there. A cleanup that silently cleans nothing is the failure mode
-        # to avoid here.
-        #
-        # And `left(nspname, n) = prefix`, NOT `LIKE prefix || '%'`: `_` is a
-        # single-character WILDCARD in `LIKE`, and both prefixes end in one. The
-        # pattern `eval_score_%` therefore also matched `eval_scores` and
-        # `eval_scoreboard` — schemas this harness never created, dropped with
-        # CASCADE. A prefix comparison is what the safety argument above actually
-        # needs, so it is what the query does.
         stale = conn.execute(
             "SELECT nspname FROM pg_catalog.pg_namespace WHERE left(nspname, %s) = %s",
             (len(prefix), prefix),
@@ -347,25 +260,18 @@ def purge_eval_schemas(url: str, prefix: str) -> None:
 def close_eval_pools() -> None:
     """Close every pool this harness opened, and forget the cache.
 
-    `get_postgres_pool` is `lru_cache`d and closes nothing — right for an
-    application process (one pool, held for its lifetime), wrong for a harness
-    that opens one per corpus case. Without this, a pytest session holds a pool,
-    and its background worker threads, for every case it scored: it grows with
-    the corpus and would hit `too many clients` on a wider one.
+    `get_postgres_pool` is `lru_cache`d and closes nothing — right for an application
+    process holding one pool for its lifetime, wrong for a harness that opens one per
+    corpus case.
 
-    ⚠️ `lru_cache` cannot forget ONE entry, so this is all-or-nothing: it must
-    only be called when nothing still holds a store or checkpointer it intends to
-    use. Both call sites satisfy that — the end of `score_memory`, where the
-    stores are local and discarded, and a pytest session teardown. Clearing the
-    cache (rather than leaving closed pools in it) is the load-bearing half: a
-    cached pool that has been closed would be handed to the next caller as if it
-    were live.
+    `lru_cache` cannot forget ONE entry, so this is all-or-nothing: call it only when
+    nothing still holds a store or checkpointer it intends to use. Clearing the cache,
+    rather than leaving closed pools in it, is what stops a closed pool from being
+    handed to the next caller as if it were live.
     """
     if not _opened_postgres_pools:
         return
     for url, schema in sorted(_opened_postgres_pools):
-        # A cache HIT — this hands back the existing pool rather than opening one
-        # just to close it.
         get_postgres_pool(url, schema).close()
     _opened_postgres_pools.clear()
     get_postgres_pool.cache_clear()
@@ -376,22 +282,18 @@ def memory_engines(
 ) -> tuple[MemoryEngine, ...]:
     """The engines to score the memory corpus against, in order.
 
-    SQLite always: it needs nothing but a temporary directory, so the corpus is
-    never left unscored. Postgres only when a URL is offered — `make score` on a
-    laptop must not require a database, and a laptop without one still gets its
-    12 cases plus a report that SAYS Postgres was not exercised (`write_report`).
-    That last part is the whole difference between a known gap and a blind spot;
-    `--require-postgres` is how CI refuses the gap.
+    SQLite always: it needs nothing but a temporary directory, so the corpus is never
+    left unscored. Postgres only when a URL is offered, so `make score` on a laptop does
+    not require a database — and the report SAYS Postgres was not exercised, which is
+    the whole difference between a known gap and a blind spot. `--require-postgres` is
+    how CI refuses the gap.
 
-    A Postgres that is configured but unreachable makes the run FAIL, loudly, and
-    is deliberately not turned into twelve failed cases: an infrastructure
-    problem that reads as "the agent lost its memory" is the worse diagnosis.
+    A Postgres that is configured but unreachable makes the run FAIL loudly, rather than
+    turning an infrastructure problem into twelve failed cases.
     """
     engines = [MemoryEngine(SQLITE, workdir)]
     url = database_url or eval_postgres_url()
     if url:
-        # Here and nowhere else: this is the one moment in a run that is
-        # guaranteed to be before the first pool exists (see `purge_eval_schemas`).
         purge_eval_schemas(url, SCORE_SCHEMA_PREFIX)
         engines.append(MemoryEngine(POSTGRES, workdir, database_url=url))
     return tuple(engines)
@@ -443,13 +345,12 @@ def replay_conversation(case: dict[str, Any], checkpointer: Any, *, pad_to: int)
 def resume_history(checkpointer: BaseCheckpointSaver, config: dict) -> list[Any]:
     """Read a fil back through a graph that never wrote it.
 
-    `get_state` on the graph that just ran would be satisfied by anything the
-    saver happens to hold in memory. A brand-new graph, over a brand-new saver
-    object on the same storage, is what "the fil survived the process" actually
-    means — the same reasoning as R5's `gone_from_disk`.
+    `get_state` on the graph that just ran would be satisfied by anything the saver
+    happens to hold in memory. A brand-new graph, over a brand-new saver object on the
+    same storage, is what "the fil survived the process" actually means.
 
-    Returns `[]` rather than raising when nothing was persisted: that is a real
-    R1 failure with a real detail line, not a crashed scorer.
+    Returns `[]` rather than raising when nothing was persisted: that is a real R1
+    failure with a real detail line, not a crashed scorer.
     """
 
     def noop(state: MessagesState) -> dict:
@@ -479,9 +380,9 @@ class CaseResult:
 class CorpusRun:
     """The outcome of scoring one corpus: the cases, plus the measured signals.
 
-    `signals` carries what the brief asks the REPORT to show and a bare score
+    `signals` carries what the REPORT has to show and a bare score
     cannot express — a blocking rate is not a false-positive rate, and an average
-    of the two hides both (`docs/brief/tests-reference/test_mlops.py`).
+    of the two hides both.
     """
 
     results: tuple[CaseResult, ...]
@@ -497,8 +398,6 @@ class CorpusRun:
 
     @property
     def score(self) -> float:
-        # An empty corpus scores 0, never 1: "nothing ran" must not read as "all
-        # good" — that is how a broken loader turns into a green delivery.
         return self.passed / self.total if self.results else 0.0
 
     @property
@@ -506,36 +405,31 @@ class CorpusRun:
         return tuple(result for result in self.results if not result.passed)
 
 
-# --- Chantier 2: the guardrail dimension ------------------------------------
+# --- The guardrail dimension ------------------------------------------------
 
 
 def score_guardrails(*, enabled: bool = True) -> CorpusRun:
     """Score the 35-case guardrail corpus. Deterministic, offline.
 
-    `enabled=False` is the DEGRADED agent of the regression test, and it is not a
-    test double: `GUARDRAILS_ENABLED=false` is a real production switch, whose
-    documented meaning is "the graph is wired exactly as before, with no guard
-    node at all". The offline equivalent of "no guard node" is no guard, so that
-    is what this builds. The starter had to hand-write an `AllowAllGuardrails`
-    class for this; here the kill switch already is the degradation, which makes
-    the regression test measure something that can actually happen in production.
+    `enabled=False` is the DEGRADED agent of the regression test, and not a test double:
+    it is a real production switch whose documented meaning is "the graph is wired
+    exactly as before, with no guard node at all". So the regression test measures
+    something that can actually happen in production.
 
     Three regimes, because the corpus mixes three kinds of expectation:
 
-      * hostile input      -> must be blocked
-      * legitimate input   -> must NOT be blocked (12 cases, and they carry as
-                              much weight as the hostile ones: a filter that
-                              blocks everything scores perfectly on hate and
-                              destroys the product)
-      * output case        -> must not ship as-is (redacted or replaced)
+        hostile input     -> must be blocked
+        legitimate input  -> must NOT be blocked (12 cases, carrying as much weight
+                             as the hostile ones: a filter that blocks everything
+                             scores perfectly on hate and destroys the product)
+        output case       -> must not ship as-is (redacted or replaced)
 
-    Plus the ARGUED DEVIATION: the 5 `out_of_scope` cases, which this project
-    deliberately lets through (`DELIBERATELY_NOT_BLOCKED`). Scoring them as
-    "must block" would cap this dimension at 30/35 forever, and a dimension that
-    can never reach its floor cannot gate anything. They are therefore scored as
-    "must reach the agent" — the same predicate `test_moderation.py` asserts —
-    and counted in `signals["deviations"]` so the report states out loud that 5
-    of the starter's criteria were reinterpreted rather than met.
+    Plus the argued deviation: the 5 `out_of_scope` cases this project deliberately lets
+    through. Scoring them as "must block" would cap the dimension at 30/35 forever, and
+    a dimension that can never reach its floor cannot gate anything. They are scored as
+    "must reach the agent" — the same predicate the tests assert — and counted in the
+    deviations signal, so the report states out loud that 5 criteria were reinterpreted
+    rather than met.
     """
     guard = build_input_guard(offline_settings().guardrails_max_input_chars) if enabled else None
     out_guard = build_output_guard([]) if enabled else None
@@ -602,7 +496,7 @@ def score_guardrails(*, enabled: bool = True) -> CorpusRun:
     )
 
 
-# --- Chantier 1: the memory dimension ---------------------------------------
+# --- The memory dimension ---------------------------------------------------
 
 
 def _check_r1(case: dict[str, Any], engine: MemoryEngine, slot: str) -> CaseResult:
@@ -610,14 +504,10 @@ def _check_r1(case: dict[str, Any], engine: MemoryEngine, slot: str) -> CaseResu
     _, config, turns = replay_conversation(
         case, engine.checkpointer(slot), pad_to=R1_MIN_TURNS
     )
-    # A second saver over the same storage: the fil must live in the ENGINE, not
-    # in the object that wrote it.
     history = resume_history(engine.checkpointer(slot), config)
 
     expected = case["evaluation"]["expected_substring"]
     held = any(expected in message.text for message in history)
-    # The turn count is part of the requirement, not decoration: recalling a fact
-    # from a 3-turn conversation does not answer R1.
     long_enough = turns >= R1_MIN_TURNS and len(history) == 2 * turns
     passed = held and long_enough
     return CaseResult(
@@ -701,7 +591,6 @@ def _check_r5(case: dict[str, Any], engine: MemoryEngine, slot: str) -> CaseResu
     user_id = case["user_id"]
     forbidden = case["evaluation"]["forbidden_substring"]
 
-    # It really was there — otherwise everything below passes on an empty store.
     if not any(forbidden in record.text for record in list_user_memories(store, user_id)):
         return CaseResult(case["id"], False, f"{forbidden!r} was never stored")
 
@@ -740,17 +629,15 @@ MEMORY_TAGS = ("R1", "R2", "R3", "R5")
 def _score_one_engine(engine: MemoryEngine) -> list[CaseResult]:
     """Run the whole 12-case corpus against ONE engine.
 
-    Each tag is scored against the mechanism that actually implements it — the
-    one adaptation this port makes, and the same one `test_memory_cases.py`
-    documents:
+    Each tag is scored against the mechanism that actually implements it:
 
         R1  ->  the CHECKPOINTER, keyed by thread_id  (nothing dropped, no search)
         R2  ->  the STORE,        keyed by user_id    (durable, survives a restart)
         R3  ->  `memories_namespace`                  (one user cannot reach another)
         R5  ->  `forget_user_memories`                (deleted, and verified deleted)
 
-    One slot per case (`r1-0`, `r2-1`, …), the R3 pair excepted: sharing storage
-    across cases would let one case's facts satisfy another's recall.
+    One slot per case, the R3 pair excepted: sharing storage across cases would let one
+    case's facts satisfy another's recall.
     """
     results: list[CaseResult] = []
     for index, case in enumerate(load_memory_cases("R1")):
@@ -768,18 +655,15 @@ def score_memory(
 ) -> CorpusRun:
     """Score the 12-case memory corpus, ONCE PER ENGINE. Deterministic, offline.
 
-    The corpus is the same on every engine; what changes underneath is the thing
-    that actually stores and searches the memories. So the dimension counts
-    `12 × len(engines)` cases, and that is the honest total rather than an
-    inflation: on Postgres these twelve cases exercise pgvector's similarity
-    query and `PostgresSaver`'s round trip, neither of which SQLite can vouch for.
-    See `memory_engines` for when the second pass happens.
+    The corpus is the same on every engine; what changes underneath is the thing that
+    actually stores and searches the memories. So the dimension counts `12 ×
+    len(engines)` cases — the honest total rather than an inflation: on Postgres these
+    twelve cases exercise pgvector's similarity query and `PostgresSaver`'s round trip,
+    neither of which SQLite can vouch for.
 
-    Two signals exist purely so the number cannot be read as more than it is —
-    `engines`, and one `<backend>_rate` per engine. `write_report` turns a missing
-    `postgres_rate` into a warning printed next to the note, because a memory
-    score that silently means "on SQLite only" is the defect this chantier closes,
-    not a defect it is allowed to reproduce.
+    Two signals exist purely so the number cannot be read as more than it is: `engines`,
+    and one rate per engine. A missing Postgres rate becomes a warning printed next to
+    the note.
     """
     engines = tuple(engines) if engines is not None else memory_engines(workdir)
 
@@ -788,9 +672,6 @@ def score_memory(
     try:
         for engine in engines:
             rows = [
-                # The engine is part of a case's IDENTITY, not a detail of it:
-                # without the suffix the report would list `R3-01` twice and never
-                # say which store leaked.
                 replace(row, case_id=f"{row.case_id}@{engine.backend}")
                 for row in _score_one_engine(engine)
             ]
@@ -799,10 +680,6 @@ def score_memory(
             )
             results.extend(rows)
     finally:
-        # One pool per slot is fine for the length of a scoring run and wrong to
-        # keep afterwards — `run_eval` is called twice in a single pytest process,
-        # and a caller may score repeatedly. In a `finally` so a raising engine
-        # (an unreachable database) does not leak its connections either.
         close_eval_pools()
 
     by_tag = {
@@ -814,9 +691,6 @@ def score_memory(
         for tag in MEMORY_TAGS
     }
     signals = {
-        # Per-requirement rates: "the memory score is 0.83" does not say WHICH
-        # requirement of the cahier des charges is failing, and that is the only
-        # thing worth knowing when it drops.
         f"{tag}_rate": (
             sum(1 for r in results if r.case_id in ids and r.passed) / len(ids) if ids else 0.0
         )

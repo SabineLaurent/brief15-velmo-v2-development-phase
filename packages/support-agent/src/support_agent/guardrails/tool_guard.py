@@ -1,18 +1,17 @@
-"""Tool-boundary guardrails (Phase 12-C: side effects & persistence).
+"""Tool-boundary guardrails: side effects and persistence.
 
-The input/output guards protect the CONVERSATION boundary. This one protects the
-TOOL boundary — where the agent writes to the business backend and to durable
-long-term memory. Tool arguments are LLM-generated from what the customer says,
-so they can carry PII or be abused. `ToolGuard` gives the write tools three cheap,
-deterministic protections:
+The input/output guards protect the CONVERSATION boundary; this one protects the TOOL
+boundary, where the agent writes to the business backend and to durable long-term
+memory. Tool arguments are LLM-generated from what the customer says, so they can carry
+PII or be abused:
 
     validate_field  -> cap field length (abuse / cost on the backend)
-    sanitize        -> mask PII BEFORE it is persisted (never store a raw PAN)
-    allow_action    -> per-key rate limit on side-effecting actions (anti-abuse)
+    sanitize        -> mask PII BEFORE it is persisted
+    allow_action    -> per-key rate limit on side-effecting actions
 
-Agnostic, like the rest: it reuses the `PIIDetector` port. The rate limiter is
-in-process (fine for a single-process demo); a real deployment swaps it for a
-shared/durable limiter (e.g. Redis) — the tool code would not change.
+Agnostic like the rest: it reuses the `PIIDetector` port. The rate limiter is in-
+process, which is fine for a single-process demo; a real deployment swaps it for a
+shared, durable one without the tool code changing.
 """
 
 from __future__ import annotations
@@ -46,7 +45,6 @@ class RateLimiter:
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         hits = self._hits[key]
-        # Drop timestamps that fell out of the trailing window.
         cutoff = now - self.window_seconds
         while hits and hits[0] < cutoff:
             hits.popleft()

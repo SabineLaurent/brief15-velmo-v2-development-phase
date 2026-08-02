@@ -1,25 +1,22 @@
 """Isolation (R3), the right to be forgotten (R5) and traceability (R6).
 
-What is worth asserting here is not "the store can delete a row" — that is
-LangGraph's job. It is the six decisions that are OURS, and that a future edit
-could quietly undo, each of which turns a privacy guarantee into a lie if it
-breaks:
+Not "the store can delete a row" — that is LangGraph's job — but the six decisions that
+are OURS, each of which turns a privacy guarantee into a lie if it breaks:
 
-    1. an audit dump is COMPLETE (it pages; it does not stop at the store default);
-    2. a semantic RECALL cannot reach another customer's facts, even when theirs
-       is the better match and even when the query asks for them by name;
+    1. an audit dump is COMPLETE (it pages past the store default);
+    2. a semantic RECALL cannot reach another customer's facts, even when
+       theirs is the better match and the query asks for them by name;
     3. one customer's erasure never touches another's data;
     4. a deletion is VERIFIED by reading back, and fails loudly when it is not;
     5. a WEAK semantic match is never deleted — guessing destroys the wrong fact;
     6. "nothing matched" is reported as such, never as a successful deletion.
 
 Point 2 was verified the only way an isolation test can be trusted: by breaking
-`memories_namespace` so it ignores the `user_id`, confirming all three recall
-tests go red, and restoring it. An isolation test that has never been seen to
-fail is a comment with a `def` in front of it.
+`memories_namespace` so it ignores the `user_id`, confirming all three recall tests go
+red, and restoring it.
 
-The embeddings are faked with a deterministic bag-of-words so the semantic search
-really runs (no network, no API key, no flakiness).
+The embeddings are faked with a deterministic bag-of-words so the semantic search really
+runs.
 """
 
 from __future__ import annotations
@@ -37,13 +34,8 @@ from support_agent.memory.privacy import (
     search_user_memories,
 )
 
-# The floor these tests exercise. Passed EXPLICITLY everywhere below rather than
-# relying on a default: the production value is calibrated per embeddings model
-# (`forget_min_score` in config.py), so a test that inherited it would start
-# passing or failing for reasons that have nothing to do with the code under test.
 _FLOOR = 0.5
 
-# Three words are enough to make similarity meaningful AND readable in a failure.
 _VOCAB = ("order", "address", "language")
 
 
@@ -53,8 +45,6 @@ def _fake_embed(texts: list[str]) -> list[list[float]]:
     for text in texts:
         lowered = text.lower()
         vector = [float(lowered.count(word)) for word in _VOCAB]
-        # A zero vector has no direction: cosine similarity would be NaN and the
-        # ranking would depend on float luck. Neutral means equidistant.
         vectors.append(vector if any(vector) else [1.0, 1.0, 1.0])
     return vectors
 
@@ -101,7 +91,6 @@ def test_audit_dump_carries_the_write_timestamps():
 
     assert record.created_at is not None
     assert record.updated_at is not None
-    # The rendering is what an operator actually reads, so it is part of the API.
     assert "k1" in str(record) and "Prefers French" in str(record)
 
 
@@ -121,15 +110,6 @@ def test_audit_dump_survives_a_malformed_row():
 
 
 # --- R3: isolation on the READ path ----------------------------------------
-#
-# The requirement is "la mémoire d'un utilisateur n'est jamais accessible à un
-# autre", and RECALL is where that is tested for real. Erasure isolation (below)
-# proves the namespace scopes a listing; these two prove it scopes a *semantic
-# search*, which is the operation the agent performs on every support turn.
-#
-# Both are built adversarially: the other customer's fact is written to be the
-# BETTER match for the query, so if namespace scoping ever stopped working, the
-# leaked row would rank FIRST rather than hide at the bottom of the results.
 
 
 def test_a_semantic_search_cannot_reach_another_customers_facts():
@@ -238,7 +218,7 @@ def test_a_deletion_that_did_not_happen_raises_instead_of_reporting_success():
 
     class DeafStore(InMemoryStore):
         def delete(self, namespace, key):  # noqa: D102 - test double
-            pass  # accepts the order, does nothing
+            pass
 
     store = DeafStore(index={"embed": _fake_embed, "dims": len(_VOCAB), "fields": ["text"]})
     _remember(store, "alice", "a1", "Order number 12345")
@@ -271,21 +251,17 @@ def test_a_weak_match_is_never_deleted():
     store = _store()
     _remember(store, "alice", "a1", "The order reference is 12345")
 
-    # Nothing stored is about a language preference. The closest row still comes
-    # back from the vector search — it always does — but below the floor.
     deleted = forget_user_memories(store, "alice", "language", min_score=_FLOOR)
 
     assert deleted == []
     assert len(list_user_memories(store, "alice")) == 1
-    # Guard the premise of this test: if the fake embeddings ever made this a
-    # strong match, the assertion above would pass for the wrong reason.
     (match,) = search_user_memories(store, "alice", "language", limit=1)
     assert match.score is not None and match.score < _FLOOR
 
 
 def test_forget_refuses_to_guess_when_the_store_has_no_vector_index():
     """No index means no score, so there is no similarity to judge — delete nothing."""
-    store = InMemoryStore()  # deliberately unindexed
+    store = InMemoryStore()
     _remember(store, "alice", "a1", "The order reference is 12345")
 
     assert forget_user_memories(store, "alice", "order", min_score=_FLOOR) == []

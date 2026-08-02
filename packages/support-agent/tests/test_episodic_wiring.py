@@ -1,15 +1,14 @@
-"""Episodic memory in the graph (Phase 14-B/C/D): the loop, end to end, offline.
+"""Episodic memory in the graph: the loop, end to end, offline.
 
-`test_episodic_memory.py` covers the store side. This file covers the two places
-where episodic memory touches the running agent, plus the offline job that joins
-them:
+`test_episodic_memory.py` covers the store side. This file covers the two places where
+episodic memory touches the running agent, plus the offline job that joins them:
 
     read  ->  the support prompt grows a few-shot block, AFTER the stable part
     write ->  `close_turn` flags the thread, with no model and no embedding
     join  ->  `consolidate` turns quiet, RESOLVED threads into episodes
 
-No provider key, no network: the chat model and the compiled graph are stubs,
-because what is under test is our wiring, not LangChain's.
+No provider key, no network: the chat model and the compiled graph are stubs, because
+what is under test is our wiring, not LangChain's.
 """
 
 from __future__ import annotations
@@ -39,8 +38,6 @@ from support_agent.memory.episodic import (
 _VOCAB = ("delivery", "refund", "invoice")
 
 
-# Counts embedding calls, so a test can assert on COST, not only on output. In
-# production each of these is a network round trip to the embeddings provider.
 _EMBED_CALLS = {"n": 0}
 
 
@@ -128,7 +125,7 @@ def test_cold_store_leaves_the_support_prompt_byte_for_byte_identical(
     store: InMemoryStore,
 ) -> None:
     """The day episodic memory is empty (day one, and after every purge) the
-    agent must behave EXACTLY as it did before Phase 14 — same prompt, same
+    agent must behave EXACTLY as it did before episodic memory — same prompt, same
     cache key, same tokens billed."""
     assert _system_prompt_seen(store, "where is my delivery?") == SUPPORT_SYSTEM_PROMPT
 
@@ -175,8 +172,8 @@ def test_recall_is_computed_once_per_message_not_once_per_model_call(
     embeds_after_first = _EMBED_CALLS["n"]
     second = recall.block_for([message, AIMessage(content="checking…")])
 
-    assert second == first  # the block itself is unchanged...
-    assert _EMBED_CALLS["n"] == embeds_after_first  # ...and cost nothing to reuse
+    assert second == first
+    assert _EMBED_CALLS["n"] == embeds_after_first
 
 
 def test_a_new_message_gets_a_fresh_lookup(store: InMemoryStore) -> None:
@@ -238,7 +235,7 @@ def test_a_handoff_flips_the_candidate_to_unresolved(store: InMemoryStore) -> No
     close_turn({"messages": [], "route": "support", "handled_by_human": True}, _CONFIG)
 
     rows = store.search(CANDIDATES_NAMESPACE, limit=10)
-    assert len(rows) == 1  # still ONE row: same thread, same key
+    assert len(rows) == 1
     assert rows[0].value["resolved"] is False
 
 
@@ -314,8 +311,8 @@ def test_dry_run_reports_without_spending_a_single_llm_call(
     report = _run(store, _FakeGraph({"t-1": _thread()}), write=False)
 
     assert report.distilled == 1
-    assert store.search(EPISODES_NAMESPACE, limit=10) == []  # nothing written
-    assert len(store.search(CANDIDATES_NAMESPACE, limit=10)) == 1  # nothing consumed
+    assert store.search(EPISODES_NAMESPACE, limit=10) == []
+    assert len(store.search(CANDIDATES_NAMESPACE, limit=10)) == 1
 
 
 def test_a_resolved_thread_becomes_an_episode(
@@ -330,7 +327,6 @@ def test_a_resolved_thread_becomes_an_episode(
 
     assert report.distilled == 1
     assert len(store.search(EPISODES_NAMESPACE, limit=10)) == 1
-    # The candidate is consumed, so a second run cannot duplicate the episode.
     assert store.search(CANDIDATES_NAMESPACE, limit=10) == []
 
 
@@ -347,7 +343,7 @@ def test_an_escalated_thread_is_dropped_never_taught(
     )
 
     assert report.skipped_unresolved == 1
-    assert model.calls == 0  # not even read: no LLM spent on a failed case
+    assert model.calls == 0
     assert store.search(EPISODES_NAMESPACE, limit=10) == []
     assert store.search(CANDIDATES_NAMESPACE, limit=10) == []
 
@@ -383,7 +379,7 @@ def test_a_provider_outage_leaves_the_candidate_for_the_next_run(
         store,
         _FakeGraph({"t-1": _thread()}),
         write=True,
-        model=_StructuredModel(None),  # provider down
+        model=_StructuredModel(None),
         monkeypatch=monkeypatch,
     )
 

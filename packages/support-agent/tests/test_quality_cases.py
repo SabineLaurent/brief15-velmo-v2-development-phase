@@ -1,29 +1,19 @@
-"""Chantier 3: the starter's 8 quality cases, run through the eval harness.
+"""The 8 quality cases, run through the eval harness.
 
-`data/eval/quality_cases.jsonl` asks eight ordinary support questions and states
-the FACT each answer must carry — a price, a delay, a return window, a carrier.
-They go through `make_target()` and `ALL_EVALUATORS`, the same harness as
-`test_eval.py`, so a case that regresses fails `make check` exactly like a case
-from `EVAL_CASES`.
+`data/eval/quality_cases.jsonl` asks eight ordinary support questions and states the
+FACT each answer must carry — a price, a delay, a return window, a carrier. They go
+through `make_target()` and `ALL_EVALUATORS`, so a case that regresses fails `make
+check` exactly like a case from `EVAL_CASES`.
 
-Two things this module has to arrange that `test_eval.py` does not:
-
-1. **The SQL business double.** The corpus speaks the shop's id convention
-   (`O-2024-0101`, `C-marc-dubois`), which is `SUPPORT_BACKEND=sqlite`, whereas
-   `EVAL_CASES` pins the in-memory adapter's (`CMD-1001`). The default is NOT
-   flipped — that warning in `packages/support-agent/CLAUDE.md` stands. Instead
-   this module seeds a throwaway shop under `tmp_path` and switches the backend
-   for its own duration, which is also the first time the eval harness is
-   exercised against the *other* adapter. That is a bonus, not an accident: it
-   proves the port is neutral where it matters, on a real agent run.
-
-2. **`q-stock` is not in the run.** The business port has no availability
-   capability, so the case has nothing to read. It is named in
-   `UNSUPPORTED_QUALITY_CASES` and pinned by a structural test below rather than
-   quietly dropped.
+Two things this module arranges that `test_eval.py` does not. The corpus speaks the SQL
+shop's id convention, so it seeds a throwaway shop under `tmp_path` and switches
+`SUPPORT_BACKEND` for its own duration rather than flipping the default — which also
+exercises the eval harness against the other adapter. And `q-stock` is not in the run:
+the business port has no availability capability, so the case is named in
+`UNSUPPORTED_QUALITY_CASES` and pinned by a structural test rather than quietly dropped.
 
 INTEGRATION tests: they drive the real graph against a real provider, so they are
-skipped when no credentials are configured — a fresh clone must not fail here.
+skipped when no credentials are configured.
 """
 
 from __future__ import annotations
@@ -45,7 +35,6 @@ from support_agent.eval.evaluators import ALL_EVALUATORS
 from support_agent.eval.run import make_target
 from support_agent.graph import build_support_graph
 
-# Same credential probe as `test_eval.py`.
 _PROVIDER_KEY_ENV = {
     "mistral": "MISTRAL_API_KEY",
     "groq": "GROQ_API_KEY",
@@ -70,14 +59,12 @@ _CASES = load_quality_cases()
 def test_stock_availability_is_not_in_the_business_port() -> None:
     """Why `q-stock` is excluded, asserted instead of asserted-in-a-comment.
 
-    The port is order lookup + ticket creation + ticket listing. Nothing reads
-    stock, so "le maillot om-1993 en taille L est-il disponible ?" cannot be
-    answered from data — and the corpus's expected token, `disponible`, is a word
-    a refusal contains too ("n'est pas disponible"), so scoring it as a substring
-    would pass on the opposite of the intended answer.
+    The port is order lookup, ticket creation and ticket listing. Nothing reads stock,
+    and the corpus's expected token `disponible` is a word a refusal contains too, so
+    scoring it as a substring would pass on the opposite of the intended answer.
 
-    Adding an availability method later makes this test fail, which is the point:
-    the case must come back into the run rather than stay forgotten.
+    Adding an availability method later makes this test fail, which is the point: the
+    case must come back into the run rather than stay forgotten.
     """
     assert UNSUPPORTED_QUALITY_CASES == {"q-stock"}
     port_methods = {name for name in SupportBackend.__protocol_attrs__}
@@ -154,7 +141,7 @@ def test_quality_case(target, case: dict) -> None:
     for evaluator in ALL_EVALUATORS:
         feedback = evaluator(case["inputs"], outputs, reference)
         if feedback is None:
-            continue  # this metric does not apply to this case
+            continue
         assert feedback["score"], (
             f"[{case['id']}] {feedback['key']} failed — "
             f"expected={reference.get('expect_substring')!r} "

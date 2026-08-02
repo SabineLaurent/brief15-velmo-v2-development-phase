@@ -1,17 +1,15 @@
-"""Run the evaluation on LangSmith (Phase 9).
+"""Run the evaluation on LangSmith.
 
     target(inputs)  ->  invoke the real graph, return {route, answer, tool_output}
     client.evaluate ->  run the target over the dataset, apply every evaluator,
                         and log a comparable experiment to LangSmith.
 
-The target is provider-agnostic: it drives the same `build_support_graph()` the
-app uses, so changing `.env` (provider/model) and re-running produces a new
-experiment you can diff against the previous one in the LangSmith UI — that is
-exactly how you catch a quality regression when switching LLMs.
+The target is provider-agnostic: it drives the same `build_support_graph()` the app
+uses, so changing `.env` and re-running produces a new experiment you can diff against
+the previous one — which is exactly how a quality regression shows up when switching
+LLMs.
 
-Run with:
-
-    make eval            # or: uv run python -m support_agent.eval.run
+    make eval
 """
 
 from __future__ import annotations
@@ -56,13 +54,8 @@ def make_target(graph: CompiledStateGraph) -> Callable[[dict], dict]:
 
     def target(inputs: dict) -> dict:
         user_id = inputs.get("user_id", "demo-user")
-        # Fresh thread per case = no short-term-memory bleed between examples.
         config = {"configurable": {"thread_id": str(uuid.uuid4())}}
 
-        # An `escalate` case pauses on `interrupt()`; `invoke` returns normally
-        # with `__interrupt__` (it does not raise). We do NOT resume — we only
-        # care that the router chose the right branch. So we read the persisted
-        # state as the single source of truth for both route and messages.
         graph.invoke(
             {"messages": [{"role": "user", "content": inputs["message"]}]},
             context=AgentContext(user_id=user_id),
@@ -72,12 +65,6 @@ def make_target(graph: CompiledStateGraph) -> Callable[[dict], dict]:
 
         route = state.values.get("route")
         messages = state.values.get("messages", [])
-        # `.text`, never `.content` — finding Q2 of the 2026-07-19 audit, and this
-        # was the site that mattered most. The evaluators call `.lower()` and
-        # `fold()` on what comes out of here, so a provider returning content
-        # BLOCKS did not degrade an answer: it raised AttributeError and took the
-        # whole non-regression gate down, at the exact moment one changes provider
-        # — which is the one moment the gate exists for.
         answer = next(
             (m.text for m in reversed(messages) if isinstance(m, AIMessage) and m.text),
             "",
@@ -96,19 +83,14 @@ def make_target(graph: CompiledStateGraph) -> Callable[[dict], dict]:
 def _token_usage(messages: list) -> dict[str, int]:
     """Sum the token usage carried by the messages PERSISTED IN STATE.
 
-    Feeds the `cout` line of the MLOps report (`eval/mlops.py`).
+    A FLOOR, not the true total, and the report says so: it counts only LLM calls whose
+    reply was appended to the graph state, so a node that calls the model without adding
+    a message (the router, a tool-choice pass) is invisible here. Its job is to make a
+    regression in token consumption VISIBLE, not to bill anyone.
 
-    ⚠️ This is a FLOOR, not the true total, and the report says so. It counts only
-    LLM calls whose reply was appended to the graph state — a node that calls the
-    model to make a decision without adding a message (the router, a tool-choice
-    pass) is invisible here. The exact figure lives in the LangSmith trace, which
-    sees every call; this is the number available without a LangSmith round trip,
-    and its job is to make a regression in token consumption VISIBLE, not to bill
-    anyone.
-
-    `usage_metadata` is the provider-agnostic shape LangChain normalises into, so
-    no provider branch is needed. Absent (or None) means the provider did not
-    report usage — counted as zero rather than crashing a report.
+    `usage_metadata` is the provider-agnostic shape LangChain normalises into, so no
+    provider branch is needed. Absent means the provider did not report usage — counted
+    as zero rather than crashing a report.
     """
     totals = {"input_tokens": 0, "output_tokens": 0}
     for message in messages:
@@ -124,20 +106,11 @@ def main() -> None:
     settings = get_settings()
     client = Client()
 
-    # 1. Make sure the versioned dataset exists in LangSmith.
     push_dataset(client)
 
-    # 2. Build the agent once and wrap it as the evaluation target.
-    #    `learn_from_turns=False`: a benchmark must not teach the thing it grades.
-    #    With it on, each run would distil episodes out of the very conversations
-    #    used to score the agent, and the NEXT run would be graded against a pool
-    #    the previous one grew — a score that improves on its own. Recall stays on
-    #    (we measure the agent as deployed); only the write side is cut.
     graph = build_support_graph(learn_from_turns=False)
     target = make_target(graph)
 
-    # 3. Score the whole dataset. The experiment name carries the provider/model
-    #    so experiments are easy to compare when you swap `.env`.
     prefix = f"{settings.llm_provider}-{settings.llm_model}"
     results = client.evaluate(
         target,

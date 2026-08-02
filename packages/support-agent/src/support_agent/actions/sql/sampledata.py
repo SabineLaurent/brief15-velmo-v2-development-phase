@@ -1,21 +1,15 @@
 """Reference dataset for the business double (catalogue, customers, orders...).
 
-`seed(session)` inserts a coherent shop: customers, a jersey catalogue, orders
-with their items, shipments, returns, refunds, escalations and past tickets.
+`seed(session)` inserts a coherent shop: customers, a jersey catalogue, orders with
+their items, shipments, returns, refunds, escalations and past tickets.
 
-Ported from the training starter's `sampledata.py` (kept in
-`data/db-shop-velmo/sampledata.py` as the untouched source) with two changes:
+The code is in English per the project convention; the *data* stays French because it IS
+the demo domain — the same shop the FAQ in `data/kb-velmo/` describes. `_tickets()`
+exists because `list_tickets` powers recurrence detection, which silently degrades to
+"no previous tickets" without seeded rows.
 
-- the code is in English, per the project convention — the *data* stays French
-  because it IS the demo domain (a French collector-jersey shop, the same one the
-  FAQ in `data/kb-velmo/` describes);
-- `_tickets()` is NEW. The starter has no ticket table, but this agent's
-  `list_tickets` port method powers recurrence detection ("has this happened to
-  you before?"). Without seeded tickets that capability silently degrades to
-  "no previous tickets" for every customer.
-
-Ids are human-readable on purpose (`O-2024-0103`, `C-marc-dubois`): a debugging
-session reads far better than it does with UUIDs.
+Ids are human-readable on purpose (`O-2024-0103`, `C-marc-dubois`): a debugging session
+reads far better than it does with UUIDs.
 """
 
 from __future__ import annotations
@@ -53,8 +47,6 @@ from support_agent.actions.sql.schema import (
 
 _DT = datetime(2024, 5, 1)
 
-# The customer the demo speaks as by default. Exported so the seed CLI and the
-# tests can name it without re-hardcoding the string.
 DEMO_CUSTOMER_ID = "C-marc-dubois"
 
 
@@ -98,12 +90,10 @@ def _products() -> list[Product]:
 
 
 def _variants() -> list[ProductVariant]:
-    # (id, product_ref, size, price, stock) — stock is often 1, sometimes 0 (sold
-    # out), which is what lets the demo show the agent NOT inventing availability.
     rows = [
         ("v-mu-1999-treble-M", "mu-1999-treble", SZ.M, 220, 1),
         ("v-mu-1999-treble-L", "mu-1999-treble", SZ.L, 220, 1),
-        ("v-om-1993-M", "om-1993", SZ.M, 180, 0),  # sold out (no-fabulation case)
+        ("v-om-1993-M", "om-1993", SZ.M, 180, 0),
         ("v-om-1993-L", "om-1993", SZ.L, 180, 1),
         ("v-brazil-1970-M", "brazil-1970", SZ.M, 300, 1),
         ("v-brazil-1970-L", "brazil-1970", SZ.L, 300, 0),
@@ -131,7 +121,6 @@ def _addr(city: str, zip_: str) -> dict:
 
 
 def _orders() -> list[Order]:
-    # (id, customer, status, total, address)
     rows = [
         ("O-2024-0101", "C-marc-dubois", OS.prepared, 250, _addr("Lyon", "69003")),
         ("O-2024-0103", "C-marc-dubois", OS.shipped, 220, _addr("Lyon", "69003")),
@@ -240,17 +229,11 @@ def _escalations() -> list[Escalation]:
 def _tickets() -> list[Ticket]:
     """Past tickets, so `list_tickets` can demonstrate recurrence detection.
 
-    NEW relative to the starter dataset (see the module docstring). The ids are
-    the CONTENT-DERIVED ids `create_ticket` would compute, not arbitrary strings:
-    the `tickets.id` primary key IS that hash, which is what makes ticket
-    creation idempotent. Building seed rows any other way would let a customer
-    re-open a ticket identical to a seeded one.
-
-    `C-marc-dubois` already had a delivery problem (resolved) on an earlier
-    order: the agent can now discover that deterministically instead of guessing.
+    The ids are the CONTENT-DERIVED ids `create_ticket` would compute, not arbitrary
+    strings: the `tickets.id` primary key IS that hash, which is what makes ticket
+    creation idempotent. Building seed rows any other way would let a customer re-open a
+    ticket identical to a seeded one.
     """
-    # Imported here rather than at module scope: `backend` imports this module's
-    # package for the seed CLI, so a top-level import would be circular.
     from support_agent.actions.backend import _ticket_id
 
     rows = [
@@ -299,5 +282,5 @@ def seed(session) -> None:
         _tickets(),
     ):
         session.add_all(batch)
-        session.flush()  # force this batch's INSERTs before the next (FK order)
+        session.flush()
     session.commit()

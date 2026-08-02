@@ -1,46 +1,32 @@
 """Smoke-check the two built images: the client carries no brain, the agent boots.
 
-CI-2 of `TODO_priorities.md` §Chantier 3quater. `make docker-build` proves the two
-images BUILD; this script proves the two claims we had only ever checked by hand:
+Building the images proves they BUILD; this script proves the two claims we had only
+ever checked by hand:
 
-  1. the `client` image contains no `support_agent`, no `langchain`, no
-     `langgraph` — the evidence of step 4's decoupling (deployment plan §4);
-  2. the `agent` image really STARTS: its lifespan warms the graph up, uvicorn
-     opens its port, `/health` and `/ready` answer, and an unauthenticated call
-     is rejected with 401.
+    1. the `client` image contains no `support_agent`, no `langchain`, no
+       `langgraph` — the evidence of the decoupling;
+    2. the `agent` image really STARTS: its lifespan warms the graph up, uvicorn
+       opens its port, `/health` and `/ready` answer, and an unauthenticated
+       call is rejected with 401.
 
-Why a stub endpoint (and why that is not cheating). The agent's lifespan builds
-the FAQ index before serving, so a container with no reachable embeddings model
-cannot boot at all — `/health` would never answer, and the smoke test would be
-asserting the absence of a key rather than the health of an image. So we serve
-the ONE network dependency of start-up from a local stub speaking the OpenAI
-embeddings API, and point the container at it through the project's existing
-`openai_compatible` rail. Nothing else is faked: same image, same entrypoint,
-same fail-closed start-up, real FAQ, real vector store, real HTTP.
+The agent's lifespan builds the FAQ index before serving, so a container with no
+reachable embeddings model cannot boot at all. The ONE network dependency of start-up is
+therefore served from a local stub speaking the OpenAI embeddings API, through the
+project's existing `openai_compatible` rail. Nothing else is faked: same image, same
+entrypoint, same fail-closed start-up, real FAQ, real vector store, real HTTP. No secret
+is needed, which is what keeps this in the guard, and that rail — the one Azure OpenAI
+uses — gets exercised end to end.
 
-Two things it buys beyond the boot: no secret is needed (this runs on any runner,
-which is what keeps it in the guard), and the `openai_compatible` rail — the one
-Azure OpenAI uses — gets exercised end to end for the first time.
+It deliberately does NOT send a chat message: answering one needs a real model, and
+quality belongs to `make score`. This asserts that the door opens.
 
-What it deliberately does NOT do: send a chat message. Answering one needs a real
-model (the router alone uses structured output), and quality belongs to
-`make score`, not to a container check. This asserts that the door opens.
+Standard library only, on purpose: it runs `docker`, and must not depend on the venv it
+is verifying.
 
-Standard library only, on purpose: it runs `docker`, and it must not depend on
-the venv it is verifying.
-
-⚠️ Read the warm-up duration it prints as a SMOKE number, not as a cold start.
-Measured on this rail (2026-07-31, Docker Desktop / arm64): 15 to 25 s across
-runs — and the spread is itself the clue. At least **7.3 s is `tiktoken`
-downloading `cl100k_base` from an OpenAI CDN** — a call
-langchain-openai makes to chunk the text, to a host that has nothing to do with
-the endpoint we configured. Verified, not guessed: the same import under
-`docker run --network none` fails on `openaipublic.blob.core.windows.net`. The
-FAQ itself costs 2 requests for 17 vectors, so the index is not the cost here.
-The plan doc's ~4.4 s cold start stands: it was measured on the `mistral` rail,
-which does not use tiktoken. Worth knowing for step 5 all the same — an Azure
-OpenAI deployment behind a locked-down VNet would not boot until that CDN is
-reachable or the encoding is baked into the image.
+Read the warm-up duration it prints as a SMOKE number, not a cold start. At least 7.3 s
+of it is `tiktoken` downloading `cl100k_base` from an OpenAI CDN, a host unrelated to
+the endpoint we configured — an Azure OpenAI deployment behind a locked-down VNet would
+not boot until that CDN is reachable or the encoding is baked into the image.
 
     make docker-smoke                        # native architecture
     make docker-smoke PLATFORM=linux/amd64   # what Azure App Service runs
@@ -62,27 +48,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 AGENT_IMAGE = "support-agent:dev"
 CLIENT_IMAGE = "client-chainlit:dev"
 
-# Named so a leftover container is obvious in `docker ps`, and removable.
 CONTAINER = "support-agent-smoke"
 
-# 8102, and not 8000/8001 (local dev) nor 8100/8101 (compose): the project keeps
-# host ports disjoint per stack precisely so a probe can never hit the wrong one
-# and report on a process nobody is testing (compose.yaml says why, at length).
 HOST_PORT = 8102
 
-# The vector width the stub advertises. Small on purpose: the long-term store
-# probes the dimension at setup and builds its vector column from the answer, so
-# any consistent number works — and a short one keeps the JSON readable in logs.
 EMBEDDING_DIM = 8
 
-# Budget for the whole boot: fail-closed check, then the FAQ index (measured at
-# ~4.4 s in a container). Generous, because a slow runner must not read as a
-# broken image — but bounded, because a hung start-up must not hang the CI.
 BOOT_TIMEOUT_S = 120
 
-# The names whose ABSENCE is the point. `langchain_core` matters more than
-# `langchain` here: it is what every lang* package drags in, so it is the honest
-# tell that no part of the brain rode along in a transitive dependency.
 FORBIDDEN_IN_CLIENT = ("support_agent", "langchain", "langchain_core", "langgraph")
 
 _CLIENT_PROBE = """
@@ -109,9 +82,6 @@ def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, capture_output=True, text=True, check=check)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# The stub embeddings endpoint
-# ─────────────────────────────────────────────────────────────────────────────
 class _StubStats:
     """How much the boot asked of the model. Printed, because the warm-up duration
     is meaningless without it: one batched call and thirty round trips look the
@@ -143,18 +113,11 @@ class _EmbeddingsHandler(BaseHTTPRequestHandler):
             return
 
         inputs = payload.get("input", [])
-        # The OpenAI API accepts a bare string, a list of strings, or (what
-        # langchain-openai actually sends once tiktoken has chunked the text) a
-        # list of token lists. Only the COUNT matters to us.
         if isinstance(inputs, str) or (inputs and isinstance(inputs[0], int)):
             count = 1
         else:
             count = len(inputs) or 1
 
-        # ⚠️ The openai SDK asks for `encoding_format: base64` unless told
-        # otherwise, and decodes it client-side. A stub that always returned a
-        # float list would make the client read floats out of a JSON string —
-        # so answer in the format that was requested, like a real endpoint.
         _StubStats.calls += 1
         _StubStats.vectors += count
 
@@ -199,9 +162,6 @@ def start_stub() -> tuple[ThreadingHTTPServer, int]:
     return server, server.server_address[1]
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Check 1 — the client image carries no brain
-# ─────────────────────────────────────────────────────────────────────────────
 def check_client_has_no_brain() -> bool:
     log(f"→ {CLIENT_IMAGE}: aucun module du cerveau ?")
     result = run(
@@ -219,9 +179,6 @@ def check_client_has_no_brain() -> bool:
     return False
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Check 2 — the agent image boots and serves
-# ─────────────────────────────────────────────────────────────────────────────
 def _call(path: str, *, json_body: dict[str, object] | None = None) -> tuple[int, str]:
     """Call the containerised agent, treating an HTTP error status as an answer."""
     data = None
@@ -236,7 +193,6 @@ def _call(path: str, *, json_body: dict[str, object] | None = None) -> tuple[int
         with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, response.read().decode()
     except urllib.error.HTTPError as error:
-        # A 401 is an ANSWER here, not a failure: it is what we assert below.
         return error.code, error.read().decode()
 
 
@@ -263,14 +219,7 @@ def check_agent_boots(stub_port: int) -> bool:
         [
             "docker", "run", "-d", "--name", CONTAINER,
             "-p", f"{HOST_PORT}:8000",
-            # Lets the container call back to the stub on the host. Needed on
-            # Linux (where `host.docker.internal` does not exist by default) and
-            # harmless on Docker Desktop, so it is passed unconditionally.
             "--add-host", "host.docker.internal:host-gateway",
-            # Realistic configuration, not a permissive one: the key is SET, so
-            # the fail-closed start-up is satisfied the way production satisfies
-            # it. `API_ALLOW_UNAUTHENTICATED=true` would boot too, and would
-            # prove the opposite of what we want to know.
             "-e", "API_KEY=smoke-key",
             "-e", "LLM_PROVIDER=openai_compatible",
             "-e", "LLM_MODEL=stub-chat",
@@ -323,14 +272,6 @@ def check_agent_boots(stub_port: int) -> bool:
             f"{_StubStats.calls} appels embeddings / {_StubStats.vectors} vecteurs)"
         )
 
-        # Fail-closed, verified on the IMAGE and not only in the unit tests: the
-        # key is enforced by the artefact we are about to ship, not by a fixture.
-        #
-        # ⚠️ POST, with a VALID body. Found the hard way while writing this: a GET
-        # on `/chat` answers 405 (method not allowed) before any dependency runs,
-        # so a probe on the wrong verb reports on routing and says NOTHING about
-        # authentication — it would have passed just as happily on a wide-open
-        # server. An invalid body has the same defect, one step later (422).
         status, _ = _call("/chat", json_body={"message": "smoke"})
         if status != 401:
             log(f"  ❌ POST /chat sans clé renvoie {status}, on attend 401")
@@ -345,8 +286,6 @@ def main() -> int:
     stub, stub_port = start_stub()
     log(f"Stub embeddings sur le port {stub_port} (dim {EMBEDDING_DIM}, aucun secret).")
     try:
-        # Both checks always run: two independent claims about two independent
-        # images, and knowing only the first of two failures wastes a CI round.
         results = [check_client_has_no_brain(), check_agent_boots(stub_port)]
     finally:
         stub.shutdown()

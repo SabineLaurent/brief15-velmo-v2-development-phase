@@ -1,4 +1,4 @@
-"""The input guard: one object that runs every entry-side check (Phase 12-A).
+"""The input guard: one object that runs every entry-side check.
 
 `InputGuard.check(text)` runs the three checks in cost order and returns a single
 `GuardDecision` the graph node acts on:
@@ -7,9 +7,9 @@
     2. injection   -> known prompt-injection phrasings
     3. PII masking -> rewrite sensitive spans BEFORE the LLM/tools/store see them
 
-The object is pure and framework-agnostic (no LangGraph import): it is trivially
-unit-testable, and the graph node (`make_guard_input`) is just thin glue around it.
-User-facing block messages live here, in the demo's language (French).
+The object is pure and framework-agnostic (no LangGraph import), so it is trivially
+unit-testable and the graph node is thin glue around it. User-facing block messages live
+here, in the demo's language (French).
 """
 
 from __future__ import annotations
@@ -32,9 +32,6 @@ from support_agent.guardrails.pii import (
     apply_pii_policy,
 )
 
-# On-topic redirect shown when we refuse an input. It deliberately does NOT reveal
-# WHY (injection vs. policy): telling an attacker what tripped the filter only
-# helps them tune the next attempt.
 INJECTION_MESSAGE = (
     "Je suis l'assistant du service client et je peux seulement vous aider sur vos "
     "commandes, livraisons, retours, remboursements ou votre compte. Que puis-je "
@@ -48,26 +45,16 @@ PII_BLOCK_MESSAGE = (
     "Pour votre sécurité, merci de ne pas partager d'informations sensibles ici "
     "(numéro de carte complet, identifiants). Je peux vous aider sans ces données."
 )
-# Harmful content. UNLIKE the injection refusal, this one names the reason —
-# there is no attacker to keep in the dark, and a customer who crossed a line
-# deserves to know which one rather than being stonewalled.
 MODERATION_MESSAGE = (
     "Je ne peux pas répondre à ce message. Je reste à votre disposition pour "
     "toute question sur vos commandes, livraisons, retours ou remboursements."
 )
-# Self-harm gets its OWN message, and this is the reason the moderator returns a
-# category instead of a boolean. Answering a person in distress with the generic
-# refusal above would be the wrong thing to say to them. No number is hard-coded:
-# it would be wrong outside France, and a wrong emergency number is worse than
-# none — the concrete line belongs in configuration, per deployment.
 SELF_HARM_MESSAGE = (
     "Je suis un assistant du service client et je ne suis pas en mesure de vous "
     "aider sur ce sujet, mais vous n'êtes pas seul·e : si vous traversez un moment "
     "difficile, parlez-en à un proche, à votre médecin, ou à un service d'écoute "
     "près de vous, qui saura vous accompagner."
 )
-# Category -> what the customer reads. A category with no entry falls back to
-# MODERATION_MESSAGE, so adding a rule to the moderator can never crash a turn.
 MODERATION_MESSAGES: dict[str, str] = {"self_harm": SELF_HARM_MESSAGE}
 
 
@@ -76,13 +63,9 @@ class GuardDecision:
     """What the guard decided about one input message."""
 
     blocked: bool
-    # Machine-readable reason, for logs and LangSmith traces (never shown raw).
     reason: str | None = None
-    # What to reply to the customer if blocked.
     user_message: str | None = None
-    # PII-masked version of the input (identical to the original if unchanged).
     sanitized_text: str = ""
-    # Entity types that were masked (for logging / tracing).
     pii_entities: list[str] = field(default_factory=list)
 
 
@@ -102,12 +85,9 @@ class InputGuard:
         self._injection = injection_detector
         self._max_input_chars = max_input_chars
         self._pii_policy = pii_policy or DEFAULT_POLICY
-        # Optional so an existing caller that built an InputGuard by hand keeps
-        # working with moderation simply absent, rather than silently enabled.
         self._moderator = content_moderator
 
     def check(self, text: str) -> GuardDecision:
-        # 1. Deterministic validation (cheapest, no detection needed).
         if not text.strip():
             return GuardDecision(
                 blocked=True, reason="empty_input", user_message=INJECTION_MESSAGE,
@@ -119,30 +99,22 @@ class InputGuard:
                 sanitized_text=text,
             )
 
-        # 2. Prompt-injection heuristic.
         if self._injection.scan(text):
             return GuardDecision(
                 blocked=True, reason="prompt_injection",
                 user_message=INJECTION_MESSAGE, sanitized_text=text,
             )
 
-        # 3. Harmful content. AFTER injection (an injection attempt dressed up as
-        # an insult should still read as injection in the logs) and BEFORE PII
-        # masking, because there is no point masking a message we are refusing.
         if self._moderator is not None:
             category = self._moderator.scan(text)
             if category is not None:
                 return GuardDecision(
                     blocked=True,
-                    # The category IS the log line — this is why the port returns
-                    # a category rather than a boolean.
                     reason=f"content_{category}",
                     user_message=MODERATION_MESSAGES.get(category, MODERATION_MESSAGE),
                     sanitized_text=text,
                 )
 
-        # 4. PII masking — does NOT block the turn (customer stays served), unless
-        # a 'block'-strategy entity is present in the policy.
         pii = apply_pii_policy(text, self._pii, self._pii_policy)
         if pii.blocked:
             return GuardDecision(

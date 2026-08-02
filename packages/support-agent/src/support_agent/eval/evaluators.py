@@ -1,22 +1,18 @@
-"""The evaluators (Phase 9): functions that SCORE one agent output.
+"""The evaluators: functions that SCORE one agent output.
 
-Each evaluator follows the LangSmith signature
-`(inputs, outputs, reference_outputs) -> dict | None` and returns a
-`{"key": <metric name>, "score": <bool/float>}` feedback — or `None` when the
-metric does not apply to this case (LangSmith then records nothing, and the
-pytest runner simply skips it).
+Each follows the LangSmith signature `(inputs, outputs, reference_outputs) -> dict |
+None` and returns a `{"key": <metric>, "score": <bool/float>}` feedback, or `None` when
+the metric does not apply to this case.
 
-Design choice: these are all **deterministic** (no LLM). The strongest signal,
-`route_matches`, is an exact enum comparison. The text-based checks
-(`cites_source`, `honest_refusal`) are honest heuristics on free-form output —
-good enough for a non-regression gate, and the reason a semantic LLM-as-judge is
-a natural later addition. `no_cross_user_leak` deliberately inspects the tool
-output (a fixed English backend message), not the model's prose, so it stays
-robust across languages.
+They are all DETERMINISTIC (no LLM). `route_matches` is an exact enum comparison; the
+text-based checks are honest heuristics on free-form output, good enough for a non-
+regression gate. `no_cross_user_leak` inspects the tool output rather than the model's
+prose, so it stays robust across languages.
 
-The agent output (`outputs`) is produced by the target in `run.py` and carries:
+The agent output is produced by the target in `run.py` and carries:
+
     route        -> the branch the router chose
-    answer        -> the final assistant message (may be empty on an interrupt)
+    answer       -> the final assistant message (may be empty on an interrupt)
     tool_output  -> concatenated tool results the agent saw this turn
 """
 
@@ -51,28 +47,19 @@ def cites_source(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedba
 def honest_refusal(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedback | None:
     """Out-of-FAQ: the agent must say it does not know, not invent an answer.
 
-    What we look for is an explicit statement of NOT KNOWING or NOT HAVING the
-    information. The signal list used to include "support" and "contact" — two
-    words a support agent says constantly — so almost any answer passed, including
-    a confidently fabricated one. That was finding Q1 of the 2026-07-19 audit, and
-    it stayed invisible until a prompt change removed the boilerplate the lax
-    signals were accidentally matching.
+    What we look for is an explicit statement of NOT KNOWING. The signal list used to
+    include "support" and "contact" — two words a support agent says constantly — so
+    almost any answer passed, including a confidently fabricated one.
 
-    Still deterministic, and still a heuristic: a semantic judge would do better.
-    But it now fails a fabricated answer, which is the whole point of the metric.
-
-    The apostrophe normalisation below is not cosmetic. Models emit the
-    TYPOGRAPHIC apostrophe (U+2019) in French roughly as often as the ASCII one,
-    and which one comes out varies between two runs of the same prompt. Without
-    the fold, "la FAQ n’indique pas" scored 0 while "la FAQ n'indique pas" scored
-    1 — the metric was measuring the model's choice of punctuation, and failing
-    correct refusals at random.
+    Still deterministic, and still a heuristic; a semantic judge would do better. The
+    apostrophe normalisation is not cosmetic: models emit U+2019 and the ASCII
+    apostrophe interchangeably, so without the fold the metric was scoring the model's
+    choice of punctuation.
     """
     if not reference_outputs.get("expect_refusal"):
         return None
     answer = (outputs.get("answer") or "").lower().replace("’", "'")
     signals = (
-        # "I do not have / the FAQ does not say"
         "ne précise pas",
         "ne mentionne pas",
         "ne contient pas",
@@ -81,14 +68,12 @@ def honest_refusal(inputs: dict, outputs: dict, reference_outputs: dict) -> Feed
         "aucune information",
         "does not specify",
         "no information",
-        # "I cannot confirm / I do not know"
         "ne peux pas",
         "ne peut pas",
         "je ne sais pas",
         "cannot confirm",
         "cannot",
         "unable",
-        # "we do not sell/offer that"
         "ne propose",
         "ne vend",
         "ne trouve",
@@ -106,20 +91,15 @@ def mentions_order(inputs: dict, outputs: dict, reference_outputs: dict) -> Feed
 
 
 def answer_contains(inputs: dict, outputs: dict, reference_outputs: dict) -> Feedback | None:
-    """The answer must carry the expected FACT (the starter's quality corpus).
+    """The answer must carry the expected FACT (the quality corpus).
 
-    Substring matching earns its keep here in a way it does not in
-    `honest_refusal`: what is matched is a FACT the customer asked for — a price
-    (`6,90`), a delay (`J+2`), a window (`14 jours`), a carrier (`Colissimo`) —
-    not the shape of a sentence. A model can phrase the answer a hundred ways;
-    all of them contain the number.
+    Substring matching earns its keep here in a way it does not in `honest_refusal`:
+    what is matched is a FACT the customer asked for — a price, a delay, a window, a
+    carrier — not the shape of a sentence.
 
-    Two properties make it robust anyway:
-      - `fold()` (accents, case, apostrophes) — the same normalisation the
-        moderation rules use, and the same class of bug `f404775` paid for;
-      - `ACCEPTED_PARAPHRASES` for the handful of expectations written in the
-        BACKEND's English vocabulary, which a French reply legitimately relays
-        in French.
+    Two things make it robust anyway: `fold()` (accents, case, apostrophes), and
+    `ACCEPTED_PARAPHRASES` for the handful of expectations written in the backend's
+    English vocabulary, which a French reply legitimately relays in French.
     """
     expected = reference_outputs.get("expect_substring")
     if not expected:
@@ -142,13 +122,10 @@ def no_cross_user_leak(inputs: dict, outputs: dict, reference_outputs: dict) -> 
     if not reference_outputs.get("expect_no_leak"):
         return None
     tool_output = (outputs.get("tool_output") or "").lower()
-    # The refusal message is emitted; the confidential status word must not be.
     refused = "no order" in tool_output
     return {"key": "no_cross_user_leak", "score": refused}
 
 
-# The full suite, in the order they read best in a report. Both runners import
-# this so LangSmith and pytest score exactly the same thing.
 ALL_EVALUATORS: list[Evaluator] = [
     route_matches,
     cites_source,

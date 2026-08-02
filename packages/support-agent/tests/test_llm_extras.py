@@ -1,21 +1,13 @@
-"""Unit tests for the provider/extra contract behind the LLM-agnosticism claim.
+"""Unit tests for the provider/extra contract behind LLM agnosticism.
 
-Providers ship as optional-dependency extras (`pyproject.toml`), and
-`init_chat_model` / `init_embeddings` import a provider's package only when the
-config asks for it. That buys a lean default install, but it opens a specific way
-to be wrong: `LLM_PROVIDER` can name a provider the install never included, and
-the raw symptom is an `ImportError` from inside LangChain — which reads like a
-broken environment rather than a deployment that did not opt in.
+Providers ship as optional-dependency extras and are imported only when the config asks
+for one. That buys a lean default install and opens a specific way to be wrong:
+`LLM_PROVIDER` can name a provider the install never included, and the raw symptom is an
+`ImportError` from inside LangChain.
 
-Two things are asserted here:
-
-  1. Translation — a missing provider package fails by naming the extra that
-     ships it, while an unrelated ImportError stays untouched.
-  2. The invariant, made executable — the alias maps and the declared extras
-     cannot drift apart. This is the regression guard for the bug that motivated
-     the split: `langchain-mistralai` was a hard dependency nothing imported,
-     while `groq` / `google_genai` / `azure_ai` were advertised in the alias map
-     and installed nowhere.
+Two things are asserted. Translation: a missing provider package fails by naming the
+extra that ships it, while an unrelated `ImportError` stays untouched. And the
+invariant, made executable: the alias maps and the declared extras cannot drift apart.
 
 Pure unit tests: no network, no credentials, no provider package required.
 """
@@ -31,12 +23,8 @@ from support_agent.llm import embeddings as embeddings_module
 from support_agent.llm import factory as factory_module
 from support_agent.llm._extras import PROVIDER_EXTRAS, provider_package_required
 
-# Providers backed by a BASE dependency (`langchain-openai`), so they are
-# legitimately absent from PROVIDER_EXTRAS. Any OTHER provider missing from that
-# map is the drift this module exists to catch.
 _BASE_DEPENDENCY_PROVIDERS = {"openai", "openai_compatible"}
 
-# Providers handled by a dedicated branch rather than by an alias lookup.
 _NON_ALIAS_PROVIDERS = {"openai_compatible", "custom"}
 
 
@@ -44,9 +32,6 @@ def _declared_extras() -> dict[str, list[str]]:
     """Read `[project.optional-dependencies]` from this package's real manifest."""
     manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
     return tomllib.loads(manifest.read_text())["project"]["optional-dependencies"]
-
-
-# ─── 1. Translation: the failure names its own fix ────────────────────────────
 
 
 def test_missing_provider_package_names_the_extra_to_install() -> None:
@@ -58,7 +43,6 @@ def test_missing_provider_package_names_the_extra_to_install() -> None:
     message = str(excinfo.value)
     assert "groq" in message
     assert "uv sync --extra groq" in message
-    # The original cause must survive for debugging, not be swallowed.
     assert "langchain_groq" in message
 
 
@@ -89,9 +73,6 @@ def test_guard_is_transparent_when_nothing_fails() -> None:
         result = "built"
 
     assert result == "built"
-
-
-# ─── 2. The architectural invariant, made executable ─────────────────────────
 
 
 def test_every_extra_in_the_map_is_actually_declared() -> None:
