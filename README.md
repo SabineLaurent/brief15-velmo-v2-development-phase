@@ -6,9 +6,6 @@ s'appuie sur une base de connaissance **FAQ** (RAG), et reste **agnostique** :
 le LLM peut venir d'Azure AI Foundry, de Mistral, Google, Groq… ou de ta propre
 API — on change de fournisseur sans toucher au code.
 
-> 📚 Ce dépôt est aussi un **tutoriel pédagogique**. Suis `ROADMAP.md` phase par
-> phase pour apprendre l'écosystème LangChain en construisant.
-
 ## Prérequis
 
 - [`uv`](https://docs.astral.sh/uv/) (gestionnaire Python)
@@ -31,25 +28,22 @@ make setup   # installe les dépendances (uv) ET crée .env depuis .env.example
 make run     # lance l'agent de support
 ```
 
-## Documentation
+## Organisation du dépôt
 
-| Fichier | Contenu |
+Mono-repo **uv workspace** : la racine orchestre les membres et partage un unique
+`uv.lock` et un unique `.venv`.
+
+| Chemin | Contenu |
 |---|---|
-| [`ROADMAP.md`](ROADMAP.md) | Le tuto étape par étape — **commence ici** |
-| [`TODO_priorities.md`](TODO_priorities.md) | Ce qu'on fait ensuite et dans quel ordre (transverse) |
-| [`docs/spec.md`](docs/spec.md) | Le **QUOI** : périmètre fonctionnel, cas d'usage |
-| [`docs/vision.md`](docs/vision.md) | Le **POURQUOI** : les 3 scopes découplés |
-| [`docs/architecture.md`](docs/architecture.md) | Le **COMMENT** : conception technique, mémoire, agnosticisme |
-| [`docs/architecture-cible-2026-07-25.md`](docs/architecture-cible-2026-07-25.md) | Les blocs déployés et le rangement des données (cible) |
-| [`docs/methodologie.md`](docs/methodologie.md) | La méthode de travail (prompt réutilisable pour de futurs projets) |
-| [`CLAUDE.md`](CLAUDE.md) | Règles & conventions du projet |
+| [`packages/support-agent/`](packages/support-agent/README.md) | Le cœur de l'agent : graphe, mémoire, RAG, outils, garde-fous, évaluation |
+| [`packages/client/`](packages/client/README.md) | Le client de démo (Chainlit), qui parle à l'agent en **HTTP** |
+| [`data/`](data/eval/README.md) | Sources versionnées : base de connaissance FAQ + corpus d'évaluation |
+| [`database/`](database/README.md) | État runtime écrit par l'agent (non versionné) |
+| `.env.example` | Toutes les variables de configuration, commentées |
 
 ## Statut
 
-🚧 En construction — Phases 0 à 10 et 12 terminées : LLM agnostique, observabilité
-LangSmith, mémoire court + long terme, RAG / FAQ, orchestration LangGraph, escalade
-humaine, outils & actions métier, évaluation, persistance & robustesse, sécurité &
-guardrails. Prochaine : **Phase 11** (cycle de vie du support — Case + Ticket),
-réordonnée après la 12. Puis Phase 13 (exposition & déploiement).
-
-État détaillé : section « Où on en est » de [`ROADMAP.md`](ROADMAP.md).
+Fonctionnalités en place : LLM agnostique, observabilité LangSmith, mémoire court
++ long terme, RAG / FAQ, orchestration LangGraph, escalade humaine, outils &
+actions métier, évaluation & scoring, persistance (SQLite / Postgres + pgvector),
+sécurité & garde-fous, exposition HTTP et conteneurisation.

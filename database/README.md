@@ -47,8 +47,8 @@ dev (même fichier, même moteur) et deviendrait impossible en prod, où les deu
 vivent dans des systèmes distincts, souvent chez des fournisseurs distincts. La
 frontière doit rester un **appel**, jamais un `JOIN`.
 
-📖 `docs/memoire.md` formule bien le partage des rôles : *le backend dit **que**
-c'est arrivé (la vérité) ; le sémantique **personnalise***.
+📖 Le partage des rôles : *le backend dit **que** c'est arrivé (la vérité) ; le
+sémantique **personnalise***.
 
 ## Ce qu'il y a dedans
 
@@ -86,16 +86,15 @@ embeddings agnostiques que la FAQ) et indexé via `sqlite-vec`, dans le même
 fichier SQLite. « Relationnel » et « vectoriel » ne sont donc pas deux endroits
 distincts — c'est la même base.
 
-📖 La taxonomie complète (sémantique / épisodique / procédural) est dans
-[`docs/memoire.md`](../docs/memoire.md). Aujourd'hui seul le **sémantique** est
-construit ; les deux autres sont des extensions naturelles.
+📖 La taxonomie complète des mémoires est sémantique / épisodique / procédural.
+Aujourd'hui le **sémantique** et l'**épisodique** sont construits ; le procédural
+est une extension naturelle.
 
 ### `index/` — réservé, volontairement absent
 
-L'index vectoriel de la FAQ y vivra **en Phase 13**, pas avant. Il a été codé
-(Chroma), mesuré, puis **annulé** le 2026-07-21 — voir
-[`TODO_priorities.md`](../TODO_priorities.md). Aujourd'hui la FAQ est réindexée en
-RAM à chaque démarrage (~1,6 s, zéro dépendance).
+L'index vectoriel de la FAQ y vivra plus tard, pas maintenant. Il a été codé
+(Chroma), mesuré, puis **annulé** : aujourd'hui la FAQ est réindexée en RAM à
+chaque démarrage (~1,6 s, zéro dépendance).
 
 Il aura son propre dossier plutôt que d'être mêlé aux deux mémoires, précisément
 parce qu'il est **reconstructible** : on doit pouvoir l'effacer sans hésiter, et
@@ -139,8 +138,7 @@ c'est une doublure, pas une base à nous.
 
 ## Pourquoi DEUX fichiers ?
 
-Un seul suffirait techniquement — c'était le cas jusqu'au 2026-07-21
-(`TEMP/database/agent_state.db`). La séparation est un **confort de développement** :
+Un seul suffirait techniquement. La séparation est un **confort de développement** :
 chaque horizon de mémoire s'inspecte, se vide et se raisonne isolément.
 
 ```bash
@@ -171,8 +169,7 @@ l'app INDEXE la FAQ au démarrage   job d'ingestion découplé (CI / cron)
 
 Côté agent, le basculement est **une variable d'environnement** — le code métier
 ne change pas (c'est le même esprit que l'agnosticisme LLM). Ce qui change vraiment,
-c'est l'**ingestion**, qui cesse d'être faite par l'application. Détail dans
-[`TODO_priorities.md`](../TODO_priorities.md) § Phase 13.
+c'est l'**ingestion**, qui cesse d'être faite par l'application.
 
 ## Réglages
 

@@ -35,6 +35,15 @@ chroma/
 /.chainlit/
 /chainlit.md
 
+# Documentation de travail & pilotage interne.
+# Ces fichiers restent sur le disque (support de conception, journal de bord),
+# mais ils sortent du dépôt rendu : le livrable, c'est le code + le README.
+/docs/
+/ROADMAP.md
+/TODO_priorities.md
+# Sans slash initial : vise les CLAUDE.md de la racine ET des packages.
+CLAUDE.md
+
 # OS / IDE
 .DS_Store
 .idea/

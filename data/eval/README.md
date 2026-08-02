@@ -71,5 +71,4 @@ relisible en revue :
 
 `test_business.py` du starter et son domaine (remboursements, plafond 50 €, table
 d'escalade) : le porter voudrait dire construire le produit Velmo ici, ce que la
-bifurcation vers l'agnosticisme a précisément écarté. Détail :
-[`docs/brief/tests-reference/README.md`](../../docs/brief/tests-reference/README.md).
+bifurcation vers l'agnosticisme a précisément écarté.

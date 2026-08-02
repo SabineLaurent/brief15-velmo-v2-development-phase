@@ -1,7 +1,6 @@
 # client-chainlit — coquille de démo Chainlit (scope B, niveau 1)
 
-But : **voir l'agent parler** dans un navigateur, pour un GIF de 20 s au README.
-UI **assumée non-prod** (cf. `docs/roadmap-frontend.md`).
+But : **voir l'agent parler** dans un navigateur. UI **assumée non-prod**.
 
 Ce membre ne connaît **rien** de LangGraph — ni même du paquet `support_agent`
 depuis l'**étape 4 du déploiement** : il parle à l'agent par un **appel HTTP**, à
@@ -16,14 +15,12 @@ navigateur ──► client (Chainlit) ──HTTP/SSE──► agent-api ──�
 
 > ⭐ La bascule import → HTTP a coûté **une ligne** dans `app.py`, parce que le
 > client réseau expose exactement la même signature. C'est la démonstration que la
-> couture valait son coût ; le détail est dans
-> [`docs/plan-deploiement-2026-07-25.md`](../../docs/plan-deploiement-2026-07-25.md) §Étape 4.
+> couture valait son coût.
 
 > 📛 **Pourquoi « client-chainlit » et pas « client » ?** Chainlit est **une**
 > implémentation de client, pas *le* client. Le nom le dit, pour qu'ajouter un
 > second client (React, mobile, `curl`) ne demande pas de renommer celui-ci.
-> Distribution avec tiret, module avec underscore (`src/client_chainlit/`) :
-> convention expliquée dans [`docs/anatomie-package-workspace.md`](../../docs/anatomie-package-workspace.md).
+> Distribution avec tiret, module avec underscore (`src/client_chainlit/`).
 
 ## Lancer
 
