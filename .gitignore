@@ -35,10 +35,28 @@ chroma/
 /.chainlit/
 /chainlit.md
 
-# Documentation de travail & pilotage interne.
-# Ces fichiers restent sur le disque (support de conception, journal de bord),
-# mais ils sortent du dépôt rendu : le livrable, c'est le code + le README.
-/docs/
+# Documentation.
+# Le dossier est ignoré SAUF les documents de conception qui font partie du
+# livrable. L'ordre compte, et le motif doit viser le CONTENU (`/docs/*`) :
+# `/docs/` seul rendrait les négations inopérantes. Tout le reste — notes de
+# travail, glossaire, briefs, archives — reste sur le disque, hors du dépôt.
+/docs/*
+!/docs/architecture.md
+!/docs/architecture-cible-2026-07-25.md
+!/docs/spec.md
+!/docs/memoire.md
+!/docs/escalade.md
+!/docs/streaming.md
+!/docs/ci.md
+!/docs/plan-deploiement-2026-07-25.md
+!/docs/latence.md
+!/docs/latence-patterns-prod.md
+!/docs/prompt-caching.md
+!/docs/revue-code-2026-07-25.md
+!/docs/revue-securite-2026-07-25.md
+!/docs/80a6c9e-revue-code-2026-07-26.md
+
+# Pilotage interne : la cadence de travail, pas le produit.
 /ROADMAP.md
 /TODO_priorities.md
 # Sans slash initial : vise les CLAUDE.md de la racine ET des packages.
