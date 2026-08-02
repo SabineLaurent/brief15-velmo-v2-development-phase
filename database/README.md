@@ -1,218 +1,103 @@
-# `database/` — l'état runtime, en développement
+# `database/` — état runtime
 
-> Tout ce que l'**agent** écrit pendant qu'il tourne. **Aucune donnée** n'est
-> versionnée ici : le `.gitignore` écarte les bases (`*.db`) et les fichiers de
-> checkpoint (`database/*/*.bin`). Seuls sont suivis ce README et un `.gitkeep`
-> par sous-dossier — pour que l'**arborescence** existe après un `git clone`,
-> sans que son **contenu** ne parte dans l'historique.
->
-> ⚠️ Ce dossier ne **simule** pas la production. Il la **cartographie**. La
-> différence est expliquée plus bas, et elle compte.
+Contient tout ce que l'agent écrit à l'exécution. **Rien n'est versionné** : le
+`.gitignore` écarte les bases (`*.db`) et les fichiers de checkpoint
+(`database/*/*.bin`). Seuls ce README et un `.gitkeep` par sous-dossier sont
+suivis, pour que l'arborescence existe après un `git clone`.
 
-## La règle de rangement, en une question
+Les chemins sont relatifs au répertoire de lancement : lancer toujours depuis la
+racine du dépôt. Les dossiers parents sont créés à la connexion
+(`memory/sqlite_conn.py`).
 
-> Est-ce que ça a été écrit par **l'agent**, et est-ce que **personne d'autre**
-> n'en a une copie ?
-
-| Réponse | Où ça va | Pourquoi |
-|---|---|---|
-| Oui aux deux | **`database/working_memory` · `agent_memory`** | perte sèche : ça n'existe nulle part ailleurs |
-| Écrit par un **humain** | `data/` | c'est de la **source**, versionnée dans git |
-| Reconstructible | `database/index/` *(à venir)* | une **projection** : sa perte coûte du CPU |
-| Appartient à un **système tiers** | `database/shop/`, **en dev seulement** | une doublure : en prod, on appelle son API |
-
-## La distinction qui compte : ce qu'on POSSÈDE vs ce qu'on DOUBLE
-
-Tout ce qui est ici n'a pas le même destin en production. Deux catégories :
-
-| | En dev | En prod | Propriétaire |
-|---|---|---|---|
-| `working_memory/` · `agent_memory/` | SQLite | **Postgres, à nous** | **nous**, des deux côtés |
-| `index/` *(à venir)* | fichier local | Chroma serveur / base managée | nous (mais reconstructible) |
-| `shop/` | SQLite (`make seed`) | ❌ **disparaît** | **le marchand** |
-
-Les mémoires sont à nous **des deux côtés**. La base métier — commandes, clients,
-tickets : le standard d'un commerce — est une **doublure**, qui n'existe que parce
-qu'on n'a pas le vrai système sous la main. Elle a désormais son fichier
-(`shop/shop.db`, cf. plus bas) : ça ne change **rien** à son statut, et c'est
-exactement le piège que la ligne suivante désamorce.
-
-En production, **on ne la migre pas : on la débranche**, et `get_order_status` /
-`create_ticket` appellent Zendesk, Salesforce ou le SI du marchand. Le backend
-métier est un **port** que l'agent consomme — il ne le possède pas.
-
-⚠️ **Le piège à éviter** : traiter cette base comme les nôtres, et finir par faire
-des **jointures** entre nos souvenirs et les commandes du client. Ça marcherait en
-dev (même fichier, même moteur) et deviendrait impossible en prod, où les deux
-vivent dans des systèmes distincts, souvent chez des fournisseurs distincts. La
-frontière doit rester un **appel**, jamais un `JOIN`.
-
-📖 Le partage des rôles : *le backend dit **que** c'est arrivé (la vérité) ; le
-sémantique **personnalise***.
-
-## Ce qu'il y a dedans
+## Contenu
 
 ```
 database/
 ├── working_memory/
-│   └── checkpoints.db     ← le fil en cours         (clé : thread_id)
+│   └── checkpoints.db     ← état du fil en cours       (clé : thread_id)
 ├── agent_memory/
-│   └── memories.db        ← ce qu'on sait du client (clé : user_id)
-├── index/                 ← (à venir, Phase 13) l'index vectoriel de la FAQ
-└── shop/
-    └── shop.db            ← la doublure du SI marchand (`make seed`)
+│   └── memories.db        ← mémoire long terme         (clé : user_id)
+├── shop/
+│   └── shop.db            ← backend métier de démonstration (`make seed`)
+├── eval/
+│   └── report.md          ← rapport d'évaluation écrit par `make score`
+└── index/                 ← réservé à l'index vectoriel persistant de la FAQ
 ```
 
-### `working_memory/` — un CHECKPOINT, pas un souvenir
+La FAQ est actuellement réindexée en mémoire à chaque démarrage
+(`knowledge/ingest.py`) ; `index/` est vide tant qu'un store persistant n'est pas
+branché.
 
-Tables `checkpoints` + `writes`. Écrit par le **checkpointer** LangGraph
-(`memory/short_term.py`). Contient l'historique des messages du fil, mais **pas
-seulement** — aussi l'**état d'exécution du graphe** : le nœud suivant à jouer,
-les écritures en attente, et les **`interrupt()` en cours**.
+### `working_memory/`
 
-C'est cette dernière ligne qui justifie le mot *checkpoint*, au sens du jeu vidéo :
-quand le routeur choisit `escalate`, le graphe se met en **pause**, et la pause vit
-ici. Reprendre une escalade, ce n'est pas *se souvenir* — c'est **restaurer une
-exécution suspendue**. On le `resume`, on ne le `recall` pas.
+Tables `checkpoints` et `writes`, écrites par le checkpointer LangGraph
+(`memory/short_term.py`). Contient l'historique des messages du fil ainsi que
+l'état d'exécution du graphe : nœud suivant, écritures en attente, `interrupt()`
+en cours. Une escalade suspendue est reprise depuis cet état.
 
-### `agent_memory/` — la vraie mémoire longue
+### `agent_memory/`
 
-Tables `store` + `store_vectors`. Écrit par le **store** LangGraph
-(`memory/long_term.py`), namespace `("memories", user_id)` : un client ne peut
-jamais lire les souvenirs d'un autre.
+Tables `store` et `store_vectors`, écrites par le store LangGraph
+(`memory/long_term.py`), sous le namespace `("memories", user_id)` — un client
+ne peut pas lire les souvenirs d'un autre. Chaque souvenir est embeddé et indexé
+via `sqlite-vec` dans le même fichier SQLite.
 
-⚠️ Ce fichier est **aussi vectoriel** : chaque souvenir est embeddé (mêmes
-embeddings agnostiques que la FAQ) et indexé via `sqlite-vec`, dans le même
-fichier SQLite. « Relationnel » et « vectoriel » ne sont donc pas deux endroits
-distincts — c'est la même base.
+### `shop/`
 
-📖 La taxonomie complète des mémoires est sémantique / épisodique / procédural.
-Aujourd'hui le **sémantique** et l'**épisodique** sont construits ; le procédural
-est une extension naturelle.
+Backend métier de démonstration (commandes, clients, expéditions, retours,
+tickets). Deux adaptateurs existent derrière le port `actions/`, sélectionnés par
+`SUPPORT_BACKEND` :
 
-### `index/` — réservé, volontairement absent
-
-L'index vectoriel de la FAQ y vivra plus tard, pas maintenant. Il a été codé
-(Chroma), mesuré, puis **annulé** : aujourd'hui la FAQ est réindexée en RAM à
-chaque démarrage (~1,6 s, zéro dépendance).
-
-Il aura son propre dossier plutôt que d'être mêlé aux deux mémoires, précisément
-parce qu'il est **reconstructible** : on doit pouvoir l'effacer sans hésiter, et
-hésiter avant d'effacer les deux autres.
-
-### `shop/` — la doublure du SI marchand
-
-Commandes, clients, tickets — le standard d'un commerce. **Deux adaptateurs
-existent derrière le port `actions/`**, et `SUPPORT_BACKEND` (`.env`) choisit :
-
-| `SUPPORT_BACKEND` | Adaptateur | Contenu | Survit au redémarrage |
+| `SUPPORT_BACKEND` | Adaptateur | Contenu | Persistant |
 |---|---|---|---|
-| `memory` *(défaut)* | `InMemorySupportBackend` | 3 commandes écrites à la main | ❌ |
-| `sqlite` | `SqlSupportBackend` | 14 commandes / 10 clients / expéditions / retours / remboursements / tickets | ✅ `shop/shop.db` |
-
-C'est **le port qui rend les deux interchangeables** : ni les outils ni le graphe
-ne savent lequel répond. Basculer, c'est une variable d'environnement — le même
-esprit que l'agnosticisme LLM, appliqué au SI métier.
+| `memory` *(défaut)* | `InMemorySupportBackend` | 3 commandes en RAM | non |
+| `sqlite` | `SqlSupportBackend` | 14 commandes / 10 clients / expéditions / retours / remboursements / tickets | oui (`shop/shop.db`) |
 
 ```bash
-make seed                 # peuple la boutique (idempotent : rejouable sans risque)
-make seed ARGS=--reset    # drop + recrée + re-seed
+make seed                 # peuple la boutique (idempotent)
+make seed ARGS=--reset    # drop + recréation + re-seed
 ```
 
-⚠️ **Deux pièges pratiques.**
+Notes :
 
-1. En `sqlite`, parle à l'agent en tant que client **existant** (`C-marc-dubois`,
-   `C-sophie-martin`…). Avec un `user_id` inconnu, aucune commande ne t'appartient
-   et l'agent a raison de le dire — ce n'est pas une panne, c'est l'autorisation.
-2. Le défaut reste `memory` **à dessein** : les deux adaptateurs n'ont pas la même
-   convention d'identifiants (`CMD-1001` vs `O-2024-0103`) et `eval/dataset.py`
-   épingle celle de `memory`.
+- En backend `sqlite`, utiliser un `user_id` existant (`C-marc-dubois`,
+  `C-sophie-martin`, …) : un identifiant inconnu ne possède aucune commande.
+- Le défaut reste `memory` car les deux adaptateurs n'ont pas la même convention
+  d'identifiants (`CMD-1001` vs `O-2024-0103`) et `eval/dataset.py` épingle celle
+  de `memory`.
+- Pas de migrations Alembic : `create_all()` crée les tables manquantes, et
+  `--reset` reconstruit le jeu de données, qui est déterministe.
+- Cette base représente un système tiers. Aucune jointure ne doit être faite entre
+  elle et les mémoires de l'agent : en production, ce backend est remplacé par des
+  appels au SI du marchand (`get_order_status`, `create_ticket`).
 
-**Pourquoi il n'y a pas d'Alembic ici.** On ne migre pas une doublure — on la
-jette et on la reconstruit. `create_all()` crée les tables *manquantes* mais ne
-modifie pas celles qui existent : ajoute une colonne à un modèle et les fichiers
-déjà sur disque gardent l'ancienne forme, sans erreur, jusqu'à ce qu'une requête
-casse loin de la cause. `--reset` **est** la réponse à ça, et elle est gratuite
-parce que le jeu de données est déterministe. Voir la mise en garde plus haut :
-c'est une doublure, pas une base à nous.
+## Configuration
 
-## Pourquoi DEUX fichiers ?
-
-Un seul suffirait techniquement. La séparation est un **confort de développement** :
-chaque horizon de mémoire s'inspecte, se vide et se raisonne isolément.
-
-```bash
-# vider les conversations sans perdre ce qu'on sait des clients
-rm database/working_memory/checkpoints.db
-```
-
-Ce n'est **pas** une frontière d'architecture : en production, les deux retournent
-dans **une seule base Postgres**. Ne construis donc rien qui dépende du fait qu'ils
-soient deux fichiers. Ce n'est plus une intention : en backend `postgres`, les huit
-tables (`checkpoints*`, `store*`, …) cohabitent bien dans le schéma `agent_state`
-d'une base unique.
-
-## Ce qui change en production
-
-Le vrai saut n'est pas le format du fichier — c'est que la base devienne un
-**service réseau partagé** entre N instances derrière un load-balancer. Un fichier
-local ne peut pas enseigner ça.
-
-```
-DEV (ici)                          PROD (cible)
-─────────                          ────────────
-PERSISTENCE_BACKEND=sqlite         PERSISTENCE_BACKEND=postgres
-  2 fichiers, 1 process              1 base, N process concurrents
-l'app INDEXE la FAQ au démarrage   job d'ingestion découplé (CI / cron)
-                                     └─ l'app n'indexe JAMAIS
-```
-
-Côté agent, le basculement est **une variable d'environnement** — le code métier
-ne change pas (c'est le même esprit que l'agnosticisme LLM). Ce qui change vraiment,
-c'est l'**ingestion**, qui cesse d'être faite par l'application.
-
-## Réglages
-
-| Variable (`.env`) | Défaut |
+| Variable (`.env`) | Défaut / valeurs |
 |---|---|
-| `PERSISTENCE_BACKEND` | `memory` (RAM, perdu au redémarrage) · `sqlite` · `postgres` |
+| `PERSISTENCE_BACKEND` | `memory` (RAM) · `sqlite` · `postgres` |
 | `WORKING_MEMORY_DB_PATH` | `./database/working_memory/checkpoints.db` (backend `sqlite`) |
 | `AGENT_MEMORY_DB_PATH` | `./database/agent_memory/memories.db` (backend `sqlite`) |
-| `DATABASE_URL` | *(vide)* — **requis** si backend `postgres` |
+| `DATABASE_URL` | *(vide)* — requis si backend `postgres` |
 | `DATABASE_SCHEMA` | `agent_state` |
 | `MEMORY_TTL_DAYS` | `365` (vide = conservation infinie) |
-| `SUPPORT_BACKEND` | `memory` (3 commandes en RAM) · `sqlite` (la boutique seedée) |
+| `SUPPORT_BACKEND` | `memory` · `sqlite` |
 | `SHOP_DB_PATH` | `./database/shop/shop.db` (backend `sqlite`) |
 
-⚠️ `PERSISTENCE_BACKEND` et `SUPPORT_BACKEND` sont **deux réglages distincts**, et
-les confondre est l'erreur naturelle : le premier gouverne la mémoire, **à nous
-des deux côtés** ; le second gouverne le SI marchand, qu'on **double** ici et
-qu'on **débranche** en prod. Ils n'ont ni le même cycle de vie ni le même
-propriétaire. C'est aussi pour ça que `SUPPORT_BACKEND=postgres` n'existe pas et
-lève une erreur : la valeur appartient à l'autre switch.
+`PERSISTENCE_BACKEND` gouverne la mémoire de l'agent ; `SUPPORT_BACKEND` gouverne
+le backend métier. Les deux sont indépendants — `SUPPORT_BACKEND=postgres`
+n'existe pas et lève une erreur.
 
-Les deux `_DB_PATH` sont nommées d'après le **rôle**, pas le moteur, et suffixées
-ainsi parce que c'est ce qu'elles contiennent — un chemin passé tel quel à
-`sqlite3.connect()`. D'où un **`DATABASE_URL`** distinct : une chaîne de connexion
-n'est pas un chemin, et `PERSISTENCE_BACKEND` choisit laquelle est lue.
+## Backend `postgres`
 
-> ✅ **Le backend `postgres` est câblé et vérifié** (déploiement étape 3, le
-> 2026-07-25) : `PostgresSaver` + `PostgresStore`, **une seule base**, les deux
-> horizons séparés par **schéma** (`agent_state`), recherche sémantique en
-> **pgvector** dans cette même base. Deux différences avec SQLite qui ne sont pas
-> cosmétiques :
->
-> - **Un pool de connexions partagé** (`memory/postgres_conn.py`), pas une
->   connexion : le serveur HTTP répond depuis un pool de threads, et le *sweeper*
->   TTL tourne sur le sien.
-> - **Une rétention RGPD réelle** : `MEMORY_TTL_DAYS` arme un balayage de fond qui
->   supprime les souvenirs périmés. ⚠️ Le compteur repart au **dernier accès**, pas
->   à la création — c'est une rétention d'**inactivité**. Non disponible en
->   `sqlite`/`memory`, où le réglage est simplement ignoré.
->
-> ⚠️ **L'image officielle `postgres` ne suffit pas** : il faut `pgvector/pgvector`,
-> sinon le store long terme échoue à son `setup()`.
+`PostgresSaver` + `PostgresStore` dans une base unique, les deux horizons de
+mémoire séparés par schéma (`DATABASE_SCHEMA`), recherche sémantique en pgvector
+dans cette même base.
 
-Les chemins sont **relatifs au répertoire de lancement** : lance toujours depuis la
-**racine du repo** (`make run`, ou `chainlit run packages/client/...`). Les
-dossiers parents sont créés à la connexion (`memory/sqlite_conn.py`).
+- Pool de connexions partagé (`memory/postgres_conn.py`) : le serveur HTTP répond
+  depuis un pool de threads et le sweeper TTL tourne sur le sien.
+- `MEMORY_TTL_DAYS` arme un balayage de fond qui supprime les souvenirs périmés.
+  Le compteur repart au **dernier accès**, pas à la création. Le réglage est
+  ignoré en backend `sqlite` et `memory`.
+- L'image Docker doit être `pgvector/pgvector`, pas `postgres` : sans l'extension,
+  le store long terme échoue à son `setup()`.
