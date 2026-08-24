@@ -13,6 +13,7 @@ UV := uv
         eval latency \
         seed consolidate memory \
         docker-build docker-smoke docker-up docker-logs docker-down \
+        wake \
         clean
 
 help: ## Affiche cette aide
@@ -104,6 +105,11 @@ docker-logs: ## Suit les logs de la pile (Ctrl-C pour sortir, les conteneurs con
 
 docker-down: ## Arrête la pile (le volume d'état est CONSERVÉ)
 	docker compose down
+
+##@ Déploiement — l'agent EN LIGNE (URL via AGENT_API_URL ou ARGS)
+
+wake: ## Réveille l'agent déployé et mesure /ready puis /health
+	@scripts/wake.sh $(ARGS)
 
 ##@ Entretien
 
