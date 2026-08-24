@@ -63,6 +63,7 @@ chroma/
 !/docs/2026-08-24-tuto-deploiement-azure-portail.md
 !/docs/deployement-journaling/
 !/docs/2026-08-24-methode-diagnostic-deploiement.md
+!/docs/2026-08-24-deplacer-des-commits-vers-une-branche.md
 
 # Pilotage interne : la cadence de travail, pas le produit.
 /ROADMAP.md
