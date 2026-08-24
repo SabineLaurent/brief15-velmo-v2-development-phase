@@ -56,6 +56,14 @@ chroma/
 !/docs/revue-securite-2026-07-25.md
 !/docs/80a6c9e-revue-code-2026-07-26.md
 
+# Déploiement Azure (2026-08-24) : livrables du brief — le dossier de conception,
+# le tutoriel au portail, et le journal d'exécution bloc par bloc. La négation
+# porte sur le DOSSIER de journalisation, pour ne pas y revenir à chaque bloc.
+!/docs/dossier-deploiement-2026-08-24.md
+!/docs/2026-08-24-tuto-deploiement-azure-portail.md
+!/docs/deployement-journaling/
+!/docs/2026-08-24-methode-diagnostic-deploiement.md
+
 # Pilotage interne : la cadence de travail, pas le produit.
 /ROADMAP.md
 /TODO_priorities.md
